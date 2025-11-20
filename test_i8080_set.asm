@@ -6,7 +6,7 @@
 ; Data Transfer (MOV permutations)
 ; All 8x8 combinations (B,C,D,E,H,L,M,A)
 i8080_set_test_start:
-MOV B,BB
+MOV B,B
 MOV B,C
 MOV B,D
 MOV B,E
