@@ -112,6 +112,17 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   }
   const lines = expanded.lines;
   const labels = new Map<string, { addr: number; line: number; src?: string }>();
+  // localsIndex: scopeKey -> (localName -> array of { key, line }) ordered by appearance
+  const localsIndex = new Map<string, Map<string, Array<{ key: string; line: number }>>>();
+  const scopes: string[] = new Array(lines.length);
+  let directiveCounter = 0;
+  function getFileKey(orig?: { file?: string; line: number }) {
+    return (orig && orig.file) ? path.resolve(orig.file) : (sourcePath ? path.resolve(sourcePath) : '<memory>');
+  }
+  function getScopeKey(orig?: { file?: string; line: number }) {
+    return getFileKey(orig) + '::' + directiveCounter;
+  }
+
   let addr = 0;
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -125,16 +136,34 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     // handle optional leading label (either with colon or bare before an opcode/directive)
     const tokens = line.split(/\s+/);
     let labelHere: string | null = null;
+    // record current scope key for this line (before any .org on this line takes effect)
+    scopes[i] = getScopeKey(origins[i]);
+
     if (tokens[0].endsWith(':')) {
       labelHere = tokens[0].slice(0, -1);
       tokens.shift();
       const org = origins[i];
-      const key = resolveLocalLabelKey(labelHere, org && org.file ? org.file : undefined, sourcePath);
-      if (labels.has(key)) {
-        const prev = labels.get(key)!;
-        errors.push(`Duplicate label '${labelHere}' at ${i + 1} (previously at ${prev.line})`);
-      } else {
+      const scopeKey = scopes[i];
+      // local label
+      if (labelHere && labelHere[0] === '@') {
+        const localName = labelHere.slice(1);
+        let fileMap = localsIndex.get(scopeKey);
+        if (!fileMap) { fileMap = new Map(); localsIndex.set(scopeKey, fileMap); }
+        let arr = fileMap.get(localName);
+        if (!arr) { arr = []; fileMap.set(localName, arr); }
+        const id = arr.length;
+        const key = '@' + localName + '_' + id;
+        arr.push({ key, line: org ? org.line : i + 1 });
         labels.set(key, { addr, line: org ? org.line : i + 1, src: org && org.file ? path.basename(org.file) : (sourcePath ? path.basename(sourcePath) : undefined) });
+      } else {
+        const key = labelHere;
+        if (labels.has(key)) {
+          const prev = labels.get(key)!;
+          errors.push(`Duplicate label '${labelHere}' at ${i + 1} (previously at ${prev.line})`);
+        } else {
+          const org = origins[i];
+          labels.set(key, { addr, line: org ? org.line : i + 1, src: org && org.file ? path.basename(org.file) : (sourcePath ? path.basename(sourcePath) : undefined) });
+        }
       }
       if (!tokens.length) {
         continue;
@@ -169,15 +198,46 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       const rest = tokens.slice(1).join(' ');
       const aTok = rest.trim().split(/\s+/)[0];
       const org = origins[i];
-      const resolvedTok = resolveLocalLabelKey(aTok, org && org.file ? org.file : undefined, sourcePath);
-      const val = parseAddressToken(resolvedTok, labels);
+      let val: number | null = null;
+      const num = parseNumberFull(aTok);
+      if (num !== null) val = num & 0xffff;
+      else if (aTok && aTok[0] === '@') {
+        // try to resolve local label in current scope
+        const scopeKey = getScopeKey(org);
+        const fileMap = localsIndex.get(scopeKey);
+        if (fileMap) {
+          const arr = fileMap.get(aTok.slice(1));
+          if (arr && arr.length) {
+            // pick first definition (definitions earlier in file would be recorded)
+            const key = arr[0].key;
+            val = labels.get(key)!.addr & 0xffff;
+          }
+        }
+      } else if (labels.has(aTok)) {
+        val = labels.get(aTok)!.addr & 0xffff;
+      }
       if (val === null) { errors.push(`Bad ORG address '${aTok}' at ${i + 1}`); continue; }
       addr = val;
+      // .org defines a new (narrower) scope region for subsequent labels
+      directiveCounter++;
       if (labelHere) {
         const org = origins[i];
-        const key = resolveLocalLabelKey(labelHere, org && org.file ? org.file : undefined, sourcePath);
-        if (labels.has(key)) errors.push(`Duplicate label ${labelHere} at ${i + 1}`);
-        labels.set(key, { addr, line: org ? org.line : i + 1, src: org && org.file ? path.basename(org.file) : (sourcePath ? path.basename(sourcePath) : undefined) });
+        const newScope = getScopeKey(org);
+        if (labelHere[0] === '@') {
+          const localName = labelHere.slice(1);
+          let fileMap = localsIndex.get(newScope);
+          if (!fileMap) { fileMap = new Map(); localsIndex.set(newScope, fileMap); }
+          let arr = fileMap.get(localName);
+          if (!arr) { arr = []; fileMap.set(localName, arr); }
+          const id = arr.length;
+          const key = '@' + localName + '_' + id;
+          arr.push({ key, line: org ? org.line : i + 1 });
+          labels.set(key, { addr, line: org ? org.line : i + 1, src: org && org.file ? path.basename(org.file) : (sourcePath ? path.basename(sourcePath) : undefined) });
+        } else {
+          const key = labelHere;
+          if (labels.has(key)) errors.push(`Duplicate label ${labelHere} at ${i + 1}`);
+          labels.set(key, { addr, line: org ? org.line : i + 1, src: org && org.file ? path.basename(org.file) : (sourcePath ? path.basename(sourcePath) : undefined) });
+        }
       }
       continue;
     }
@@ -275,6 +335,27 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const out: number[] = [];
   const map: Record<number, number> = {};
 
+  // Resolve an address token in second pass: numeric, local (@) or global label
+  function resolveAddressToken(arg: string, lineIndex: number): number | null {
+    if (!arg) return null;
+    const num = parseNumberFull(arg);
+    if (num !== null) return num & 0xffff;
+    // local label resolution based on the scope recorded during first pass
+    if (arg[0] === '@') {
+      const scopeKey = scopes[lineIndex - 1];
+      const fileMap = localsIndex.get(scopeKey);
+      if (!fileMap) return null;
+      const arr = fileMap.get(arg.slice(1));
+      if (!arr || !arr.length) return null;
+      // by default pick the first definition in this scope (allows forward references)
+      const key = arr[0].key;
+      if (labels.has(key)) return labels.get(key)!.addr & 0xffff;
+      return null;
+    }
+    if (labels.has(arg)) return labels.get(arg)!.addr & 0xffff;
+    return null;
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const srcLine = i + 1;
@@ -369,13 +450,9 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         target = num;
         if (target > 0xffff) warnings.push(`Address ${arg} (0x${target.toString(16).toUpperCase()}) too large for ${op} at ${srcLine}; truncating to 16-bit`);
       } else {
-        const resolved = resolveLocalLabelKey(arg, origins[i] && origins[i].file ? origins[i].file : undefined, sourcePath);
-        if (labels.has(resolved)) {
-          target = labels.get(resolved)!.addr;
-        } else {
-          errors.push(`Unknown label or address '${arg}' at ${srcLine}`);
-          target = 0;
-        }
+        const resolvedVal = resolveAddressToken(arg, srcLine);
+        if (resolvedVal !== null) target = resolvedVal;
+        else { errors.push(`Unknown label or address '${arg}' at ${srcLine}`); target = 0; }
       }
       const opcode = op === 'LHLD' ? 0x2A : 0x22;
       out.push(opcode & 0xff);
@@ -432,13 +509,9 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         target = num;
         if (target > 0xffff) warnings.push(`Address ${arg} (0x${target.toString(16).toUpperCase()}) too large for ${op} at ${srcLine}; truncating to 16-bit`);
       } else {
-        const resolved = resolveLocalLabelKey(arg, origins[i] && origins[i].file ? origins[i].file : undefined, sourcePath);
-        if (labels.has(resolved)) {
-          target = labels.get(resolved)!.addr;
-        } else {
-          errors.push(`Unknown label or address '${arg}' at ${srcLine}`);
-          target = 0;
-        }
+        const resolvedVal = resolveAddressToken(arg, srcLine);
+        if (resolvedVal !== null) target = resolvedVal;
+        else { errors.push(`Unknown label or address '${arg}' at ${srcLine}`); target = 0; }
       }
       let opcode = 0;
       if (op === 'LDA') opcode = 0x3A;
@@ -474,8 +547,8 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         target = num;
         if (target > 0xffff) warnings.push(`Immediate ${val} (0x${target.toString(16).toUpperCase()}) too large for LXI at ${srcLine}; truncating to 16-bit`);
       } else {
-        const resolved = resolveLocalLabelKey(val, origins[i] && origins[i].file ? origins[i].file : undefined, sourcePath);
-        if (labels.has(resolved)) target = labels.get(resolved)!.addr;
+        const resolvedVal = resolveAddressToken(val, srcLine);
+        if (resolvedVal !== null) target = resolvedVal;
         else { errors.push(`Bad LXI value '${val}' at ${srcLine}`); target = 0; }
       }
       out.push(opcode & 0xff);
@@ -656,8 +729,8 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         target = num;
         if (target > 0xffff) warnings.push(`Address ${arg} (0x${target.toString(16).toUpperCase()}) too large for ${op} at ${srcLine}; truncating to 16-bit`);
       } else {
-        const resolved = resolveLocalLabelKey(arg, origins[i] && origins[i].file ? origins[i].file : undefined, sourcePath);
-        if (labels.has(resolved)) target = labels.get(resolved)!.addr;
+        const resolvedVal = resolveAddressToken(arg, srcLine);
+        if (resolvedVal !== null) target = resolvedVal;
         else { errors.push(`Unknown label or address '${arg}' at ${srcLine}`); target = 0; }
       }
       out.push(jmpMap[op]); out.push(target & 0xff); out.push((target >> 8) & 0xff); addr += 3; continue;

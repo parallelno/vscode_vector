@@ -1,0 +1,30 @@
+{
+    "labels": {
+        "LABEL_ONE": {
+            "addr": "0x0102",
+            "src": "test.asm",
+            "line": 7
+        },
+        "@sub1_0": {
+            "addr": "0x0105",
+            "src": "test.asm",
+            "line": 8
+        },
+        "i8080_set_test_start": {
+            "addr": "0x0108",
+            "src": "test_i8080_set.asm",
+            "line": 8
+        },
+        "i8080_set_test_end": {
+            "addr": "0x0241",
+            "src": "test_i8080_set.asm",
+            "line": 282
+        },
+        "@sub1_1": {
+            "addr": "0x0244",
+            "src": "test.asm",
+            "line": 15
+        }
+    },
+    "consts": {}
+}

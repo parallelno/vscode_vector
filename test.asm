@@ -4,14 +4,14 @@ DI
 HLT
 
 ; label examples
-LABEL_ONE: CALL sub1
-LABEL_TWO: CALL sub1
+LABEL_ONE: CALL @sub1
+@sub1: CALL i8080_set_test_end
 
 
 ; -------------------------
 ; include i8080 instruction set test
 .include "test_i8080_set.asm"
-
-sub1:
+	call @sub1
+@sub1:
 	INR C
 	RET
