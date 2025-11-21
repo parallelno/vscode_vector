@@ -28,6 +28,9 @@
   },
   "activationEvents": [
     "onCommand:i8080.compile",
+    "onCommand:i8080.run",
+    "onCommand:i8080.pause",
+    "onCommand:i8080.resume",
     "onDebug"
   ],
   "contributes": {
@@ -35,6 +38,21 @@
       {
         "command": "i8080.compile",
         "title": "Compile i8080 Assembly"
+      }
+      ,
+      {
+        "command": "i8080.run",
+        "title": "Run i8080 Emulator"
+      }
+      ,
+      {
+        "command": "i8080.pause",
+        "title": "Pause i8080 Emulator"
+      }
+      ,
+      {
+        "command": "i8080.resume",
+        "title": "Resume i8080 Emulator"
       }
     ],
     "debuggers": [

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { assemble } from './assembler';
+import { openEmulatorPanel, pauseEmulatorPanel, resumeEmulatorPanel } from './emulatorUI';
 
 export function activate(context: vscode.ExtensionContext) {
   const disposable = vscode.commands.registerCommand('i8080.compile', async () => {
@@ -19,6 +20,21 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   context.subscriptions.push(disposable);
+
+  const runDisposable = vscode.commands.registerCommand('i8080.run', async () => {
+    openEmulatorPanel(context);
+  });
+  context.subscriptions.push(runDisposable);
+
+  const pauseDisposable = vscode.commands.registerCommand('i8080.pause', async () => {
+    pauseEmulatorPanel();
+  });
+  context.subscriptions.push(pauseDisposable);
+
+  const resumeDisposable = vscode.commands.registerCommand('i8080.resume', async () => {
+    resumeEmulatorPanel();
+  });
+  context.subscriptions.push(resumeDisposable);
 }
 
 export function deactivate() {}
