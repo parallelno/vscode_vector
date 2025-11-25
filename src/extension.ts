@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { assemble } from './assembler';
-import { openEmulatorPanel, pauseEmulatorPanel, resumeEmulatorPanel } from './emulatorUI';
+import { openEmulatorPanel, pauseEmulatorPanel, resumeEmulatorPanel, run10KInstructionsPanel } from './emulatorUI';
 
 export function activate(context: vscode.ExtensionContext) {
   const disposable = vscode.commands.registerCommand('i8080.compile', async () => {
@@ -35,6 +35,14 @@ export function activate(context: vscode.ExtensionContext) {
     resumeEmulatorPanel();
   });
   context.subscriptions.push(resumeDisposable);
+
+  const run10KDisposable = vscode.commands.registerCommand('i8080.run10K', async () => {
+    // Ensure the emulator panel is open before running instructions
+    await openEmulatorPanel(context);
+    // then run the instruction batch
+    run10KInstructionsPanel();
+  });
+  context.subscriptions.push(run10KDisposable);
 }
 
 export function deactivate() {}

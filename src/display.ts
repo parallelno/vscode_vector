@@ -1,149 +1,543 @@
 import IO from './io';
+import Memory from './memory';
+
+// phisical frame config:
+// 312 scanlines in a frame:
+//		vsync: 22 lines
+//		vblank (top): 18 lines
+//		vertical resolution: 256 lines
+//      vblank (bottom): 16 lines
+
+// scanline has 768/384 pxls (MODE_512/MODE_256).
+// A scanline rasterising time takes 192 cpu cycles (3 Mhz tick rate) or
+// 768 quarters of a cpu cycle (12 Mhz tick rate).
+//		hblank (left): 128/64 pxls
+//		horizontal resolution : 512/256 pxls
+//		hblank (right): 128/64 pxls
+
+// For simplisity of the logic the diplay buffer horizontal resolution
+// is always 768 pxls to fit the 512 mode.
+// It rasters 4 horizontal pxls every cpu cycle no mater the mode.
+// In MODE_256 it dups every 2 horizontal pxls.
+
+const FRAME_W: number = 768;					// a frame resolution including borders
+const FRAME_H: number = 312;					// a frame resolution including borders
+const FRAME_LEN: number = FRAME_W * FRAME_H;	// the size of a frame buffer
+
+// For the realtime emulation it should be called
+//  every 0.019968 seconds by 3000000/59904 Mz timer
+const VSYC_DELAY: number = 19968; // in microseconds
+
+const FRAMES_PER_SECOND: number = 50;
+
+const SCAN_VSYNC: number = 24;
+const SCAN_VBLANK_TOP: number = 16;
+const SCAN_VBLANK_BOTTOM: number = 16;
+const SCAN_ACTIVE_AREA_TOP: number = SCAN_VSYNC + SCAN_VBLANK_TOP;
+// horizontal screen resolution in MODE_512
+const ACTIVE_AREA_W: number = 512;
+// vertical screen resolution
+const ACTIVE_AREA_H: number = 256;
+// horizontal screen resolution in MODE_512
+const BORDER_LEFT: number = 128;
+// horizontal screen resolution in MODE_512
+const BORDER_RIGHT: number = BORDER_LEFT;
+const BORDER_TOP: number = SCAN_ACTIVE_AREA_TOP;
+const BORDER_BOTTOM: number = SCAN_VBLANK_BOTTOM;
+// border visible on the screen in pxls in 256 mode
+const BORDER_VISIBLE: number = 16;
+// the amount of rasterized pxls every 4 cpu cycles in MODE_512
+const RASTERIZED_PXLS_MAX: number = 16;
+// this timer in pixels.
+// if the palette is set inside the active area,
+// the fourth and the fifth pixels get corrupted colors
+const COLORS_POLUTED_DELAY: number = 4;
+
+// interrupt request.
+// time's counted by 12 MHz clock (equals amount of pixels in 512 mode)
+const IRQ_COMMIT_PXL: number = 112;
+const SCROLL_COMMIT_PXL: number = BORDER_LEFT + 3;
+// vertical scrolling, 0xff - no scroll
+const SCROLL_DEFAULT = 0xff;
+
+const FULL_PALETTE_LEN: number = 256;
+
+export class Update	{
+  frameNum: number = 0;	// counts frames
+  irq: boolean = false;			// interruption request
+  framebufferIdx: number = 0;		// currently rendered pixel idx to m_frameBuffer
+  scrollIdx: number = SCROLL_DEFAULT;	// vertical scrolling
+}
+
+export enum BufferType { FRAME_BUFFER = 0, BACK_BUFFER = 1, GPU_BUFFER = 2 }
+
+export class State {
+  update: Update = new Update();
+	frameBuffer?: Uint32Array;
+  BuffUpdate?: ((buffer: BufferType) => void);
+}
 
 export class Display {
-  static readonly FRAME_W = 768;
-  static readonly FRAME_H = 312;
-  static readonly FRAME_LEN = Display.FRAME_W * Display.FRAME_H;
-  static readonly SCAN_VSYNC = 24;
-  static readonly SCAN_VBLANK_TOP = 16;
-  static readonly SCAN_VBLANK_BOTTOM = 16;
-  static readonly SCAN_ACTIVE_AREA_TOP = Display.SCAN_VSYNC + Display.SCAN_VBLANK_TOP;
-  static readonly ACTIVE_AREA_W = 512;
-  static readonly ACTIVE_AREA_H = 256;
-  static readonly BORDER_LEFT = 128;
-  static readonly BORDER_RIGHT = Display.BORDER_LEFT + Display.ACTIVE_AREA_W;
-  static readonly RASTERIZED_PXLS_MAX = 16;
+  state: State = new State();
+  memory?: Memory;
+  io?: IO;
 
-  memory: any;
-  io: IO;
   // framebuffers use 32-bit ARGB values
-  frameBuffer: Uint32Array;
-  backBuffer: Uint32Array;
-  framebufferIdx = 0;
-  frameNum = 0;
+  // rasterizer draws here
+  frameBuffer: Uint32Array = new Uint32Array(FRAME_LEN);
+  // to simulate VSYNC
+  backBuffer: Uint32Array = new Uint32Array(FRAME_LEN);
+  // temp buffer for loading on GPU
+  gpuBuffer: Uint32Array = new Uint32Array(FRAME_LEN);
 
-  constructor(memory: any, io: IO) {
+  borderLeft = BORDER_LEFT;
+  irqCommitPxl = IRQ_COMMIT_PXL;
+
+  // prebaked look-up vector_color->RGBA pallete
+  fullPalette: Uint8Array = new Uint8Array(FULL_PALETTE_LEN);
+
+
+  constructor(memory: Memory, io: IO)
+  {
     this.memory = memory;
     this.io = io;
-    this.frameBuffer = new Uint32Array(Display.FRAME_LEN);
-    this.backBuffer = new Uint32Array(Display.FRAME_LEN);
-    // initialize palette to identity mapping
-    for (let i = 0; i < Display.FRAME_LEN; i++) this.frameBuffer[i] = 0xff000000;
-    this.framebufferIdx = 0;
+    this.PrebakeFullPalette();
+    this.state.frameBuffer = this.frameBuffer;
+    this.state.BuffUpdate = this.BuffUpdate.bind(this);
+    this.Init();
   }
 
-  // Convert vector color (BBGGGRRR) -> ARGB (32-bit)
-  static vectorColorToArgb(v: number) {
-    const r = v & 0x07;
-    const g = (v & 0x38) >> 3;
-    const b = (v & 0xc0) >> 6;
-    const color = 0xff000000 |
-      ((r & 0xff) << (5 + 0)) |
-      ((g & 0xff) << (5 + 8)) |
-      ((b & 0xff) << (6 + 16));
-    return color >>> 0;
+  // rasterizes the memory into the frame buff
+  BuffUpdate(bufferType: BufferType)
+  {
+    switch (bufferType)
+    {
+    case BufferType.FRAME_BUFFER:
+      this.FrameBuffUpdate();
+      break;
+
+    case BufferType.BACK_BUFFER:
+      this.backBuffer.set(this.frameBuffer);
+      break;
+
+    case BufferType.GPU_BUFFER:
+      this.gpuBuffer.set(this.frameBuffer);
+      break;
+
+    default:
+      break;
+    }
   }
 
-  // Reads 4 screen bytes at _screenAddrOffset, matching C++ GetScreenBytes
-  getScreenBytes(screenAddrOffset: number): number {
-    const base = screenAddrOffset & 0xffff;
-    const b8 = this.memory.getByte(0x8000 + base) | 0;
-    const bA = this.memory.getByte(0xA000 + base) | 0;
-    const bC = this.memory.getByte(0xC000 + base) | 0;
-    const bE = this.memory.getByte(0xE000 + base) | 0;
-    return (b8 << 24) | (bA << 16) | (bC << 8) | bE;
+  Init()
+  {
+    this.state.update.framebufferIdx = 0;
+    this.frameBuffer.fill(0xff000000);
   }
 
-  // Extract 4-bit color index (256 mode) from 4 screen bytes and bit index
-  bytesToColorIdx256(screenBytes: number, bitIdx: number) {
-    return ((screenBytes >> (bitIdx + 0)) & 1) |
-      (((screenBytes >> (bitIdx - 1 + 8)) & 1) << 1) |
-      (((screenBytes >> (bitIdx - 2 + 16)) & 1) << 2) |
-      (((screenBytes >> (bitIdx - 3 + 24)) & 1) << 3);
+  RasterizeActiveArea(rasterizedPixels: number)
+  {
+    const rasterLine: number = this.GetRasterLine();
+    const rasterPixel: number = this.GetRasterPixel();
+    const commitTime: boolean =
+      (this.io?.GetOutCommitTimer() ?? 0) > 0 ||
+      (this.io?.GetPaletteCommitTimer() ?? 0) > 0;
+
+    const scrollTime: boolean = rasterLine == SCAN_ACTIVE_AREA_TOP &&
+                            rasterPixel < this.borderLeft + RASTERIZED_PXLS_MAX;
+
+    if (commitTime || scrollTime)
+    {
+      if ((this.io?.GetDisplayMode() ?? IO.MODE_256) == IO.MODE_256) {
+        this.FillActiveArea256PortHandling(rasterizedPixels);
+      }
+      else {
+        this.FillActiveArea512PortHandling(rasterizedPixels);
+      }
+    }
+    else {
+      if ((this.io?.GetDisplayMode() ?? IO.MODE_256) == IO.MODE_256) {
+        this.FillActiveArea256(rasterizedPixels);
+      }
+      else {
+        this.FillActiveArea512(rasterizedPixels);
+      }
+    }
   }
 
-  // Extract 3-bit color index (512 mode) - simplified to match C++ logic
-  bytesToColorIdx512(screenBytes: number, bitIdx: number) {
-    const even = (bitIdx & 1) === 1;
-    let idx = 0;
-    const b = bitIdx >> 1;
+  RasterizeBorder(rasterizedPixels: number)
+  {
+    const rasterLine: number = this.GetRasterLine();
+    const commitTime: boolean =
+      (this.io?.GetOutCommitTimer() ?? 0) >= 0 ||
+      (this.io?.GetPaletteCommitTimer() ?? 0) >= 0;
+
+    if (commitTime || rasterLine == 0 || rasterLine == 311)
+    {
+      this.FillBorderPortHandling(rasterizedPixels);
+    }
+    else {
+      this.FillBorder(rasterizedPixels);
+    }
+  }
+
+  // renders 16 pixels (in the 512 mode) from left to right
+  Rasterize()
+  {
+    // reset the interrupt request. it can be set during border drawing.
+    this.state.update.irq = false;
+
+    const rasterLine: number = this.GetRasterLine();
+    const rasterPixel: number = this.GetRasterPixel();
+
+    const isActiveScan: boolean = rasterLine >= SCAN_ACTIVE_AREA_TOP &&
+                              rasterLine < SCAN_ACTIVE_AREA_TOP + ACTIVE_AREA_H;
+    const isActiveArea: boolean = isActiveScan &&
+                    rasterPixel >= this.borderLeft && rasterPixel < BORDER_RIGHT;
+
+    // Rasterize the Active Area
+    if (isActiveArea)
+    {
+      let rasterizedPixels: number =
+        Math.min(BORDER_RIGHT - rasterPixel, RASTERIZED_PXLS_MAX);
+
+      this.RasterizeActiveArea(rasterizedPixels);
+      // Rasterize the border if there is a leftover
+      if (rasterizedPixels < RASTERIZED_PXLS_MAX)
+      {
+        rasterizedPixels = RASTERIZED_PXLS_MAX - rasterizedPixels;
+        this.RasterizeBorder(rasterizedPixels);
+      }
+    }
+    // Rasterize the Border
+    else {
+      let rasterizedPixels: number = !isActiveScan || rasterPixel >= BORDER_RIGHT ?
+              RASTERIZED_PXLS_MAX :
+              Math.min(this.borderLeft - rasterPixel, RASTERIZED_PXLS_MAX);
+
+      this.RasterizeBorder(rasterizedPixels);
+
+      // Rasterize the Active Area if there is a leftover
+      if (rasterizedPixels < RASTERIZED_PXLS_MAX)
+      {
+        rasterizedPixels = RASTERIZED_PXLS_MAX - rasterizedPixels;
+        this.RasterizeActiveArea(rasterizedPixels);
+      }
+    }
+  }
+
+  FillBorder(rasterizedPixels: number)
+  {
+    let borderColor: number = this.fullPalette[this.io?.GetBorderColor() ?? 0];
+    for (let i = 0; i < rasterizedPixels; i++)
+    {
+      this.frameBuffer[this.state.update.framebufferIdx++] = borderColor;
+    }
+  }
+
+  FillBorderPortHandling(rasterizedPixels: number)
+  {
+    for (let i = 0; i < rasterizedPixels; i++)
+    {
+      this.io?.TryToCommit(this.io?.GetBorderColorIdx() ?? 0);
+      let color = this.fullPalette[this.io?.GetBorderColor() ?? 0];
+
+      this.frameBuffer[this.state.update.framebufferIdx++] = color;
+      let isNewFrame = this.state.update.framebufferIdx / FRAME_LEN;
+      this.state.update.framebufferIdx %= FRAME_LEN;
+
+      let rasterLine = this.GetRasterLine();
+      let rasterPixel = this.GetRasterPixel();
+      this.state.update.irq ||= this.state.update.framebufferIdx == this.irqCommitPxl;
+
+      if (isNewFrame)
+      {
+        this.state.update.frameNum++;
+        // TODO: fix rasterizarion sync
+        // std::unique_lock<std::mutex> mlock(this.backBufferMutex);
+        this.backBuffer.set(this.frameBuffer); // copy a frame to a back buffer
+      }
+    }
+  }
+
+  FillActiveArea256(rasterizedPixels: number)
+  {
+    // scrolling
+    let rasterLine = this.GetRasterLine();
+    let rasterPixel = this.GetRasterPixel();
+    let rasterLineScrolled = (
+      rasterLine - SCAN_ACTIVE_AREA_TOP + (255 - this.state.update.scrollIdx) + ACTIVE_AREA_H) %
+      ACTIVE_AREA_H + SCAN_ACTIVE_AREA_TOP;
+
+    // rasterization
+    let screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
+    let bitIdx = 7 - (
+      ((this.state.update.framebufferIdx - this.borderLeft) % RASTERIZED_PXLS_MAX) >> 1);
+
+    for (let i = 0; i < rasterizedPixels; i++)
+    {
+      let colorIdx = this.BytesToColorIdx256(screenBytes, bitIdx);
+      let color = this.fullPalette[this.io?.GetColor(colorIdx) ?? 0];
+
+      this.frameBuffer[this.state.update.framebufferIdx++] = color;
+
+      bitIdx -= i % 2;
+      if (bitIdx < 0) {
+        bitIdx = 7;
+        screenBytes = this.GetScreenBytes(rasterLineScrolled, this.GetRasterPixel());
+      }
+    }
+  }
+
+  FillActiveArea256PortHandling(rasterizedPixels: number)
+  {
+    // scrolling
+    const rasterLine = this.GetRasterLine();
+    let rasterPixel = this.GetRasterPixel();
+    const rasterLineScrolled = (
+      rasterLine - SCAN_ACTIVE_AREA_TOP + (255 - this.state.update.scrollIdx) + ACTIVE_AREA_H) %
+      ACTIVE_AREA_H + SCAN_ACTIVE_AREA_TOP;
+
+    // rasterization
+    let screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
+    let bitIdx = 7 - (
+      ((this.state.update.framebufferIdx - this.borderLeft) % RASTERIZED_PXLS_MAX) >> 1);
+
+    for (let i = 0; i < rasterizedPixels; i++)
+    {
+      rasterPixel = this.GetRasterPixel();
+      if (rasterLine == SCAN_ACTIVE_AREA_TOP && rasterPixel == SCROLL_COMMIT_PXL) {
+        this.state.update.scrollIdx = this.io?.GetScroll() ?? SCROLL_DEFAULT;
+      }
+
+      let colorIdx = this.BytesToColorIdx256(screenBytes, bitIdx);
+      this.io?.TryToCommit(colorIdx);
+      let color = this.fullPalette[this.io?.GetColor(colorIdx) ?? 0];
+
+      this.frameBuffer[this.state.update.framebufferIdx++] = color;
+
+      bitIdx -= i % 2;
+      if (bitIdx < 0){
+        bitIdx = 7;
+        screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
+      }
+    }
+  }
+
+  FillActiveArea512PortHandling(rasterizedPixels: number)
+  {
+    // scrolling
+    const rasterLine = this.GetRasterLine();
+    let rasterPixel = this.GetRasterPixel();
+    const rasterLineScrolled = (rasterLine - SCAN_ACTIVE_AREA_TOP +
+                          (255 - this.state.update.scrollIdx) +
+                          ACTIVE_AREA_H) % ACTIVE_AREA_H + SCAN_ACTIVE_AREA_TOP;
+
+    // rasterization
+    // 4 bytes. One byte per screen buffer
+    let screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
+    // 0-15
+    let pxlIdx = 15 - (
+      (this.state.update.framebufferIdx - this.borderLeft) % RASTERIZED_PXLS_MAX);
+
+    for (let i = 0; i < rasterizedPixels; i++)
+    {
+      rasterPixel = this.GetRasterPixel();
+
+      if (rasterLine == SCAN_ACTIVE_AREA_TOP && rasterPixel == SCROLL_COMMIT_PXL) {
+        this.state.update.scrollIdx = this.io?.GetScroll() ?? SCROLL_DEFAULT;
+      }
+
+      let colorIdx = this.BytesToColorIdx512(screenBytes, pxlIdx);
+      this.io?.TryToCommit(colorIdx);
+      let color = this.fullPalette[this.io?.GetColor(colorIdx) ?? 0];
+
+      this.frameBuffer[this.state.update.framebufferIdx++] = color;
+
+      pxlIdx--;
+      if (pxlIdx < 0){
+        pxlIdx = 15;
+        screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
+      }
+    }
+  }
+
+  FillActiveArea512(rasterizedPixels: number)
+  {
+    // scrolling
+    let rasterLine = this.GetRasterLine();
+    let rasterPixel = this.GetRasterPixel();
+    let rasterLineScrolled = (
+      rasterLine - SCAN_ACTIVE_AREA_TOP + (255 - this.state.update.scrollIdx) + ACTIVE_AREA_H) %
+      ACTIVE_AREA_H + SCAN_ACTIVE_AREA_TOP;
+
+    // rasterization
+    // 4 bytes. One byte per screen buffer
+    let screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
+    // 0-15
+    let pxlIdx = 15 - (
+      (this.state.update.framebufferIdx - this.borderLeft) % RASTERIZED_PXLS_MAX);
+
+    for (let i = 0; i < rasterizedPixels; i++)
+    {
+      let colorIdx = this.BytesToColorIdx512(screenBytes, pxlIdx);
+      let color = this.fullPalette[this.io?.GetColor(colorIdx) ?? 0];
+
+      this.frameBuffer[this.state.update.framebufferIdx++] = color;
+
+      pxlIdx--;
+      if (pxlIdx < 0){
+        pxlIdx = 15;
+        screenBytes = this.GetScreenBytes(rasterLineScrolled, this.GetRasterPixel());
+      }
+    }
+  }
+
+  IsIRQ(): boolean { return this.state.update.irq; }
+
+  GetFrame(vsync: boolean): Uint32Array
+  {
+    // TODO: fix rasterizarion sync
+    //std::unique_lock<std::mutex> mlock(m_backBufferMutex);
+    this.gpuBuffer.set(vsync ? this.backBuffer : this.frameBuffer);
+
+    return this.gpuBuffer;
+  }
+
+  /**
+   * Retrieves four screen bytes at the current raster line and pixel.
+   * Each byte for each graphic buffer.
+   */
+  GetScreenBytes(_rasterLine: number, _rasterPixel: number): number
+  {
+    let addrHigh = (_rasterPixel - this.borderLeft) / RASTERIZED_PXLS_MAX;
+    let addrLow = ACTIVE_AREA_H - 1 - (_rasterLine - SCAN_ACTIVE_AREA_TOP);
+    let screenAddrOffset = (addrHigh << 8 | addrLow) & 0xffff;
+    return this.memory?.GetScreenBytes(screenAddrOffset) ?? 0;
+  }
+
+  // 256 screen mode
+  // extract a 4-bit color index from the four screen bytes.
+  // _bitIdx is in the range [0..7]
+  BytesToColorIdx256(screenBytes: number, bitIdx: number): number
+  {
+    return (screenBytes >> (bitIdx - 0 + 0))  & 1 |
+        (screenBytes >> (bitIdx - 1 + 8))  & 2 |
+        (screenBytes >> (bitIdx - 2 + 16)) & 4 |
+        (screenBytes >> (bitIdx - 3 + 24)) & 8;
+  }
+
+  // 512 screen mode
+  // extract a 3-bit color index from the four screen bytes.
+  // _bitIdx is in the range [0..15]
+  // In the 512x256 mode, the even pixel colors are stored in screen buffers 3 and 2,
+  // and the odd ones - in screen buffers 0 and 1
+  BytesToColorIdx512(screenBytes: number, bitIdx: number): number
+  {
+    const even: boolean = (bitIdx & 1) !== 0;
+    bitIdx >>= 1;
+
     if (even) {
-      idx = ((screenBytes >> (b + 0)) & 1) | (((screenBytes >> (b - 1 + 8)) & 1) << 1);
-    } else {
-      idx = (((screenBytes >> (b + 16)) & 1) | (((screenBytes >> (b - 1 + 24)) & 1) << 1)) * 4;
+      const result = (screenBytes >> (bitIdx - 0 + 0)) & 1 |
+                     (screenBytes >> (bitIdx - 1 + 8)) & 2;
+      return result;
     }
-    return idx;
+
+    const result =((screenBytes >> (bitIdx - 0 + 16)) & 1 |
+                   (screenBytes >> (bitIdx - 1 + 24)) & 2) * 4;
+    return result;
   }
 
-  // Rasterize up to RASTERIZED_PXLS_MAX pixels. Should be called once per 4 CPU cycles.
-  rasterizeChunk() {
-    let rasterLine = Math.floor(this.framebufferIdx / Display.FRAME_W);
-    let rasterPixel = this.framebufferIdx % Display.FRAME_W;
 
-    const rasterizedPixels = Math.min(Display.BORDER_RIGHT - rasterPixel, Display.RASTERIZED_PXLS_MAX);
+  FrameBuffUpdate()
+  {
+    const framebufferIdxTemp = this.state.update.framebufferIdx;
+    this.state.update.framebufferIdx = 0;
 
-    for (let i = 0; i < rasterizedPixels; i++) {
-      const isActiveScan = rasterLine >= Display.SCAN_ACTIVE_AREA_TOP && rasterLine < Display.SCAN_ACTIVE_AREA_TOP + Display.ACTIVE_AREA_H;
-      const isActiveArea = isActiveScan && rasterPixel >= Display.BORDER_LEFT && rasterPixel < Display.BORDER_RIGHT;
+    for(let i=0; i < FRAME_LEN; i += 16)
+    {
+      const rasterLine: number = this.GetRasterLine();
+      const rasterPixel: number = this.GetRasterPixel();
 
-      let color = 0xff000000;
+      const isActiveScan: boolean = rasterLine >= SCAN_ACTIVE_AREA_TOP &&
+                              rasterLine < SCAN_ACTIVE_AREA_TOP + ACTIVE_AREA_H;
+      const isActiveArea: boolean = isActiveScan &&
+                                    rasterPixel >= this.borderLeft &&
+                                    rasterPixel < BORDER_RIGHT;
 
-      if (isActiveArea) {
-        // compute screen bytes
-        const addrHigh = Math.floor((rasterPixel - Display.BORDER_LEFT) / Display.RASTERIZED_PXLS_MAX);
-        const addrLow = Display.ACTIVE_AREA_H - 1 - (rasterLine - Display.SCAN_ACTIVE_AREA_TOP);
-        const screenAddrOffset = ((addrHigh << 8) | (addrLow & 0xff)) & 0xffff;
-        const screenBytes = this.getScreenBytes(screenAddrOffset);
-        const bitIdx = 7 - (((this.framebufferIdx - Display.BORDER_LEFT) % Display.RASTERIZED_PXLS_MAX) >> 1);
-        const colorIdx = this.bytesToColorIdx256(screenBytes, bitIdx) & 0x0f;
-        // let IO decide palette mapping
-        const palIdx = this.io.getColor(colorIdx);
-        color = Display.vectorColorToArgb(palIdx);
-        // inform IO about pixel for commit timers
-        this.io.tryToCommit(colorIdx);
-      } else {
-        // border
-        const brd = this.io.getBorderColor();
-        color = Display.vectorColorToArgb(brd);
-        this.io.tryToCommit(brd);
+      // Rasterize the Active Area
+      if (isActiveArea)
+      {
+        let rasterizedPixels = Math.min(BORDER_RIGHT - rasterPixel, RASTERIZED_PXLS_MAX);
+
+        if ((this.io?.GetDisplayMode() ?? IO.MODE_256) == IO.MODE_256) {
+          this.FillActiveArea256(rasterizedPixels);
+        }
+        else {
+          this.FillActiveArea512(rasterizedPixels);
+        }
+
+        // Rasterize the border if there is a leftover
+        if (rasterizedPixels < RASTERIZED_PXLS_MAX)
+        {
+          rasterizedPixels = RASTERIZED_PXLS_MAX - rasterizedPixels;
+          this.FillBorder(rasterizedPixels);
+        }
       }
+      // Rasterize the Border
+      else {
+        let rasterizedPixels = !isActiveScan || rasterPixel >= BORDER_RIGHT ?
+          RASTERIZED_PXLS_MAX :
+          Math.min(this.borderLeft - rasterPixel, RASTERIZED_PXLS_MAX);
 
-      this.frameBuffer[this.framebufferIdx++] = color >>> 0;
+        this.FillBorder(rasterizedPixels);
 
-      // wrap frame
-      if (this.framebufferIdx >= Display.FRAME_LEN) {
-        this.frameNum++;
-        // copy frameBuffer to backBuffer
-        this.backBuffer.set(this.frameBuffer);
-        this.framebufferIdx = 0;
+        // Rasterize the Active Area if there is a leftover
+        if (rasterizedPixels < RASTERIZED_PXLS_MAX)
+        {
+          rasterizedPixels = RASTERIZED_PXLS_MAX - rasterizedPixels;
+          if ((this.io?.GetDisplayMode() ?? IO.MODE_256) == IO.MODE_256) {
+            this.FillActiveArea256(rasterizedPixels);
+          }
+          else {
+            this.FillActiveArea512(rasterizedPixels);
+          }
+        }
       }
+    }
 
-      rasterPixel++;
-      if (rasterPixel >= Display.FRAME_W) {
-        rasterPixel = 0; rasterLine++;
-      }
+    this.state.update.framebufferIdx = framebufferIdxTemp;
+  }
+
+
+  // Vector color format: uint8_t BBGGGRRR
+  // Output Color: ABGR (Imgui Image)
+  VectorColorToArgb(vColor: number): number
+  {
+    const r: number = (vColor & 0x07);
+    const g: number = (vColor & 0x38) >> 3;
+    const b: number = (vColor & 0xc0) >> 6;
+    const color =
+      0xff000000 |
+      (r << (5 + 0)) |
+      (g << (5 + 8 )) |
+      (b << (6 + 16 ));
+    return color;
+  }
+
+  //Prebake palette to 256x256 color table
+  PrebakeFullPalette() {
+    for (let i = 0; i < FULL_PALETTE_LEN; i++) {
+      this.fullPalette[i] = this.VectorColorToArgb(i);
     }
   }
 
-  // Return a scaled 256x192 RGBA buffer derived from the full frame buffer
-  getScaledFrame(): { width: number; height: number; data: Uint8ClampedArray } {
-    const outW = 256, outH = 192;
-    const out = new Uint8ClampedArray(outW * outH * 4);
-    for (let y = 0; y < outH; y++) {
-      const srcY = Display.SCAN_ACTIVE_AREA_TOP + Math.floor(y * Display.ACTIVE_AREA_H / outH);
-      for (let x = 0; x < outW; x++) {
-        const srcX = Display.BORDER_LEFT + x * 2; // map 256 -> 512
-        const srcIdx = srcY * Display.FRAME_W + srcX;
-        const col = this.backBuffer[srcIdx] || 0xff000000;
-        const base = (y * outW + x) * 4;
-        out[base + 0] = (col >> 16) & 0xff; // R (ARGB->RGBA ordering)
-        out[base + 1] = (col >> 8) & 0xff; // G
-        out[base + 2] = (col >> 0) & 0xff; // B
-        out[base + 3] = 255;
-      }
-    }
-    return { width: outW, height: outH, data: out };
-  }
+  get frameNum(): number { return this.state.update.frameNum; };
+  get rasterLine(): number { return this.state.update.framebufferIdx / FRAME_W; };
+  get rasterPixel(): number { return this.state.update.framebufferIdx % FRAME_W; };
+	get framebufferIdx(): number { return this.state.update.framebufferIdx; };
 }
+
+
 
 export default Display;

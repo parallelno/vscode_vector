@@ -1,49 +1,91 @@
-export class Keyboard {
-  private encodingMatrix: number[] = new Array(8).fill(0);
-  private keymap: Map<string, number> = new Map();
-  public m_keySS = false; // shift
-  public m_keyUS = false; // ctrl
-  public m_keyRus = false; // alt/cmd
+type KeyCode = string;
+type RowColumnCode = number;
+enum Operation {
+  NONE = 0,
+  RESET = 1,
+  RESTART = 2
+}
+export class Keyboard
+{
+  private encodingMatrix: Uint8Array = new Uint8Array(8).fill(0);
+  private keymap: Map<KeyCode, RowColumnCode> = new Map();
+
+  public keySS = false; // key on russian keyboard 'CC'
+  public keyUS = false; // key on russian keyboard 'УС'
+  public keyRus = false; // key on russian keyboard 'Рус Lat'
+
+  rebootType: Operation = Operation.NONE;
 
   constructor() {
-    this.initMapping();
+    this.InitMapping();
   }
 
-  // action: 'down' | 'up'
-  keyHandling(code: string, action: 'down' | 'up') {
-    // special keys
-    if (code === 'F11' && action === 'up') return 'RESET';
-    if (code === 'F12' && action === 'up') return 'RESTART';
-    if (code === 'ShiftLeft' || code === 'ShiftRight') { this.m_keySS = action === 'down'; return 'NONE'; }
-    if (code === 'ControlLeft' || code === 'ControlRight') { this.m_keyUS = action === 'down'; return 'NONE'; }
-    if (code === 'AltLeft' || code === 'AltRight' || code === 'MetaLeft') { this.m_keyRus = action === 'down'; return 'NONE'; }
+  KeyHandling(code: string, action: string): Operation
+  {
+    switch (code) {
+      case 'F11': // BLK + VVOD functionality
+        if (action === 'up') return Operation.RESET;
+        break;
+      case 'F12': // BLK + SBR functionality
+        if (action === 'up') return Operation.RESTART;
+        break;
+      case 'ShiftLeft': // SS (shift) key
+      case 'ShiftRight':
+        this.keySS = action === 'down';
+        break;
+      case 'ControlLeft': // US (ctrl) key
+      case 'ControlRight':
+        this.keyUS = action === 'down';
+        break;
+      case 'AltLeft': // RUS/LAT (cmd) key
+      case 'AltRight':
+      case 'MetaLeft':
+      case 'F6':
+        this.keyRus = action === 'down';
+        break;
+      default:
+        const mapped = this.keymap.get(code);
+        if (mapped != undefined)
+        {
+          const row = mapped >> 8;
+          const column = mapped & 0xff;
+          if (action === 'up') this.encodingMatrix[row] &= ~column;
+          else this.encodingMatrix[row] |= column;
+        }
+    }
 
-    const mapped = this.keymap.get(code);
-    if (mapped === undefined) return 'NONE';
-
-    const row = mapped >> 8;
-    const colMask = mapped & 0xff;
-    if (action === 'down') this.encodingMatrix[row] |= colMask;
-    else this.encodingMatrix[row] &= ~colMask;
-    return 'NONE';
+    return Operation.NONE;
   }
 
   // rows: bitmask where 0 bit means the row is selected (active-low). Returns ~encoded result like C++
-  read(rows: number): number {
+  Read(rows: number): number {
     let result = 0;
     for (let row = 0; row < 8; row++) {
       const rowBit = 1 << row;
-      if ((rows & rowBit) === 0) {
-        result |= this.encodingMatrix[row];
-      }
+      result |= (rows & rowBit) == 0 ? this.encodingMatrix[row] : 0;
     }
     return (~result) & 0xff;
   }
 
-  private initMapping() {
+  private InitMapping() {
     // Map DOM KeyboardEvent.code values to row<<8 | (1<<column) based on C++ mapping
+    // Keyboard encoding matrix:
+    //              columns
+    //     │ 7   6   5   4   3   2   1   0
+    // ────┼───────────────────────────────
+    //   7 │SPC  ^   ]   \   [   Z   Y   X
+    //   6 │ W   V   U   T   S   R   Q   P
+    // r 5 │ O   N   M   L   K   J   I   H
+    // o 4 │ G   F   E   D   C   B   A   @
+    // w 3 │ /   .   =   ,   ;   :   9   8
+    // s 2 │ 7   6   5   4   3   2   1   0
+    //   1 │F5  F4  F3  F2  F1  AR2 STR LDA,
+    //   0 │DN  RT  UP  LFT ZB  VK  PS  TAB
+    //
+    // LDA - left diagonal arrow
     const map = (code: string, rowCol: number) => this.keymap.set(code, rowCol);
 
+    // KeyCode, RowColumnCode = row<<8 | 1<<column
     // Row 7
     map('Space', 0x780); // SPC
     map('Backquote', 0x701); // ` (mapped as @ in C++ minus)
@@ -82,7 +124,7 @@ export class Keyboard {
     map('KeyC', 0x408);
     map('KeyB', 0x404);
     map('KeyA', 0x402);
-    map('Minus', 0x401);
+    map('Minus', 0x401); // '@'
 
     // Row 3
     map('Slash', 0x380);
@@ -110,19 +152,19 @@ export class Keyboard {
     map('F3', 0x120);
     map('F2', 0x110);
     map('F1', 0x108);
-    map('Escape', 0x104);
-    map('F8', 0x102);
-    map('F7', 0x101);
+    map('Escape', 0x104); // AR2
+    map('F8', 0x102);     // STR
+    map('F7', 0x101);     // LDA, left diagonal arrow
 
     // Row 0 (arrows and others)
     map('ArrowDown', 0x080);
     map('ArrowRight', 0x040);
     map('ArrowUp', 0x020);
     map('ArrowLeft', 0x010);
-    map('Backspace', 0x008);
-    map('Enter', 0x004);
-    map('AltRight', 0x002);
-    map('Tab', 0x001);
+    map('Backspace', 0x008);  // ZB
+    map('Enter', 0x004);      // VK
+    map('AltRight', 0x002);   // PS
+    map('Tab', 0x001);        // TAB
   }
 }
 

@@ -16,7 +16,8 @@
   "scripts": {
     "compile": "tsc -p .",
     "watch": "tsc -w -p .",
-    "prepublish": "npm run compile"
+    "prepublish": "npm run compile",
+    "run-rom-ts": "npm run compile && node ./out/tools/runRom.js"
   },
   "devDependencies": {
     "typescript": "^4.9.5",
@@ -31,6 +32,7 @@
     "onCommand:i8080.run",
     "onCommand:i8080.pause",
     "onCommand:i8080.resume",
+    "onCommand:i8080.run10K",
     "onDebug"
   ],
   "contributes": {
@@ -53,6 +55,11 @@
       {
         "command": "i8080.resume",
         "title": "Resume i8080 Emulator"
+      }
+      ,
+      {
+        "command": "i8080.run10K",
+        "title": "Run 0x10K Instructions and Pause"
       }
     ],
     "debuggers": [

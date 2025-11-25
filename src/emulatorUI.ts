@@ -6,7 +6,7 @@ import Keyboard from './keyboard';
 import * as path from 'path';
 import * as fs from 'fs';
 
-let currentPanelController: { pause: () => void; resume: () => void } | null = null;
+let currentPanelController: { pause: () => void; resume: () => void; runInstructions?: (count: number) => void } | null = null;
 
 export async function openEmulatorPanel(context: vscode.ExtensionContext) {
   const panel = vscode.window.createWebviewPanel('vectorEmu', 'Vector-06C Emulator', vscode.ViewColumn.One, {
@@ -94,7 +94,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext) {
   const cyclesPerFrame = 59904;
   let running = true;
 
-  // expose pause/resume controls for external commands
+  // expose pause/resume controls and a 'run N instructions' helper for external commands
   currentPanelController = {
     pause: () => {
       running = false;
@@ -116,7 +116,34 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext) {
         try { panel.webview.postMessage({ type: 'pause', addr, opcode, regs, m: mVal, pc: regs.PC }); } catch(e) {}
       } catch (e) {}
     },
-    resume: () => { if (!running) { running = true; tick(); } }
+    resume: () => { if (!running) { running = true; tick(); } },
+    runInstructions: (count: number) => {
+      // stop regular frame loop while we run instructions
+      running = false;
+      try {
+        const result = emu.runUntilBreakpointOrHalt(count);
+        // After running, emit a pause-like log
+        try {
+          const addr = emu.regs.PC & 0xffff;
+          const opcode = (emu as any).cpu.readByte(addr) & 0xff;
+          const regs = (emu as any).cpu.snapshotRegs ? (emu as any).cpu.snapshotRegs() : emu.regs;
+          const addrHex = addr.toString(16).padStart(4, '0');
+          const opHex = opcode.toString(16).padStart(2, '0');
+          const flagsStr = 'S=' + (regs.flags.S ? '1' : '0') + ' Z=' + (regs.flags.Z ? '1' : '0') + ' AC=' + (regs.flags.AC ? '1' : '0') + ' P=' + (regs.flags.P ? '1' : '0') + ' CY=' + (regs.flags.CY ? '1' : '0');
+          const hl = ((regs.H << 8) | regs.L) & 0xffff;
+          let mVal = 0;
+          try { mVal = (emu as any).cpu.readByte(hl) & 0xff; } catch (e) {}
+          const mHex = mVal.toString(16).padStart(2, '0');
+          const pcHex = (regs.PC & 0xffff).toString(16).padStart(4,'0');
+          const line = `RUN ${count.toString(16)}: ${addrHex}: ${opHex} PC=${pcHex} A=${regs.A.toString(16).padStart(2,'0')} B=${regs.B.toString(16).padStart(2,'0')} C=${regs.C.toString(16).padStart(2,'0')} D=${regs.D.toString(16).padStart(2,'0')} E=${regs.E.toString(16).padStart(2,'0')} H=${regs.H.toString(16).padStart(2,'0')} L=${regs.L.toString(16).padStart(2,'0')} M=${mHex} SP=${regs.SP.toString(16).padStart(4,'0')} ${flagsStr}`;
+          try { cpuOutput.appendLine(line); } catch (e) {}
+          try { panel.webview.postMessage({ type: 'pause', addr, opcode, regs, m: mVal, pc: regs.PC }); } catch (e) {}
+        } catch (e) {}
+      } finally {
+        // leave emulator paused
+        running = false;
+      }
+    }
   };
 
   panel.webview.onDidReceiveMessage(msg => {
@@ -170,6 +197,15 @@ export function pauseEmulatorPanel() {
 export function resumeEmulatorPanel() {
   if (currentPanelController) currentPanelController.resume();
   else vscode.window.showWarningMessage('Emulator panel not open');
+}
+
+export function run10KInstructionsPanel() {
+  if (currentPanelController && currentPanelController.runInstructions) {
+    // run 0x10000 instructions then pause
+    currentPanelController.runInstructions(0x10000);
+  } else {
+    vscode.window.showWarningMessage('Emulator panel not open');
+  }
 }
 
 function getWebviewContent() {
