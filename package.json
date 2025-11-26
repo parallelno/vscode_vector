@@ -32,7 +32,7 @@
     "onCommand:i8080.run",
     "onCommand:i8080.pause",
     "onCommand:i8080.resume",
-    "onCommand:i8080.run10K",
+    "onCommand:i8080.runFrame",
     "onDebug"
   ],
   "contributes": {
@@ -58,8 +58,8 @@
       }
       ,
       {
-        "command": "i8080.run10K",
-        "title": "Run 0x10K Instructions and Pause"
+        "command": "i8080.runFrame",
+        "title": "Run one frame and Pause"
       }
     ],
     "debuggers": [
