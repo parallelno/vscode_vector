@@ -4,6 +4,7 @@ import { Keyboard } from './keyboard';
 import IO from './io';
 import { Display } from './display';
 import { HardwareReq } from './hardware_reqs';
+import { ReqData } from './hardware_types';
 
 enum Status {
 			RUN = 0,
@@ -29,20 +30,16 @@ const execDelays: number[] = [
 	0.0
 ];
 
-export type ReqData = {
-  [ key: string ]: any
-};
-
 export class Hardware
 {
   status: Status = Status.STOP;
-  execSpeed: ExecSpeed = ExecSpeed.NORMAL;
+  execSpeed: ExecSpeed = ExecSpeed.NORMAL; // execution speed
 
   cpu?: CPU;
   memory?: Memory;
   keyboard?: Keyboard;
   io?: IO;
-  display?: Display;
+  _display?: Display;
 
   constructor(
     pathBootData: string,
@@ -55,7 +52,7 @@ export class Hardware
     this.io = new IO();
     this.cpu = new CPU(
       this.memory, this.io.PortIn.bind(this.io), this.io.PortOut.bind(this.io));
-    this.display = new Display(this.memory, this.io);
+    this._display = new Display(this.memory, this.io);
 
     this.Init();
     this.Execution();
@@ -70,7 +67,7 @@ export class Hardware
   Init()
   {
     this.memory?.Init();
-    this.display?.Init();
+    this._display?.Init();
     this.io?.Init();
   }
 
@@ -84,7 +81,7 @@ export class Hardware
     while (this.status != Status.EXIT)
     {
       let startCC = this.cpu?.cc ?? 0;
-      let startFrame = this.display?.frameNum ?? 0;
+      let startFrame = this._display?.frameNum ?? 0;
       let startTime = performance.now();
       let endFrameTime = performance.now();
 
@@ -92,7 +89,7 @@ export class Hardware
       {
         let startFrameTime = performance.now();
 
-        let frameNum = this.display?.frameNum ?? 0;
+        let frameNum = this._display?.frameNum ?? 0;
 
         do // rasterizes a frame
         {
@@ -102,7 +99,8 @@ export class Hardware
             break;
           };
 
-        } while (this.status == Status.RUN && this.display?.frameNum == frameNum);
+        } while (this.status == Status.RUN &&
+                this._display?.frameNum == frameNum);
 
         // vsync
         if (this.status == Status.RUN)
@@ -130,7 +128,7 @@ export class Hardware
       let elapsedCC = (this.cpu?.cc ?? 0) - startCC;
       if (elapsedCC)
       {
-        let elapsedFrames = (this.display?.frameNum ?? 0) - startFrame;
+        let elapsedFrames = (this._display?.frameNum ?? 0) - startFrame;
         let elapsedTime = performance.now() - startTime;
         let timeDurationSec = elapsedTime / 1000.0;
         console.log(`Break: elapsed cpu cycles: ${elapsedCC}, elapsed frames: ${elapsedFrames}, elapsed seconds: ${timeDurationSec}`);
@@ -152,8 +150,8 @@ export class Hardware
 
     do
     {
-      this.display?.Rasterize();
-      this.cpu?.ExecuteMachineCycle(this.display?.IsIRQ() ?? false);
+      this._display?.Rasterize();
+      this.cpu?.ExecuteMachineCycle(this._display?.IsIRQ() ?? false);
       // TODO: add audio support
       //this.audio?.Clock(2, this.io?.GetBeeper() ?? false);
 
@@ -163,7 +161,7 @@ export class Hardware
     /*
     // TODO: fix the debug later
     if (this.debugAttached &&
-      this.debug?.(this.cpu.GetStateP(), this.memory.GetStateP(), this.io.GetStateP(), this.display.GetStateP()) )
+      this.debug?.(this.cpu.GetStateP(), this.memory.GetStateP(), this.io.GetStateP(), this._display.GetStateP()) )
     {
       return true;
     }
@@ -180,7 +178,7 @@ export class Hardware
   }
 
   // UI thread. It return when the request fulfilled
-  Request(req: HardwareReq, data: ReqData): ReqData
+  Request(req: HardwareReq, data: ReqData = {}): ReqData
   {
     return this.ReqHandling(req, data);
   }
@@ -269,27 +267,27 @@ export class Hardware
 
     case HardwareReq.GET_DISPLAY_BORDER_LEFT:
     {
-      const data = this.display?.GetBorderLeft();
+      const data = this._display?.GetBorderLeft();
       out = {"borderLeft": data};
       break;
     }
 
     case HardwareReq.SET_DISPLAY_BORDER_LEFT:
     {
-      this.display?.SetBorderLeft(dataJ["borderLeft"]);
+      this._display?.SetBorderLeft(dataJ["borderLeft"]);
       break;
     }
 
     case HardwareReq.GET_DISPLAY_IRQ_COMMIT_PXL:
     {
-      const data = this.display?.GetIrqCommitPxl();
+      const data = this._display?.GetIrqCommitPxl();
       out = {"irqCommitPxl": data};
       break;
     }
 
     case HardwareReq.SET_DISPLAY_IRQ_COMMIT_PXL:
     {
-      this.display?.SetIrqCommitPxl(dataJ["irqCommitPxl"]);
+      this._display?.SetIrqCommitPxl(dataJ["irqCommitPxl"]);
       break;
     }
 
@@ -322,9 +320,9 @@ export class Hardware
       break;
 
     case HardwareReq.GET_DISPLAY_DATA:
-      out = {"rasterLine": this.display?.GetRasterLine(),
-        "rasterPixel": this.display?.GetRasterPixel(),
-        "frameNum": this.display?.GetFrameNum(),
+      out = {"rasterLine": this._display?.GetRasterLine(),
+        "rasterPixel": this._display?.GetRasterPixel(),
+        "frameNum": this._display?.GetFrameNum(),
         };
       break;
 
@@ -418,10 +416,11 @@ export class Hardware
         };
       break;
     }
+*/
     case HardwareReq.SET_MEM:
-      m_memory.SetRam(dataJ["addr"], dataJ["data"]);
+      this.memory?.SetRam(data["addr"], data["data"]);
       break;
-
+/*
     case HardwareReq.SET_BYTE_GLOBAL:
       m_memory.SetByteGlobal(dataJ["addr"], dataJ["data"]);
       break;
@@ -704,10 +703,10 @@ export class Hardware
 */
   ExecuteFrameNoBreaks()
   {
-    const frameNum: number = this.display?.frameNum ?? 0;
+    const frameNum: number = this._display?.frameNum ?? 0;
     do {
       this.ExecuteInstruction();
-    } while (this.display?.frameNum === frameNum);
+    } while (this._display?.frameNum === frameNum);
   }
 /*
   GetStepOverAddr()
@@ -756,4 +755,6 @@ export class Hardware
     return next_pc;
   }
     */
+
+  get display(): Display | undefined { return this._display; }
 }

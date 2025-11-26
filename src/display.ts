@@ -20,9 +20,9 @@ import Memory from './memory';
 // It rasters 4 horizontal pxls every cpu cycle no mater the mode.
 // In MODE_256 it dups every 2 horizontal pxls.
 
-const FRAME_W: number = 768;					// a frame resolution including borders
-const FRAME_H: number = 312;					// a frame resolution including borders
-const FRAME_LEN: number = FRAME_W * FRAME_H;	// the size of a frame buffer
+export const FRAME_W: number = 768;					// a frame resolution including borders
+export const FRAME_H: number = 312;					// a frame resolution including borders
+export const FRAME_LEN: number = FRAME_W * FRAME_H;	// the size of a frame buffer
 
 // For the realtime emulation it should be called
 //  every 0.019968 seconds by 3000000/59904 Mz timer
@@ -137,8 +137,8 @@ export class Display {
 
   RasterizeActiveArea(rasterizedPixels: number)
   {
-    const rasterLine: number = this.GetRasterLine();
-    const rasterPixel: number = this.GetRasterPixel();
+    const rasterLine: number = this.rasterLine;
+    const rasterPixel: number = this.rasterPixel;
     const commitTime: boolean =
       (this.io?.GetOutCommitTimer() ?? 0) > 0 ||
       (this.io?.GetPaletteCommitTimer() ?? 0) > 0;
@@ -167,7 +167,7 @@ export class Display {
 
   RasterizeBorder(rasterizedPixels: number)
   {
-    const rasterLine: number = this.GetRasterLine();
+    const rasterLine: number = this.rasterLine;
     const commitTime: boolean =
       (this.io?.GetOutCommitTimer() ?? 0) >= 0 ||
       (this.io?.GetPaletteCommitTimer() ?? 0) >= 0;
@@ -187,8 +187,8 @@ export class Display {
     // reset the interrupt request. it can be set during border drawing.
     this.state.update.irq = false;
 
-    const rasterLine: number = this.GetRasterLine();
-    const rasterPixel: number = this.GetRasterPixel();
+    const rasterLine: number = this.rasterLine;
+    const rasterPixel: number = this.rasterPixel;
 
     const isActiveScan: boolean = rasterLine >= SCAN_ACTIVE_AREA_TOP &&
                               rasterLine < SCAN_ACTIVE_AREA_TOP + ACTIVE_AREA_H;
@@ -246,8 +246,8 @@ export class Display {
       let isNewFrame = this.state.update.framebufferIdx / FRAME_LEN;
       this.state.update.framebufferIdx %= FRAME_LEN;
 
-      let rasterLine = this.GetRasterLine();
-      let rasterPixel = this.GetRasterPixel();
+      let rasterLine = this.rasterLine;
+      let rasterPixel = this.rasterPixel;
       this.state.update.irq ||= this.state.update.framebufferIdx == this.irqCommitPxl;
 
       if (isNewFrame)
@@ -263,8 +263,8 @@ export class Display {
   FillActiveArea256(rasterizedPixels: number)
   {
     // scrolling
-    let rasterLine = this.GetRasterLine();
-    let rasterPixel = this.GetRasterPixel();
+    let rasterLine = this.rasterLine;
+    let rasterPixel = this.rasterPixel;
     let rasterLineScrolled = (
       rasterLine - SCAN_ACTIVE_AREA_TOP + (255 - this.state.update.scrollIdx) + ACTIVE_AREA_H) %
       ACTIVE_AREA_H + SCAN_ACTIVE_AREA_TOP;
@@ -284,7 +284,7 @@ export class Display {
       bitIdx -= i % 2;
       if (bitIdx < 0) {
         bitIdx = 7;
-        screenBytes = this.GetScreenBytes(rasterLineScrolled, this.GetRasterPixel());
+        screenBytes = this.GetScreenBytes(rasterLineScrolled, this.rasterPixel);
       }
     }
   }
@@ -292,8 +292,8 @@ export class Display {
   FillActiveArea256PortHandling(rasterizedPixels: number)
   {
     // scrolling
-    const rasterLine = this.GetRasterLine();
-    let rasterPixel = this.GetRasterPixel();
+    const rasterLine = this.rasterLine;
+    let rasterPixel = this.rasterPixel;
     const rasterLineScrolled = (
       rasterLine - SCAN_ACTIVE_AREA_TOP + (255 - this.state.update.scrollIdx) + ACTIVE_AREA_H) %
       ACTIVE_AREA_H + SCAN_ACTIVE_AREA_TOP;
@@ -305,7 +305,7 @@ export class Display {
 
     for (let i = 0; i < rasterizedPixels; i++)
     {
-      rasterPixel = this.GetRasterPixel();
+      rasterPixel = this.rasterPixel;
       if (rasterLine == SCAN_ACTIVE_AREA_TOP && rasterPixel == SCROLL_COMMIT_PXL) {
         this.state.update.scrollIdx = this.io?.GetScroll() ?? SCROLL_DEFAULT;
       }
@@ -327,8 +327,8 @@ export class Display {
   FillActiveArea512PortHandling(rasterizedPixels: number)
   {
     // scrolling
-    const rasterLine = this.GetRasterLine();
-    let rasterPixel = this.GetRasterPixel();
+    const rasterLine = this.rasterLine;
+    let rasterPixel = this.rasterPixel;
     const rasterLineScrolled = (rasterLine - SCAN_ACTIVE_AREA_TOP +
                           (255 - this.state.update.scrollIdx) +
                           ACTIVE_AREA_H) % ACTIVE_AREA_H + SCAN_ACTIVE_AREA_TOP;
@@ -342,7 +342,7 @@ export class Display {
 
     for (let i = 0; i < rasterizedPixels; i++)
     {
-      rasterPixel = this.GetRasterPixel();
+      rasterPixel = this.rasterPixel;
 
       if (rasterLine == SCAN_ACTIVE_AREA_TOP && rasterPixel == SCROLL_COMMIT_PXL) {
         this.state.update.scrollIdx = this.io?.GetScroll() ?? SCROLL_DEFAULT;
@@ -365,8 +365,8 @@ export class Display {
   FillActiveArea512(rasterizedPixels: number)
   {
     // scrolling
-    let rasterLine = this.GetRasterLine();
-    let rasterPixel = this.GetRasterPixel();
+    let rasterLine = this.rasterLine;
+    let rasterPixel = this.rasterPixel;
     let rasterLineScrolled = (
       rasterLine - SCAN_ACTIVE_AREA_TOP + (255 - this.state.update.scrollIdx) + ACTIVE_AREA_H) %
       ACTIVE_AREA_H + SCAN_ACTIVE_AREA_TOP;
@@ -388,14 +388,14 @@ export class Display {
       pxlIdx--;
       if (pxlIdx < 0){
         pxlIdx = 15;
-        screenBytes = this.GetScreenBytes(rasterLineScrolled, this.GetRasterPixel());
+        screenBytes = this.GetScreenBytes(rasterLineScrolled, this.rasterPixel);
       }
     }
   }
 
   IsIRQ(): boolean { return this.state.update.irq; }
 
-  GetFrame(vsync: boolean): Uint32Array
+  GetFrame(vsync: boolean = true): Uint32Array
   {
     // TODO: fix rasterizarion sync
     //std::unique_lock<std::mutex> mlock(m_backBufferMutex);
@@ -456,8 +456,8 @@ export class Display {
 
     for(let i=0; i < FRAME_LEN; i += 16)
     {
-      const rasterLine: number = this.GetRasterLine();
-      const rasterPixel: number = this.GetRasterPixel();
+      const rasterLine: number = this.rasterLine;
+      const rasterPixel: number = this.rasterPixel;
 
       const isActiveScan: boolean = rasterLine >= SCAN_ACTIVE_AREA_TOP &&
                               rasterLine < SCAN_ACTIVE_AREA_TOP + ACTIVE_AREA_H;
@@ -537,7 +537,5 @@ export class Display {
   get rasterPixel(): number { return this.state.update.framebufferIdx % FRAME_W; };
 	get framebufferIdx(): number { return this.state.update.framebufferIdx; };
 }
-
-
 
 export default Display;
