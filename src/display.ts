@@ -243,7 +243,7 @@ export class Display {
       let color = this.fullPalette[this.io?.GetBorderColor() ?? 0];
 
       this.frameBuffer[this.state.update.framebufferIdx++] = color;
-      let isNewFrame = this.state.update.framebufferIdx / FRAME_LEN;
+      let isNewFrame = (this.state.update.framebufferIdx / FRAME_LEN) | 0;
       this.state.update.framebufferIdx %= FRAME_LEN;
 
       let rasterLine = this.rasterLine;
@@ -410,7 +410,7 @@ export class Display {
    */
   GetScreenBytes(_rasterLine: number, _rasterPixel: number): number
   {
-    let addrHigh = (_rasterPixel - this.borderLeft) / RASTERIZED_PXLS_MAX;
+    let addrHigh = ((_rasterPixel - this.borderLeft) / RASTERIZED_PXLS_MAX) | 0;
     let addrLow = ACTIVE_AREA_H - 1 - (_rasterLine - SCAN_ACTIVE_AREA_TOP);
     let screenAddrOffset = (addrHigh << 8 | addrLow) & 0xffff;
     return this.memory?.GetScreenBytes(screenAddrOffset) ?? 0;
@@ -533,7 +533,7 @@ export class Display {
   }
 
   get frameNum(): number { return this.state.update.frameNum; };
-  get rasterLine(): number { return this.state.update.framebufferIdx / FRAME_W; };
+  get rasterLine(): number { return (this.state.update.framebufferIdx / FRAME_W) | 0; }; // '| 0' converts to int
   get rasterPixel(): number { return this.state.update.framebufferIdx % FRAME_W; };
 	get framebufferIdx(): number { return this.state.update.framebufferIdx; };
 }

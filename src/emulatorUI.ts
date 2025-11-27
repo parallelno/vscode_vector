@@ -137,7 +137,6 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext)
 
         const addrHex = s.pc.toString(16).padStart(4, '0');
         const opHex = s.opcode.toString(16).padStart(2, '0');
-        const pcHex = (s.state.regs.pc.pair ?? 0).toString(16).padStart(4, '0');
         const flagsStr =
            'S=' + (s.state.regs.af.s ? '1' : '0') +
           ' Z=' + (s.state.regs.af.z ? '1' : '0') +
@@ -145,16 +144,17 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext)
           ' P=' + (s.state.regs.af.p ? '1' : '0') +
           ' CY=' + (s.state.regs.af.c ? '1' : '0');
 
-        const line = `${header} ${addrHex}:
-          ${opHex} PC=${pcHex} A=${(s.state.regs.af.a).toString(16).padStart(2,'0')}
-          B=${(s.state.regs.bc.h).toString(16).padStart(2,'0')}
-          C=${(s.state.regs.bc.l).toString(16).padStart(2,'0')}
-          D=${(s.state.regs.de.h).toString(16).padStart(2,'0')}
-          E=${(s.state.regs.de.l).toString(16).padStart(2,'0')}
-          H=${(s.state.regs.hl.h).toString(16).padStart(2,'0')}
-          L=${(s.state.regs.hl.l).toString(16).padStart(2,'0')}
-          M=${mVal.toString(16).padStart(2,'0')}
-          SP=${(s.state.regs.sp.pair).toString(16).padStart(4,'0')} ${flagsStr}`;
+        const line = `${header} ${addrHex}: ' +
+          '${opHex} A=${(s.state.regs.af.a).toString(16).padStart(2,'0')} '+
+          'B=${(s.state.regs.bc.h).toString(16).padStart(2,'0')} '+
+          'C=${(s.state.regs.bc.l).toString(16).padStart(2,'0')} '+
+          'D=${(s.state.regs.de.h).toString(16).padStart(2,'0')} '+
+          'E=${(s.state.regs.de.l).toString(16).padStart(2,'0')} '+
+          'H=${(s.state.regs.hl.h).toString(16).padStart(2,'0')} '+
+          'L=${(s.state.regs.hl.l).toString(16).padStart(2,'0')} '+
+          'M=${mVal.toString(16).padStart(2,'0')} '+
+          'SP=${(s.state.regs.sp.pair).toString(16).padStart(4,'0')}' +
+          '${flagsStr}`;
 
         try { emuOutput.appendLine(line); } catch (e) {}
 
