@@ -17,8 +17,8 @@ let maxInstr = DEFAULT_INSTR_MAX;
 
 const argv = process.argv.slice(2);
 if (argv.length < 1) {
-  console.log('Usage: npm run run-rom-ts -- <rom-file>');
-  console.log('Example: npm run run-rom-ts -- test.rom');
+  console.log('Usage: npm run run-rom-ts -- <rom-file> [max-instructions]');
+  console.log('Example: npm run run-rom-ts -- test.rom 1000');
   process.exit(1);
 }
 
