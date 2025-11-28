@@ -5,19 +5,18 @@
 	  lxi h, set_palette
 	  shld 0x39
       ei
-      hlt
+      hlt ; it invokes the set_palette routine
+
 test_start:
   		MVI B, 0x00
   		CALL fill_scr
+		hlt ; to capture the screen
 
   		MVI B, 0xFF
   		CALL fill_scr
-
-		JMP test_start
-
 end:
 	  di
-	  hlt
+	  hlt ; end of program and for capture the final screen
 
 PALETTE_LEN = 16
 

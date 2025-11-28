@@ -17,14 +17,16 @@
     "compile": "tsc -p .",
     "watch": "tsc -w -p .",
     "prepublish": "npm run compile",
-    "run-rom-ts": "npm run compile && node ./out/tools/runRom.js"
+    "run-rom-ts": "npm run compile && node ./out/tools/runRom.js",
+    "run-frames": "npm run compile && node ./out/tools/run_frames.js"
   },
   "devDependencies": {
-    "typescript": "^4.9.5",
     "@types/node": "^18.15.11",
-    "@types/vscode": "^1.70.0"
+    "@types/vscode": "^1.70.0",
+    "typescript": "^4.9.5"
   },
   "dependencies": {
+    "pngjs": "^7.0.0",
     "vscode-debugadapter": "^1.47.0"
   },
   "activationEvents": [
@@ -40,23 +42,19 @@
       {
         "command": "i8080.compile",
         "title": "Compile i8080 Assembly"
-      }
-      ,
+      },
       {
         "command": "i8080.run",
         "title": "Run i8080 Emulator"
-      }
-      ,
+      },
       {
         "command": "i8080.pause",
         "title": "Pause i8080 Emulator"
-      }
-      ,
+      },
       {
         "command": "i8080.resume",
         "title": "Resume i8080 Emulator"
-      }
-      ,
+      },
       {
         "command": "i8080.runFrame",
         "title": "Run one frame and Pause"
@@ -69,7 +67,9 @@
         "program": "./out/debugAdapter.js",
         "configurationAttributes": {
           "launch": {
-            "required": ["program"],
+            "required": [
+              "program"
+            ],
             "properties": {
               "program": {
                 "type": "string",
@@ -78,7 +78,9 @@
             }
           }
         },
-        "languages": ["asm"]
+        "languages": [
+          "asm"
+        ]
       }
     ]
   }

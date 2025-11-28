@@ -1,21 +1,10 @@
 {
-    "breakpoints": [
-        {
-            "addr": "0x0100",
-            "autoDel": false,
-            "comment": "",
-            "cond": "=ANY",
-            "memPages": 4294967295,
-            "operand": "A",
-            "status": 1,
-            "value": "0x00"
+    "labels": {
+        "fill_scr": {
+            "addr": "0x0106",
+            "src": "fill_scr.asm",
+            "line": 7
         }
-    ],
-    "codePerfs": null,
-    "comments": null,
-    "consts": null,
-    "labels": null,
-    "memoryEdits": null,
-    "scripts": null,
-    "watchpoints": null
+    },
+    "consts": {}
 }
