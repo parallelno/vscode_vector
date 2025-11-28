@@ -23,6 +23,9 @@ logs/
 test.rom
 *.rom
 
+# Frames output from run_frames tool
+frames_out/
+
 # Optional coverage
 coverage/
 
