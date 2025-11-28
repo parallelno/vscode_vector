@@ -94,7 +94,7 @@ export class Display {
   irqCommitPxl = IRQ_COMMIT_PXL;
 
   // prebaked look-up vector_color->RGBA pallete
-  fullPalette: Uint8Array = new Uint8Array(FULL_PALETTE_LEN);
+  fullPalette: Uint32Array = new Uint32Array(FULL_PALETTE_LEN);
 
 
   constructor(memory: Memory, io: IO)
@@ -511,24 +511,24 @@ export class Display {
 
 
   // Vector color format: uint8_t BBGGGRRR
-  // Output Color: ABGR (Imgui Image)
+  // Output Color: ARGB (Imgui Image)
   VectorColorToArgb(vColor: number): number
   {
     const r: number = (vColor & 0x07);
     const g: number = (vColor & 0x38) >> 3;
     const b: number = (vColor & 0xc0) >> 6;
     const color =
-      0xff000000 |
-      (r << (5 + 0)) |
+      0xFF000000 |
+      (r << (5 + 16)) |
       (g << (5 + 8 )) |
-      (b << (6 + 16 ));
+      (b << (6 + 0 ));
     return color;
   }
 
   //Prebake palette to 256x256 color table
   PrebakeFullPalette() {
     for (let i = 0; i < FULL_PALETTE_LEN; i++) {
-      this.fullPalette[i] = this.VectorColorToArgb(i);
+      this.fullPalette[i] = this.VectorColorToArgb(i) >>> 0;
     }
   }
 
