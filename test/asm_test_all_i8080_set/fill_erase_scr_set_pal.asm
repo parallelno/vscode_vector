@@ -14,6 +14,9 @@ test_start:
 
   		MVI B, 0xFF
   		CALL fill_scr
+		hlt ; to capture the screen
+
+		jmp test_start
 end:
 	  di
 	  hlt ; end of program and for capture the final screen
