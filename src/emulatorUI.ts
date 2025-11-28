@@ -104,6 +104,11 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext)
   tick();
 
   panel.onDidDispose(() => {
+    // Stop the emulation hardware thread to free resources
+    try {
+      running = false;
+    } catch (e) {}
+    try { emu.hardware?.Request(HardwareReq.EXIT); } catch (e) {}
     currentPanelController = null;
   }, null, context.subscriptions);
 }
