@@ -44,6 +44,7 @@ const BORDER_LEFT: number = 128;
 const BORDER_RIGHT: number = BORDER_LEFT;
 const BORDER_TOP: number = SCAN_ACTIVE_AREA_TOP;
 const BORDER_BOTTOM: number = SCAN_VBLANK_BOTTOM;
+const ACTIVE_AREA_RIGHT: number = BORDER_LEFT + ACTIVE_AREA_W;
 // border visible on the screen in pxls in 256 mode
 const BORDER_VISIBLE: number = 16;
 // the amount of rasterized pxls every 4 cpu cycles in MODE_512
@@ -194,13 +195,13 @@ export class Display {
     const isActiveScan: boolean = rasterLine >= SCAN_ACTIVE_AREA_TOP &&
                               rasterLine < SCAN_ACTIVE_AREA_TOP + ACTIVE_AREA_H;
     const isActiveArea: boolean = isActiveScan &&
-                    rasterPixel >= this.borderLeft && rasterPixel < BORDER_RIGHT;
+                    rasterPixel >= this.borderLeft && rasterPixel < ACTIVE_AREA_RIGHT;
 
     // Rasterize the Active Area
     if (isActiveArea)
     {
       let rasterizedPixels: number =
-        Math.min(BORDER_RIGHT - rasterPixel, RASTERIZED_PXLS_MAX);
+        Math.min(ACTIVE_AREA_RIGHT - rasterPixel, RASTERIZED_PXLS_MAX);
 
       this.RasterizeActiveArea(rasterizedPixels);
       // Rasterize the border if there is a leftover
@@ -212,7 +213,7 @@ export class Display {
     }
     // Rasterize the Border
     else {
-      let rasterizedPixels: number = !isActiveScan || rasterPixel >= BORDER_RIGHT ?
+      let rasterizedPixels: number = !isActiveScan || rasterPixel >= ACTIVE_AREA_RIGHT ?
               RASTERIZED_PXLS_MAX :
               Math.min(this.borderLeft - rasterPixel, RASTERIZED_PXLS_MAX);
 
@@ -464,12 +465,12 @@ export class Display {
                               rasterLine < SCAN_ACTIVE_AREA_TOP + ACTIVE_AREA_H;
       const isActiveArea: boolean = isActiveScan &&
                                     rasterPixel >= this.borderLeft &&
-                                    rasterPixel < BORDER_RIGHT;
+                                    rasterPixel < ACTIVE_AREA_RIGHT;
 
       // Rasterize the Active Area
       if (isActiveArea)
       {
-        let rasterizedPixels = Math.min(BORDER_RIGHT - rasterPixel, RASTERIZED_PXLS_MAX);
+        let rasterizedPixels = Math.min(ACTIVE_AREA_RIGHT - rasterPixel, RASTERIZED_PXLS_MAX);
 
         if ((this.io?.GetDisplayMode() ?? IO.MODE_256) == IO.MODE_256) {
           this.FillActiveArea256(rasterizedPixels);
@@ -487,7 +488,7 @@ export class Display {
       }
       // Rasterize the Border
       else {
-        let rasterizedPixels = !isActiveScan || rasterPixel >= BORDER_RIGHT ?
+        let rasterizedPixels = !isActiveScan || rasterPixel >= ACTIVE_AREA_RIGHT ?
           RASTERIZED_PXLS_MAX :
           Math.min(this.borderLeft - rasterPixel, RASTERIZED_PXLS_MAX);
 
