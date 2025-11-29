@@ -1,18 +1,30 @@
+OPCODE_EI = 0xFB
+OPCODE_RET = 0xC9
+
 .org 0x100
-    lxi sp, 0x8000
-	  lxi h, 0x38
-	  mvi m, 0xC3
-	  lxi h, set_palette
-	  shld 0x39
-      ei
-      hlt ; it invokes the set_palette routine
+		di
+		lxi sp, 0x8000
+		mvi a, OPCODE_EI
+		sta 0x38
+		mvi a, OPCODE_RET
+		sta 0x39
+		ei
+
+	  	hlt
+	  	call set_palette
 
 test_start:
-  		MVI B, 0x00
-  		CALL fill_scr
+		; fill
+  		lxi h, 0x80ff
+		lxi b, 0x80
+		mvi a, 0xff
+  		call fill_scr
 		hlt ; to capture the screen
 
-  		MVI B, 0xFF
+		; erase
+		lxi h, 0x80ff
+		lxi b, 0x80
+		mvi a, 0x00
   		CALL fill_scr
 		hlt ; to capture the screen
 
@@ -21,8 +33,24 @@ end:
 	  di
 	  hlt ; end of program and for capture the final screen
 
-PALETTE_LEN = 16
+; reversed fill
+; in:
+; hl - start of screen memory
+; bc - length
+; a - value to fill with
+TEMP_BYTE = 0x00
+fill_scr:
+  sta @loop + 1
+@loop:
+  mvi m, TEMP_BYTE
+  dcx h
+  dcx b
+  mov a, b
+  ora c
+  jnz @loop
+  ret
 
+PALETTE_LEN = 16
 set_palette:
 			lxi h, palette + PALETTE_LEN - 1
 			mvi	a, 0x88
@@ -42,31 +70,8 @@ set_palette:
 			out 0x0C
 
 			jp	@loop
+			ei
 			ret
-
-; in: B - value to fill with
-; use: HL - start of screen memory
-fill_scr:
-  LXI H, 0x8000
-@loop:
-  MOV M, B
-  INX H
-  MOV A, H
-  ORA L
-  JNZ @loop
-  ;CALL pause
-  RET
-
-; Simple delay
-; use: C = delay count
-pause:
-  MVI C, 0xFF
-@loop:
-  NOP
-  DCR C
-  JNZ @loop
-  RET
-
 
 palette:
   			DB b11_111_000, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, b00_000_000,

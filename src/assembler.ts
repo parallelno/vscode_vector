@@ -451,6 +451,8 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     // simple numeric
     const num = parseNumberFull(s);
     if (num !== null) return num & 0xffff;
+      // check simple named constants (e.g. TEMP_BYTE = 0x00)
+      if (consts && consts.has(s)) return consts.get(s)! & 0xffff;
 
     // support simple expressions like "base + 15" where base may be a
     // numeric, a global label, or a local label (@name). RHS must be numeric.
@@ -624,7 +626,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     if (op === 'LHLD' || op === 'SHLD') {
-      const arg = tokens[1];
+      const arg = tokens.slice(1).join(' ').trim();
       let target = 0;
       const num = parseNumberFull(arg);
       if (num !== null) {
@@ -655,7 +657,17 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       if (m.length !== 2) { errors.push(`Bad MVI syntax at ${srcLine}`); continue; }
       const r = m[0].toUpperCase();
       const rawVal = m[1];
-      const full = parseNumberFull(rawVal);
+      // Allow numeric literals, constants, labels or simple expressions for the immediate
+      let full: number | null = parseNumberFull(rawVal);
+      if (full === null) {
+        const resolved = resolveAddressToken(rawVal, srcLine);
+        if (resolved !== null) full = resolved;
+        else {
+          // fallback to parseAddressToken which can evaluate simple const/label expressions
+          const p = parseAddressToken(rawVal, labels, consts);
+          if (p !== null) full = p;
+        }
+      }
       if (!(r in mviOpcodes) || (full === null)) { errors.push(`Bad MVI operands at ${srcLine}`); continue; }
       if (full > 0xff) warnings.push(`Immediate ${rawVal} (0x${full.toString(16).toUpperCase()}) too large for MVI at ${srcLine}; truncating to 0x${(full & 0xff).toString(16).toUpperCase()}`);
       out.push(mviOpcodes[r]);
@@ -683,7 +695,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     if (op === 'LDA' || op === 'STA' || op === 'JMP' || op === 'JZ' || op === 'JNZ' || op === 'CALL') {
-      const arg = tokens[1];
+      const arg = tokens.slice(1).join(' ').trim();
       let target = 0;
       const num = parseNumberFull(arg);
       if (num !== null) {
@@ -903,7 +915,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     const retMap: Record<string, number> = { 'RNZ': 0xC0, 'RZ': 0xC8, 'RNC': 0xD0, 'RC': 0xD8, 'RPO': 0xE0, 'RPE': 0xE8, 'RP': 0xF0, 'RM': 0xF8 };
 
     if (op in jmpMap) {
-      const arg = tokens[1];
+      const arg = tokens.slice(1).join(' ').trim();
       let target = 0;
       const num = parseNumberFull(arg);
       if (num !== null) {
@@ -918,7 +930,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     if (op in callMap) {
-      const arg = tokens[1];
+      const arg = tokens.slice(1).join(' ').trim();
       let target = 0;
       const num = parseNumberFull(arg);
       if (num !== null) {
@@ -1049,7 +1061,12 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
 
   // write token file (JSON) next to outPath, same base name but .json extension
   try {
-    const tokenPath = outPath.replace(/\.[^/.]+$/, '.json');
+  // token file uses a postfix '_' before the extension so it's easy to
+  // distinguish (e.g. `test.rom` -> `test_.json`). If no extension,
+  // append `_.json`.
+  let tokenPath: string;
+  if (/\.[^/.]+$/.test(outPath)) tokenPath = outPath.replace(/\.[^/.]+$/, '_.json');
+  else tokenPath = outPath + '_.json';
     const tokens: any = {
       labels: {},
       consts: {}
