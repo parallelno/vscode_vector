@@ -65,8 +65,8 @@ function printState(state?: State) {
   const flags =
     `S=${r.af.s?1:0} Z=${r.af.z?1:0} AC=${r.af.ac?1:0} P=${r.af.p?1:0} CY=${r.af.c?1:0}`;
 
-    const pc_str: string = (r.pc.pair).toString(16).padStart(4,'0')
-    const sp_str: string = (r.sp.pair).toString(16).padStart(4,'0')
+    const pc_str: string = (r.pc.word).toString(16).padStart(4,'0')
+    const sp_str: string = (r.sp.word).toString(16).padStart(4,'0')
     const a_str: string = (r.af.a).toString(16).padStart(2,'0')
     const b_str: string = (r.bc.h).toString(16).padStart(2,'0')
     const c_str: string = (r.bc.l).toString(16).padStart(2,'0')
@@ -75,9 +75,9 @@ function printState(state?: State) {
     const h_str: string = (r.hl.h).toString(16).padStart(2,'0')
     const l_str: string = (r.hl.l).toString(16).padStart(2,'0')
 
-    const opcode = emu.hardware?.memory?.GetByte(r.pc.pair & 0xffff) ?? 0;
-    const b1 = emu.hardware?.memory?.GetByte((r.pc.pair + 1) & 0xffff) ?? 0;
-    const b2 = emu.hardware?.memory?.GetByte((r.pc.pair + 2) & 0xffff) ?? 0;
+    const opcode = emu.hardware?.memory?.GetByte(r.pc.word & 0xffff) ?? 0;
+    const b1 = emu.hardware?.memory?.GetByte((r.pc.word + 1) & 0xffff) ?? 0;
+    const b2 = emu.hardware?.memory?.GetByte((r.pc.word + 2) & 0xffff) ?? 0;
     const opcode_s = opcode.toString(16).padStart(2,'0')
     const b1_s = b1.toString(16).padStart(2,'0')
     const b2_s = b2.toString(16).padStart(2,'0');
@@ -92,7 +92,7 @@ for (let i = 0; i < maxInstr; i++)
   if (print_log){
     printState(emu.hardware?.cpu?.state);
   }
-  else if ((emu.hardware?.cpu?.state.regs.pc.pair ?? 0) == START_LOG_ADDR){
+  else if ((emu.hardware?.cpu?.state.regs.pc.word ?? 0) == START_LOG_ADDR){
     print_log = true;
   }
 
@@ -108,7 +108,7 @@ for (let i = 0; i < maxInstr; i++)
 console.log('Stop emulation.');
 
 // Print memory dump at PC
-const pc = emu.hardware?.cpu?.state.regs.pc.pair ?? 0;
+const pc = emu.hardware?.cpu?.state.regs.pc.word ?? 0;
 const mem: string[] = [];
 for (let addr = pc; addr < pc + 16; addr++)
 {

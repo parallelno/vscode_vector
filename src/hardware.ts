@@ -5,6 +5,7 @@ import IO from './io';
 import { Display } from './display';
 import { HardwareReq } from './hardware_reqs';
 import { ReqData } from './hardware_types';
+import { cp } from 'fs';
 
 enum Status {
 			RUN = 0,
@@ -40,6 +41,9 @@ export class Hardware
   keyboard?: Keyboard;
   io?: IO;
   _display?: Display;
+  // Optional callback invoked after each instruction is executed.
+  // The callback is called from the hardware execution thread.
+  debugInstructionCallback?: ((hw: Hardware) => void) | null = null;
 
   constructor(
     pathBootData: string,
@@ -141,7 +145,6 @@ export class Hardware
     }
   }
 
-
   // Output true if the execution breaks
   ExecuteInstruction(): boolean
   {
@@ -156,6 +159,15 @@ export class Hardware
       //this.audio?.Clock(2, this.io?.GetBeeper() ?? false);
 
     } while (!this.cpu?.IsInstructionExecuted());
+
+    // invoke per-instruction debug callback (if attached)
+    try {
+      if (this.debugInstructionCallback) {
+        this.debugInstructionCallback(this);
+      }
+    } catch (e) {
+      console.error('debugInstructionCallback error', e);
+    }
 
     // debug per instruction
     /*

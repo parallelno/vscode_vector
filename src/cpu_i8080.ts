@@ -42,14 +42,28 @@ export class RegPair {
   l: number = 0;
 
   constructor(val: number = 0) {
-    this.pair = val;
+    this.word = val & 0xffff;
   }
-  get pair(): number {
+  get word(): number {
     return (this.h << 8) | this.l;
   }
-  set pair(value: number) {
-    this.h = value >> 8;
+  set word(value: number) {
+    this.h = (value >> 8) & 0xff;
     this.l = value & 0xff;
+  }
+}
+
+export class Reg {
+  _v: number = 0;
+
+  constructor(val: number = 0) {
+    this._v = val & 0xff;
+  }
+  get v(): number {
+    return this._v;
+  }
+  set v(val: number) {
+    this._v = val & 0xff;
   }
 }
 
@@ -65,7 +79,7 @@ export class AF {
   s: boolean = false; // sign flag
 
   constructor() {
-    this.pair = PSW_INIT;
+    this.word = PSW_INIT;
   }
 
   get f(): number {
@@ -78,7 +92,7 @@ export class AF {
     return f | PSW_INIT;
   }
 
-  set flags(value: number) {
+  set f(value: number) {
     this.s = (value & 0b10000000) !== 0;
     this.z = (value & 0b01000000) !== 0;
     this.ac = (value & 0b00100000) !== 0;
@@ -86,14 +100,12 @@ export class AF {
     this.c = (value & 0b00000001) !== 0;
   }
 
-  get pair(): number {
-    return (this.a << 8) | this.flags;
+  get word(): number {
+    return (this.a << 8) | this.f;
   }
-  set pair(value: number) {
-    this.a = value >> 8;
-    this.flags = value & 0xff;
-    this.flags &= PSW_NUL_FLAGS;
-    this.flags |= PSW_INIT;
+  set word(val: number) {
+    this.a = (val >> 8) & 0xff;
+    this.f = val;
   }
 }
 
@@ -104,9 +116,9 @@ export type Registers = {
   bc: RegPair; // BC register pair
   de: RegPair; // DE register pair
   hl: RegPair; // HL register pair
-  ir: number   // internal register to fetch instructions
-  tmp: number  // internal temporary register
-  act: number  // internal temporaty accumulator
+  ir: Reg   // internal register to fetch instructions
+  tmp: Reg  // internal temporary register
+  act: Reg  // internal temporaty accumulator
   wz: RegPair  // internal address register
 };
 
@@ -127,9 +139,9 @@ export class State{
     bc: new RegPair(),
     de: new RegPair(),
     hl: new RegPair(),
-    ir: 0,
-    tmp: 0,
-    act: 0,
+    ir: new Reg(),
+    tmp: new Reg(),
+    act: new Reg(),
     wz: new RegPair()
   };
   ints: Int = new Int();
@@ -150,10 +162,10 @@ export default class CPU
     return this._state.cc;
   }
   get pc(): number {
-    return this._state.regs.pc.pair;
+    return this._state.regs.pc.word;
   }
   get sp(): number {
-    return this._state.regs.sp.pair;
+    return this._state.regs.sp.word;
   }
   get psw(): AF {
     return this._state.regs.af;
@@ -171,7 +183,7 @@ export default class CPU
     return this._state.regs.af.a;
   }
   get f(): number {
-    return this._state.regs.af.flags;
+    return this._state.regs.af.f;
   }
   get b(): number {
     return this._state.regs.bc.h;
@@ -233,22 +245,22 @@ export default class CPU
 
   Init() {
     // TODO: all regs must be rundom at init
-    this._state.regs.af.pair = PSW_INIT;
-    this._state.regs.bc.pair = 0;
-    this._state.regs.de.pair = 0;
-    this._state.regs.hl.pair = 0;
+    this._state.regs.af.word = PSW_INIT;
+    this._state.regs.bc.word = 0;
+    this._state.regs.de.word = 0;
+    this._state.regs.hl.word = 0;
 
     this.Reset();
   }
 
   Reset() {
     this._state.cc = 0;
-    this._state.regs.pc.pair = 0;
-    this._state.regs.sp.pair = 0;
-    this._state.regs.ir = 0;
-    this._state.regs.tmp = 0;
-    this._state.regs.act = 0;
-    this._state.regs.wz.pair = 0;
+    this._state.regs.pc.word = 0;
+    this._state.regs.sp.word = 0;
+    this._state.regs.ir.v = 0;
+    this._state.regs.tmp.v = 0;
+    this._state.regs.act.v = 0;
+    this._state.regs.wz.word = 0;
     this._state.ints = new Int();
   }
 
@@ -264,14 +276,14 @@ export default class CPU
         this._state.ints.inte = false;
         this._state.ints.iff = false;
         this._state.ints.hlta = false;
-        this._state.regs.ir = OPCODE_RST7;
+        this._state.regs.ir.v = OPCODE_RST7;
         this.memory?.CpuInvokesRst7();
       }
       // normal instruction execution
       else
       {
         this._state.ints.eiPending = false;
-        this._state.regs.ir = this.ReadInstrMovePC(0);
+        this._state.regs.ir.v = this.ReadInstrMovePC(0);
       }
     }
     this.Decode();
@@ -378,7 +390,7 @@ export default class CPU
 
   Decode()
   {
-	  switch (this._state.regs.ir)
+	  switch (this._state.regs.ir.v)
 	  {
     	case 0x7F: this._state.regs.af.a = this.MOVRegReg(this._state.regs.af.a, this._state.regs.af.a); break; // MOV A,A
       case 0x78: this._state.regs.af.a = this.MOVRegReg(this._state.regs.af.a, this._state.regs.bc.h); break; // MOV A,B
@@ -434,13 +446,13 @@ export default class CPU
       case 0x6C: this._state.regs.hl.l = this.MOVRegReg(this._state.regs.hl.l, this._state.regs.hl.h); break; // MOV L,H
       case 0x6D: this._state.regs.hl.l = this.MOVRegReg(this._state.regs.hl.l, this._state.regs.hl.l); break; // MOV L,L
 
-      case 0x7E: this._state.regs.af.a = this.LoadRegPtr(this._state.regs.af.a, this._state.regs.hl.pair); break; // MOV A,M
-      case 0x46: this._state.regs.bc.h = this.LoadRegPtr(this._state.regs.bc.h, this._state.regs.hl.pair); break; // MOV B,M
-      case 0x4E: this._state.regs.bc.l = this.LoadRegPtr(this._state.regs.bc.l, this._state.regs.hl.pair); break; // MOV C,M
-      case 0x56: this._state.regs.de.h = this.LoadRegPtr(this._state.regs.de.h, this._state.regs.hl.pair); break; // MOV D,M
-      case 0x5E: this._state.regs.de.l = this.LoadRegPtr(this._state.regs.de.l, this._state.regs.hl.pair); break; // MOV E,M
-      case 0x66: this._state.regs.hl.h = this.LoadRegPtr(this._state.regs.hl.h, this._state.regs.hl.pair); break; // MOV H,M
-      case 0x6E: this._state.regs.hl.l = this.LoadRegPtr(this._state.regs.hl.l, this._state.regs.hl.pair); break; // MOV L,M
+      case 0x7E: this._state.regs.af.a = this.LoadRegPtr(this._state.regs.af.a, this._state.regs.hl.word); break; // MOV A,M
+      case 0x46: this._state.regs.bc.h = this.LoadRegPtr(this._state.regs.bc.h, this._state.regs.hl.word); break; // MOV B,M
+      case 0x4E: this._state.regs.bc.l = this.LoadRegPtr(this._state.regs.bc.l, this._state.regs.hl.word); break; // MOV C,M
+      case 0x56: this._state.regs.de.h = this.LoadRegPtr(this._state.regs.de.h, this._state.regs.hl.word); break; // MOV D,M
+      case 0x5E: this._state.regs.de.l = this.LoadRegPtr(this._state.regs.de.l, this._state.regs.hl.word); break; // MOV E,M
+      case 0x66: this._state.regs.hl.h = this.LoadRegPtr(this._state.regs.hl.h, this._state.regs.hl.word); break; // MOV H,M
+      case 0x6E: this._state.regs.hl.l = this.LoadRegPtr(this._state.regs.hl.l, this._state.regs.hl.word); break; // MOV L,M
 
       case 0x77: this.MOVMemReg(this._state.regs.af.a); break; // MOV M,A
       case 0x70: this.MOVMemReg(this._state.regs.bc.h); break; // MOV M,B
@@ -459,12 +471,12 @@ export default class CPU
       case 0x2E: this._state.regs.hl.l = this.MVIRegData(this._state.regs.hl.l); break; // MVI L,uint8_t
       case 0x36: this.MVIMemData(); break; // MVI M,uint8_t
 
-      case 0x0A: this._state.regs.af.a = this.LoadRegPtr(this._state.regs.af.a, this._state.regs.bc.pair); break; // LDAX B
-      case 0x1A: this._state.regs.af.a = this.LoadRegPtr(this._state.regs.af.a, this._state.regs.de.pair); break; // LDAX D
+      case 0x0A: this._state.regs.af.a = this.LoadRegPtr(this._state.regs.af.a, this._state.regs.bc.word); break; // LDAX B
+      case 0x1A: this._state.regs.af.a = this.LoadRegPtr(this._state.regs.af.a, this._state.regs.de.word); break; // LDAX D
       case 0x3A: this.LDA(); break; // LDA word
 
-      case 0x02: this.STAX(this._state.regs.bc.pair); break; // STAX B
-      case 0x12: this.STAX(this._state.regs.de.pair); break; // STAX D
+      case 0x02: this.STAX(this._state.regs.bc.word); break; // STAX B
+      case 0x12: this.STAX(this._state.regs.de.word); break; // STAX D
       case 0x32: this.STA(); break; // STA word
 
       case 0x01: this.LXI(this._state.regs.bc); break; // LXI B,word
@@ -482,10 +494,10 @@ export default class CPU
       case 0xD5: this.PUSH(this._state.regs.de.h, this._state.regs.de.l); break; // PUSH D
       case 0xE5: this.PUSH(this._state.regs.hl.h, this._state.regs.hl.l); break; // PUSH H
       case 0xF5: this.PUSH(this._state.regs.af.a, this._state.regs.af.f); break; // PUSH PSW
-      case 0xC1: this._state.regs.bc.pair = this.POP(this._state.regs.bc.pair); break; // POP B
-      case 0xD1: this._state.regs.de.pair = this.POP(this._state.regs.de.pair); break; // POP D
-      case 0xE1: this._state.regs.hl.pair = this.POP(this._state.regs.hl.pair); break; // POP H
-      case 0xF1: this._state.regs.af.pair = this.POP(this._state.regs.af.pair); break; // POP PSW
+      case 0xC1: this._state.regs.bc.word = this.POP(this._state.regs.bc.word); break; // POP B
+      case 0xD1: this._state.regs.de.word = this.POP(this._state.regs.de.word); break; // POP D
+      case 0xE1: this._state.regs.hl.word = this.POP(this._state.regs.hl.word); break; // POP H
+      case 0xF1: this._state.regs.af.word = this.POP(this._state.regs.af.word); break; // POP PSW
 
       case 0x87: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.af.a, false); break; // ADD A
       case 0x80: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.bc.h, false); break; // ADD B
@@ -561,12 +573,12 @@ export default class CPU
       case 0x3B: this.DCX(this._state.regs.sp); break; // DCX SP
 
       case 0x27: this.DAA(); break; // DAA
-      case 0x2F: this._state.regs.af.a = ~this._state.regs.af.a; break; // CMA
+      case 0x2F: this._state.regs.af.a = (~this._state.regs.af.a) & 0xFF; break; // CMA
       case 0x37: this._state.regs.af.c = true; break; // STC
       case 0x3F: this._state.regs.af.c = !this._state.regs.af.c; break; // CMC
 
-      case 0x07: this.RLC(); break; // RLC (rotate left)
-      case 0x0F: this.RRC(); break; // RRC (rotate right)
+      case 0x07: this.RLC(); break; // RLC
+      case 0x0F: this.RRC(); break; // RRC
       case 0x17: this.RAL(); break; // RAL
       case 0x1F: this.RAR(); break; // RAR
 
@@ -673,13 +685,13 @@ export default class CPU
 
 
     default:
-      console.log("Handling undocumented instruction. Opcode: {}", this._state.regs.ir);
+      console.log("Handling undocumented instruction. Opcode: {}", this._state.regs.ir.v);
       throw new Error("Exit: UNRECOGNIZED_CPU_INSTR");
       break;
     }
 
     this._state.ints.mc++;
-    this._state.ints.mc %= CPU.M_CYCLES[this._state.regs.ir];
+    this._state.ints.mc %= CPU.M_CYCLES[this._state.regs.ir.v];
   }
 
 
@@ -693,8 +705,8 @@ export default class CPU
   // _byteNum is the instruction number of byte (0, 2)
   ReadInstrMovePC(byteNum: number): number
   {
-    let opcode: number = this.memory?.CpuReadInstr(this._state.regs.pc.pair, AddrSpace.RAM, byteNum) ?? 0x00;
-    this._state.regs.pc.pair++;
+    let opcode: number = this.memory?.CpuReadInstr(this._state.regs.pc.word, AddrSpace.RAM, byteNum) ?? 0x00;
+    this._state.regs.pc.word++;
     return opcode;
   }
 
@@ -786,10 +798,10 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.tmp = regSrc;
+      this._state.regs.tmp.v = regSrc;
       return regDest;
     default:
-      return this._state.regs.tmp;
+      return this._state.regs.tmp.v;
     }
   }
 
@@ -807,10 +819,10 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.tmp = sss;
+      this._state.regs.tmp.v = sss;
       return;
     case 1:
-      this.WriteByte(this._state.regs.hl.pair, this._state.regs.tmp, AddrSpace.RAM, 0);
+      this.WriteByte(this._state.regs.hl.word, this._state.regs.tmp.v, AddrSpace.RAM, 0);
       return;
     }
   }
@@ -831,10 +843,10 @@ export default class CPU
     case 0:
       return;
     case 1:
-      this._state.regs.tmp = this.ReadInstrMovePC(1);
+      this._state.regs.tmp.v = this.ReadInstrMovePC(1);
       return;
     case 2:
-      this.WriteByte(this._state.regs.hl.pair, this._state.regs.tmp, AddrSpace.RAM, 0);
+      this.WriteByte(this._state.regs.hl.word, this._state.regs.tmp.v, AddrSpace.RAM, 0);
       return;
     }
   }
@@ -851,7 +863,7 @@ export default class CPU
       this._state.regs.wz.h = this.ReadInstrMovePC(2);
       return;
     case 3:
-      this._state.regs.af.a = this.ReadByte(this._state.regs.wz.pair);
+      this._state.regs.af.a = this.ReadByte(this._state.regs.wz.word);
       return;
     }
   }
@@ -868,7 +880,7 @@ export default class CPU
       this._state.regs.wz.h = this.ReadInstrMovePC(2);
       return;
     case 3:
-      this.WriteByte(this._state.regs.wz.pair, this._state.regs.af.a, AddrSpace.RAM, 0);
+      this.WriteByte(this._state.regs.wz.word, this._state.regs.af.a, AddrSpace.RAM, 0);
       return;
     }
   }
@@ -910,11 +922,11 @@ export default class CPU
       this._state.regs.wz.h = this.ReadInstrMovePC(2);
       return;
     case 3:
-      this._state.regs.hl.l = this.ReadByte(this._state.regs.wz.pair, AddrSpace.RAM, 0);
-      this._state.regs.wz.pair++;
+      this._state.regs.hl.l = this.ReadByte(this._state.regs.wz.word, AddrSpace.RAM, 0);
+      this._state.regs.wz.word++;
       return;
     case 4:
-      this._state.regs.hl.h = this.ReadByte(this._state.regs.wz.pair, AddrSpace.RAM, 1);
+      this._state.regs.hl.h = this.ReadByte(this._state.regs.wz.word, AddrSpace.RAM, 1);
       return;
     }
   }
@@ -931,11 +943,11 @@ export default class CPU
       this._state.regs.wz.h = this.ReadInstrMovePC(2);
       return;
     case 3:
-      this.WriteByte(this._state.regs.wz.pair, this._state.regs.hl.l, AddrSpace.RAM, 0);
-      this._state.regs.wz.pair++;
+      this.WriteByte(this._state.regs.wz.word, this._state.regs.hl.l, AddrSpace.RAM, 0);
+      this._state.regs.wz.word++;
       return;
     case 4:
-      this.WriteByte(this._state.regs.wz.pair, this._state.regs.hl.h, AddrSpace.RAM, 1);
+      this.WriteByte(this._state.regs.wz.word, this._state.regs.hl.h, AddrSpace.RAM, 1);
       return;
     }
   }
@@ -946,20 +958,20 @@ export default class CPU
     case 0:
       return;
     case 1:
-      this._state.regs.sp.pair = this._state.regs.hl.pair;
+      this._state.regs.sp.word = this._state.regs.hl.word;
       return;
     }
   }
 
   private XCHG()
   {
-    this._state.regs.tmp = this._state.regs.de.h;
+    this._state.regs.tmp.v = this._state.regs.de.h;
     this._state.regs.de.h = this._state.regs.hl.h;
-    this._state.regs.hl.h = this._state.regs.tmp;
+    this._state.regs.hl.h = this._state.regs.tmp.v;
 
-    this._state.regs.tmp = this._state.regs.de.l;
+    this._state.regs.tmp.v = this._state.regs.de.l;
     this._state.regs.de.l = this._state.regs.hl.l;
-    this._state.regs.hl.l = this._state.regs.tmp;
+    this._state.regs.hl.l = this._state.regs.tmp.v;
   }
 
   private XTHL()
@@ -968,19 +980,19 @@ export default class CPU
     case 0:
       return;
     case 1:
-      this._state.regs.wz.l = this.ReadByte(this._state.regs.sp.pair, AddrSpace.STACK, 0);
+      this._state.regs.wz.l = this.ReadByte(this._state.regs.sp.word, AddrSpace.STACK, 0);
       return;
     case 2:
-      this._state.regs.wz.h = this.ReadByte(this._state.regs.sp.pair + 1, AddrSpace.STACK, 1);
+      this._state.regs.wz.h = this.ReadByte(this._state.regs.sp.word + 1, AddrSpace.STACK, 1);
       return;
     case 3:
-      this.WriteByte(this._state.regs.sp.pair, this._state.regs.hl.l, AddrSpace.STACK, 1);
+      this.WriteByte(this._state.regs.sp.word, this._state.regs.hl.l, AddrSpace.STACK, 1);
       return;
     case 4:
-      this.WriteByte(this._state.regs.sp.pair + 1, this._state.regs.hl.h, AddrSpace.STACK, 0);
+      this.WriteByte(this._state.regs.sp.word + 1, this._state.regs.hl.h, AddrSpace.STACK, 0);
       return;
     case 5:
-      this._state.regs.hl.pair = this._state.regs.wz.pair;
+      this._state.regs.hl.word = this._state.regs.wz.word;
       return;
     }
   }
@@ -989,16 +1001,16 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.sp.pair--;
+      this._state.regs.sp.word--;
       return;
     case 1:
-      this.WriteByte(this._state.regs.sp.pair, hb, AddrSpace.STACK, 0);
+      this.WriteByte(this._state.regs.sp.word, hb, AddrSpace.STACK, 0);
       return;
     case 2:
-      this._state.regs.sp.pair--;
+      this._state.regs.sp.word--;
       return;
     case 3:
-      this.WriteByte(this._state.regs.sp.pair, lb, AddrSpace.STACK, 1);
+      this.WriteByte(this._state.regs.sp.word, lb, AddrSpace.STACK, 1);
       return;
     }
   }
@@ -1011,10 +1023,10 @@ export default class CPU
     case 1:
       return regPair;
     default:
-      let regL: number = this.ReadByte(this._state.regs.sp.pair, AddrSpace.STACK, 0);
-      this._state.regs.sp.pair++;
-      let regH: number = this.ReadByte(this._state.regs.sp.pair, AddrSpace.STACK, 1);
-      this._state.regs.sp.pair++;
+      let regL: number = this.ReadByte(this._state.regs.sp.word, AddrSpace.STACK, 0);
+      this._state.regs.sp.word++;
+      let regH: number = this.ReadByte(this._state.regs.sp.word, AddrSpace.STACK, 1);
+      this._state.regs.sp.word++;
       return (regH << 8) | regL;
     }
   }
@@ -1034,11 +1046,11 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1:
-      this._state.regs.tmp = this.ReadByte(this._state.regs.hl.pair);
-      this._state.regs.af.a = this.ADD(this._state.regs.act, this._state.regs.tmp, cy);
+      this._state.regs.tmp.v = this.ReadByte(this._state.regs.hl.word);
+      this._state.regs.af.a = this.ADD(this._state.regs.act.v, this._state.regs.tmp.v, cy);
       return;
     }
   }
@@ -1047,11 +1059,11 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1:
-      this._state.regs.tmp = this.ReadInstrMovePC(1);
-      this._state.regs.af.a = this.ADD(this._state.regs.act, this._state.regs.tmp, cy);
+      this._state.regs.tmp.v = this.ReadInstrMovePC(1);
+      this._state.regs.af.a = this.ADD(this._state.regs.act.v, this._state.regs.tmp.v, cy);
       return;
     }
   }
@@ -1069,11 +1081,11 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1:
-      this._state.regs.tmp = this.ReadByte(this._state.regs.hl.pair);
-      this._state.regs.af.a = this.SUB(this._state.regs.act, this._state.regs.tmp, cy);
+      this._state.regs.tmp.v = this.ReadByte(this._state.regs.hl.word);
+      this._state.regs.af.a = this.SUB(this._state.regs.act.v, this._state.regs.tmp.v, cy);
       return;
     }
   }
@@ -1082,11 +1094,11 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1:
-      this._state.regs.tmp = this.ReadInstrMovePC(1);
-      this._state.regs.af.a = this.SUB(this._state.regs.act, this._state.regs.tmp, cy);
+      this._state.regs.tmp.v = this.ReadInstrMovePC(1);
+      this._state.regs.af.a = this.SUB(this._state.regs.act.v, this._state.regs.tmp.v, cy);
       return;
     }
   }
@@ -1097,17 +1109,17 @@ export default class CPU
     case 0:
       return;
     case 1: {
-        this._state.regs.act = regPair.l;
-        this._state.regs.tmp = this._state.regs.hl.l;
-        const res: number = this._state.regs.act + this._state.regs.tmp;
+        this._state.regs.act.v = regPair.l;
+        this._state.regs.tmp.v = this._state.regs.hl.l;
+        const res: number = this._state.regs.act.v + this._state.regs.tmp.v;
         this._state.regs.af.c = (res & 0x100) !== 0;
         this._state.regs.hl.l = res & 0xFF;
         return;
       }
     case 2: {
-        this._state.regs.act = regPair.h;
-        this._state.regs.tmp = this._state.regs.hl.h;
-        const result: number = this._state.regs.act + this._state.regs.tmp + (this._state.regs.af.c ? 1 : 0);
+        this._state.regs.act.v = regPair.h;
+        this._state.regs.tmp.v = this._state.regs.hl.h;
+        const result: number = this._state.regs.act.v + this._state.regs.tmp.v + (this._state.regs.af.c ? 1 : 0);
         this._state.regs.af.c = (result & 0x100) !== 0;
         this._state.regs.hl.h = result & 0xFF;
         return;
@@ -1119,13 +1131,13 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.tmp = regDest;
-      this._state.regs.tmp++;
-      this._state.regs.af.ac = (this._state.regs.tmp & 0xF) == 0;
-      this.SetZSP(this._state.regs.tmp);
+      this._state.regs.tmp.v = regDest;
+      this._state.regs.tmp.v++;
+      this._state.regs.af.ac = (this._state.regs.tmp.v & 0xF) == 0;
+      this.SetZSP(this._state.regs.tmp.v);
       return regDest;
     default:
-      return this._state.regs.tmp;
+      return this._state.regs.tmp.v;
     }
   }
 
@@ -1135,13 +1147,13 @@ export default class CPU
     case 0:
       return;
     case 1:
-      this._state.regs.tmp = this.ReadByte(this._state.regs.hl.pair);
-      this._state.regs.tmp++;
-      this._state.regs.af.ac = (this._state.regs.tmp & 0xF) == 0;
-      this.SetZSP(this._state.regs.tmp);
+      this._state.regs.tmp.v = this.ReadByte(this._state.regs.hl.word);
+      this._state.regs.tmp.v++;
+      this._state.regs.af.ac = (this._state.regs.tmp.v & 0xF) == 0;
+      this.SetZSP(this._state.regs.tmp.v);
       return;
     case 2:
-      this.WriteByte(this._state.regs.hl.pair, this._state.regs.tmp, AddrSpace.RAM, 0);
+      this.WriteByte(this._state.regs.hl.word, this._state.regs.tmp.v, AddrSpace.RAM, 0);
       return;
     }
   }
@@ -1150,13 +1162,13 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.tmp = regDest;
-      this._state.regs.tmp--;
-      this._state.regs.af.ac = !((this._state.regs.tmp & 0xF) == 0xF);
-      this.SetZSP(this._state.regs.tmp);
+      this._state.regs.tmp.v = regDest;
+      this._state.regs.tmp.v--;
+      this._state.regs.af.ac = !((this._state.regs.tmp.v & 0xF) == 0xF);
+      this.SetZSP(this._state.regs.tmp.v);
       return regDest;
     default:
-      return this._state.regs.tmp;
+      return this._state.regs.tmp.v;
     }
   }
 
@@ -1166,13 +1178,13 @@ export default class CPU
     case 0:
       return;
     case 1:
-      this._state.regs.tmp = this.ReadByte(this._state.regs.hl.pair);
-      this._state.regs.tmp--;
-      this._state.regs.af.ac = !((this._state.regs.tmp & 0xF) == 0xF);
-      this.SetZSP(this._state.regs.tmp);
+      this._state.regs.tmp.v = this.ReadByte(this._state.regs.hl.word);
+      this._state.regs.tmp.v--;
+      this._state.regs.af.ac = !((this._state.regs.tmp.v & 0xF) == 0xF);
+      this.SetZSP(this._state.regs.tmp.v);
       return;
     case 2:
-      this.WriteByte(this._state.regs.hl.pair, this._state.regs.tmp, AddrSpace.RAM, 0);
+      this.WriteByte(this._state.regs.hl.word, this._state.regs.tmp.v, AddrSpace.RAM, 0);
       return;
     }
   }
@@ -1181,10 +1193,10 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.wz.pair = (regPair.pair + 1) & 0xFFFF;
+      this._state.regs.wz.word = (regPair.word + 1) & 0xFFFF;
       return;
     case 1:
-      regPair.pair = this._state.regs.wz.pair;
+      regPair.word = this._state.regs.wz.word;
       return;
     }
   }
@@ -1193,10 +1205,10 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.wz.pair = (regPair.pair - 1) & 0xFFFF;
+      this._state.regs.wz.word = (regPair.word - 1) & 0xFFFF;
       return;
     case 1:
-      regPair.pair = this._state.regs.wz.pair;
+      regPair.word = this._state.regs.wz.word;
       return;
     }
   }
@@ -1229,11 +1241,11 @@ export default class CPU
 
   private ANA(sss: number)
   {
-    this._state.regs.act = this._state.regs.af.a;
-    this._state.regs.tmp = sss;
-    this._state.regs.af.a = this._state.regs.act & this._state.regs.tmp;
+    this._state.regs.act.v = this._state.regs.af.a;
+    this._state.regs.tmp.v = sss;
+    this._state.regs.af.a = this._state.regs.act.v & this._state.regs.tmp.v;
     this._state.regs.af.c = false;
-    this._state.regs.af.ac = ((this._state.regs.act | this._state.regs.tmp) & 0x08) != 0;
+    this._state.regs.af.ac = ((this._state.regs.act.v | this._state.regs.tmp.v) & 0x08) != 0;
     this.SetZSP(this._state.regs.af.a);
   }
 
@@ -1241,13 +1253,13 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1:
-      this._state.regs.tmp = this.ReadByte(this._state.regs.hl.pair);
-      this._state.regs.af.a = this._state.regs.act & this._state.regs.tmp;
+      this._state.regs.tmp.v = this.ReadByte(this._state.regs.hl.word);
+      this._state.regs.af.a = this._state.regs.act.v & this._state.regs.tmp.v;
       this._state.regs.af.c = false;
-      this._state.regs.af.ac = ((this._state.regs.act | this._state.regs.tmp) & 0x08) != 0;
+      this._state.regs.af.ac = ((this._state.regs.act.v | this._state.regs.tmp.v) & 0x08) != 0;
       this.SetZSP(this._state.regs.af.a);
       return;
     }
@@ -1257,13 +1269,13 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1:
-      this._state.regs.tmp = this.ReadInstrMovePC(1);
-      this._state.regs.af.a = this._state.regs.act & this._state.regs.tmp;
+      this._state.regs.tmp.v = this.ReadInstrMovePC(1);
+      this._state.regs.af.a = this._state.regs.act.v & this._state.regs.tmp.v;
       this._state.regs.af.c = false;
-      this._state.regs.af.ac = ((this._state.regs.act | this._state.regs.tmp) & 0x08) != 0;
+      this._state.regs.af.ac = ((this._state.regs.act.v | this._state.regs.tmp.v) & 0x08) != 0;
       this.SetZSP(this._state.regs.af.a);
       return;
     }
@@ -1273,9 +1285,9 @@ export default class CPU
   // result in register this._state.regs.af.a
   private XRA(sss: number)
   {
-    this._state.regs.act = this._state.regs.af.a;
-    this._state.regs.tmp = sss;
-    this._state.regs.af.a = this._state.regs.act ^ this._state.regs.tmp;
+    this._state.regs.act.v = this._state.regs.af.a;
+    this._state.regs.tmp.v = sss;
+    this._state.regs.af.a = this._state.regs.act.v ^ this._state.regs.tmp.v;
     this._state.regs.af.c = false;
     this._state.regs.af.ac = false;
     this.SetZSP(this._state.regs.af.a);
@@ -1285,11 +1297,11 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1:
-      this._state.regs.tmp = this.ReadByte(this._state.regs.hl.pair);
-      this._state.regs.af.a = this._state.regs.act ^ this._state.regs.tmp;
+      this._state.regs.tmp.v = this.ReadByte(this._state.regs.hl.word);
+      this._state.regs.af.a = this._state.regs.act.v ^ this._state.regs.tmp.v;
       this._state.regs.af.c = false;
       this._state.regs.af.ac = false;
       this.SetZSP(this._state.regs.af.a);
@@ -1301,11 +1313,11 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1:
-      this._state.regs.tmp = this.ReadInstrMovePC(1);
-      this._state.regs.af.a = this._state.regs.act ^ this._state.regs.tmp;
+      this._state.regs.tmp.v = this.ReadInstrMovePC(1);
+      this._state.regs.af.a = this._state.regs.act.v ^ this._state.regs.tmp.v;
       this._state.regs.af.c = false;
       this._state.regs.af.ac = false;
       this.SetZSP(this._state.regs.af.a);
@@ -1317,9 +1329,9 @@ export default class CPU
   // result in register this._state.regs.af.a
   private ORA(sss: number)
   {
-    this._state.regs.act = this._state.regs.af.a;
-    this._state.regs.tmp = sss;
-    this._state.regs.af.a = this._state.regs.act | this._state.regs.tmp;
+    this._state.regs.act.v = this._state.regs.af.a;
+    this._state.regs.tmp.v = sss;
+    this._state.regs.af.a = this._state.regs.act.v | this._state.regs.tmp.v;
     this._state.regs.af.c = false;
     this._state.regs.af.ac = false;
     this.SetZSP(this._state.regs.af.a);
@@ -1329,11 +1341,11 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1:
-      this._state.regs.tmp = this.ReadByte(this._state.regs.hl.pair);
-      this._state.regs.af.a = this._state.regs.act | this._state.regs.tmp;
+      this._state.regs.tmp.v = this.ReadByte(this._state.regs.hl.word);
+      this._state.regs.af.a = this._state.regs.act.v | this._state.regs.tmp.v;
       this._state.regs.af.c = false;
       this._state.regs.af.ac = false;
       this.SetZSP(this._state.regs.af.a);
@@ -1345,11 +1357,11 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1:
-      this._state.regs.tmp = this.ReadInstrMovePC(1);
-      this._state.regs.af.a = this._state.regs.act | this._state.regs.tmp;
+      this._state.regs.tmp.v = this.ReadInstrMovePC(1);
+      this._state.regs.af.a = this._state.regs.act.v | this._state.regs.tmp.v;
       this._state.regs.af.c = false;
       this._state.regs.af.ac = false;
       this.SetZSP(this._state.regs.af.a);
@@ -1367,11 +1379,11 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1: {
-        this._state.regs.tmp = this.ReadByte(this._state.regs.hl.pair);
-        this.SUB(this._state.regs.act, this._state.regs.tmp, false);
+        this._state.regs.tmp.v = this.ReadByte(this._state.regs.hl.word);
+        this.SUB(this._state.regs.act.v, this._state.regs.tmp.v, false);
         return;
       }
     }
@@ -1381,11 +1393,11 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.act = this._state.regs.af.a;
+      this._state.regs.act.v = this._state.regs.af.a;
       return;
     case 1:
-      this._state.regs.tmp = this.ReadInstrMovePC(1);
-      this.SUB(this._state.regs.act, this._state.regs.tmp, false);
+      this._state.regs.tmp.v = this.ReadInstrMovePC(1);
+      this.SUB(this._state.regs.act.v, this._state.regs.tmp.v, false);
       return;
     }
   }
@@ -1402,7 +1414,7 @@ export default class CPU
       this._state.regs.wz.h = this.ReadInstrMovePC(2);
       if (condition)
       {
-        this._state.regs.pc.pair = this._state.regs.wz.pair;
+        this._state.regs.pc.word = this._state.regs.wz.word;
       }
       return;
     }
@@ -1414,7 +1426,7 @@ export default class CPU
     case 0:
       return;
     case 1:
-      this._state.regs.pc.pair = this._state.regs.hl.pair;
+      this._state.regs.pc.word = this._state.regs.hl.word;
       return;
     }
   }
@@ -1424,7 +1436,7 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.sp.pair -= condition ? 1 : 0;
+      this._state.regs.sp.word -= condition ? 1 : 0;
       return;
     case 1:
       this._state.regs.wz.l = this.ReadInstrMovePC(1);
@@ -1434,8 +1446,8 @@ export default class CPU
       return;
     case 3:
       if (condition)	{
-        this.WriteByte(this._state.regs.sp.pair, this._state.regs.pc.h, AddrSpace.STACK, 0);
-        this._state.regs.sp.pair--;
+        this.WriteByte(this._state.regs.sp.word, this._state.regs.pc.h, AddrSpace.STACK, 0);
+        this._state.regs.sp.word--;
       }
       else {
         // end execution
@@ -1443,10 +1455,10 @@ export default class CPU
       }
       return;
     case 4:
-      this.WriteByte(this._state.regs.sp.pair, this._state.regs.pc.l, AddrSpace.STACK, 1);
+      this.WriteByte(this._state.regs.sp.word, this._state.regs.pc.l, AddrSpace.STACK, 1);
       return;
     case 5:
-      this._state.regs.pc.pair = this._state.regs.wz.pair;
+      this._state.regs.pc.word = this._state.regs.wz.word;
       return;
     }
   }
@@ -1456,19 +1468,19 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.sp.pair--;
+      this._state.regs.sp.word--;
       return;
     case 1:
-      this.WriteByte(this._state.regs.sp.pair, this._state.regs.pc.h, AddrSpace.STACK, 0);
-      this._state.regs.sp.pair--;
+      this.WriteByte(this._state.regs.sp.word, this._state.regs.pc.h, AddrSpace.STACK, 0);
+      this._state.regs.sp.word--;
       return;
     case 2:
       this._state.regs.wz.h = 0;
       this._state.regs.wz.l = arg << 3;
-      this.WriteByte(this._state.regs.sp.pair, this._state.regs.pc.l, AddrSpace.STACK, 1);
+      this.WriteByte(this._state.regs.sp.word, this._state.regs.pc.l, AddrSpace.STACK, 1);
       return;
     case 3:
-      this._state.regs.pc.pair = this._state.regs.wz.pair;
+      this._state.regs.pc.word = this._state.regs.wz.word;
       return;
     }
   }
@@ -1480,13 +1492,13 @@ export default class CPU
     case 0:
       return;
     case 1:
-      this._state.regs.wz.l = this.ReadByte(this._state.regs.sp.pair, AddrSpace.STACK, 0);
-      this._state.regs.sp.pair++;
+      this._state.regs.wz.l = this.ReadByte(this._state.regs.sp.word, AddrSpace.STACK, 0);
+      this._state.regs.sp.word++;
       return;
     case 2:
-      this._state.regs.wz.h = this.ReadByte(this._state.regs.sp.pair, AddrSpace.STACK, 1);
-      this._state.regs.sp.pair++;
-      this._state.regs.pc.pair = this._state.regs.wz.pair;
+      this._state.regs.wz.h = this.ReadByte(this._state.regs.sp.word, AddrSpace.STACK, 1);
+      this._state.regs.sp.word++;
+      this._state.regs.pc.word = this._state.regs.wz.word;
       return;
     }
   }
@@ -1501,13 +1513,13 @@ export default class CPU
       if (!condition) this._state.ints.mc = 3;
       return;
     case 2:
-      this._state.regs.wz.l = this.ReadByte(this._state.regs.sp.pair, AddrSpace.STACK, 0);
-      this._state.regs.sp.pair++;
+      this._state.regs.wz.l = this.ReadByte(this._state.regs.sp.word, AddrSpace.STACK, 0);
+      this._state.regs.sp.word++;
       return;
     case 3:
-      this._state.regs.wz.h = this.ReadByte(this._state.regs.sp.pair, AddrSpace.STACK, 1);
-      this._state.regs.sp.pair++;
-      this._state.regs.pc.pair = this._state.regs.wz.pair;
+      this._state.regs.wz.h = this.ReadByte(this._state.regs.sp.word, AddrSpace.STACK, 1);
+      this._state.regs.sp.word++;
+      this._state.regs.pc.word = this._state.regs.wz.word;
       return;
     }
   }
@@ -1546,7 +1558,7 @@ export default class CPU
   {
     switch (this._state.ints.mc) {
     case 0:
-      this._state.regs.pc.pair--;
+      this._state.regs.pc.word--;
       return;
     case 1:
       this.ReadInstrMovePC(0);
@@ -1554,7 +1566,7 @@ export default class CPU
       if (!this._state.ints.iff) {
         this._state.ints.hlta = true;
         this._state.ints.mc--;
-        this._state.regs.pc.pair--;
+        this._state.regs.pc.word--;
       }
       return;
 	  }

@@ -539,6 +539,7 @@ export class Display {
   get rasterLine(): number { return (this.state.update.framebufferIdx / FRAME_W) | 0; }; // '| 0' converts to int
   get rasterPixel(): number { return this.state.update.framebufferIdx % FRAME_W; };
 	get framebufferIdx(): number { return this.state.update.framebufferIdx; };
+  get scrollIdx(): number { return this.state.update.scrollIdx; };
 }
 
 export default Display;

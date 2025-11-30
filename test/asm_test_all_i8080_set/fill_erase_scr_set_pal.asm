@@ -3,7 +3,13 @@ OPCODE_RET = 0xC9
 
 .org 0x100
 		di
+		; Initialize registers to zero
 		lxi sp, 0x8000
+		lxi b, 0
+		lxi d, 0
+		lxi h, 0
+		push b
+		pop psw
 		mvi a, OPCODE_EI
 		sta 0x38
 		mvi a, OPCODE_RET
