@@ -162,6 +162,46 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(runDisposable);
 
+  const createProjectDisposable = vscode.commands.registerCommand('i8080.createProject', async () => {
+    if (!vscode.workspace.workspaceFolders || !vscode.workspace.workspaceFolders.length) {
+      vscode.window.showErrorMessage('Open a folder before creating a project.');
+      return;
+    }
+    const name = await vscode.window.showInputBox({
+      prompt: 'Project name',
+      placeHolder: 'MyVectorProject',
+      validateInput: (value) => value && value.trim().length > 0 ? undefined : 'Enter a project name'
+    });
+    if (!name) return;
+    const trimmed = name.trim();
+    const safeName = trimmed.replace(/[^A-Za-z0-9_-]+/g, '_') || 'vector_project';
+    const projectData = {
+      name: trimmed,
+      main: 'main.asm'
+    };
+    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const targetPath = path.join(workspaceRoot, `${safeName}.project.json`);
+    if (fs.existsSync(targetPath)) {
+      const overwrite = await vscode.window.showWarningMessage(
+        `${path.basename(targetPath)} already exists. Overwrite?`,
+        { modal: true },
+        'Overwrite'
+      );
+      if (overwrite !== 'Overwrite') return;
+    }
+    try {
+      fs.writeFileSync(targetPath, JSON.stringify(projectData, null, 4), 'utf8');
+      logOutput(`Devector: Created project file ${targetPath}`, true);
+      try {
+        const doc = await vscode.workspace.openTextDocument(targetPath);
+        await vscode.window.showTextDocument(doc);
+      } catch (_) {}
+    } catch (err) {
+      vscode.window.showErrorMessage('Failed to create project file: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  });
+  context.subscriptions.push(createProjectDisposable);
+
   // Register a debug configuration provider so the debugger is visible and
   // VS Code can present debug configurations and a F5 launch option.
   const dbgProvider: vscode.DebugConfigurationProvider = {

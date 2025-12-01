@@ -36,6 +36,7 @@
     "onCommand:i8080.pause",
     "onCommand:i8080.resume",
     "onCommand:i8080.runFrame",
+    "onCommand:i8080.createProject",
     "onDebug"
   ],
   "contributes": {
@@ -77,6 +78,10 @@
       {
         "command": "i8080.toggleBreakpoint",
         "title": "Toggle Breakpoint"
+      },
+      {
+        "command": "i8080.createProject",
+        "title": "Create i8080 Project"
       }
     ],
     "keybindings": [
