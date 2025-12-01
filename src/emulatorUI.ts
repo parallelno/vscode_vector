@@ -73,9 +73,12 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext)
     }, null, context.subscriptions
   );
 
-  // attach debugger
+  // attach debugger and sync breakpoints from the compiled token file, if available
   emu.hardware?.Request(HardwareReq.DEBUG_ATTACH, { data: true });
-  emu.hardware?.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr: 0x0100 });
+  const appliedBreakpoints = loadBreakpointsFromToken(romPath, emu.hardware, emuOutput);
+  if (appliedBreakpoints > 0) {
+    try { emuOutput.appendLine(`Loaded ${appliedBreakpoints} breakpoint(s) from token file.`); } catch (e) {}
+  }
 
   // expose pause/resume controls and a 'run N instructions' helper for external commands
   currentPanelController = {
@@ -323,4 +326,136 @@ function getWebviewContent() {
   </script>
 </body>
 </html>`;
+}
+
+function loadBreakpointsFromToken(romPath: string, hardware: Hardware | undefined | null, log?: vscode.OutputChannel): number {
+  if (!hardware || !romPath) return 0;
+  const tokenPath = deriveTokenPath(romPath);
+  if (!tokenPath || !fs.existsSync(tokenPath)) return 0;
+
+  let tokens: any;
+  try {
+    tokens = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
+  } catch (err) {
+    try { log?.appendLine(`Failed to parse token file ${tokenPath}: ${err}`); } catch (e) {}
+    return 0;
+  }
+
+  const desired = collectBreakpointAddresses(tokens);
+  if (!desired.size) return 0;
+
+  try { hardware.Request(HardwareReq.DEBUG_BREAKPOINT_DEL_ALL); } catch (e) {}
+  for (const [addr, meta] of desired) {
+    try { hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr }); } catch (e) {}
+    if (meta.enabled === false) {
+      try { hardware.Request(HardwareReq.DEBUG_BREAKPOINT_DISABLE, { addr }); } catch (e) {}
+    }
+  }
+
+  try {
+    log?.appendLine(`Applied ${desired.size} breakpoint${desired.size === 1 ? '' : 's'} from ${path.basename(tokenPath)}`);
+  } catch (e) {}
+  return desired.size;
+}
+
+function deriveTokenPath(romPath: string): string {
+  if (!romPath) return '';
+  if (/\.[^/.]+$/.test(romPath)) return romPath.replace(/\.[^/.]+$/, '_.json');
+  return romPath + '_.json';
+}
+
+type BreakpointMeta = { enabled?: boolean };
+
+function collectBreakpointAddresses(tokens: any): Map<number, BreakpointMeta> {
+  const resolved = new Map<number, BreakpointMeta>();
+  if (!tokens || typeof tokens !== 'object') return resolved;
+
+  const labelAddrByName = new Map<string, number>();
+  const labelAddrByFileLine = new Map<string, number>();
+
+  if (tokens.labels && typeof tokens.labels === 'object') {
+    for (const [labelName, rawInfo] of Object.entries(tokens.labels)) {
+      const info = rawInfo as any;
+      const addr = parseAddressLike(info?.addr ?? info?.address);
+      if (addr === undefined) continue;
+      labelAddrByName.set(labelName, addr);
+      const srcBase = normalizeFileKey(typeof info?.src === 'string' ? info.src : undefined);
+      const lineNum = typeof info?.line === 'number' ? info.line : undefined;
+      if (srcBase && lineNum !== undefined) {
+        labelAddrByFileLine.set(formatFileLineKey(srcBase, lineNum), addr);
+      }
+    }
+  }
+
+  const registerBreakpoint = (addr: number | undefined, enabled: boolean | undefined) => {
+    if (addr === undefined) return;
+    const normalized = addr & 0xffff;
+    if (!resolved.has(normalized)) {
+      resolved.set(normalized, { enabled });
+      return;
+    }
+    if (enabled !== undefined) resolved.set(normalized, { enabled });
+  };
+
+  const resolveEnabled = (entry: any): boolean | undefined => {
+    if (!entry || typeof entry !== 'object') return undefined;
+    if (typeof entry.enabled === 'boolean') return entry.enabled;
+    if (typeof entry.status === 'number') return entry.status !== 0;
+    return undefined;
+  };
+
+  const resolveAddress = (entry: any, fileKey?: string): number | undefined => {
+    if (!entry || typeof entry !== 'object') return parseAddressLike(entry);
+    const direct = parseAddressLike(entry.addr ?? entry.address);
+    if (direct !== undefined) return direct;
+    if (typeof entry.label === 'string') {
+      const byLabel = labelAddrByName.get(entry.label);
+      if (byLabel !== undefined) return byLabel;
+    }
+    if (fileKey && typeof entry.line === 'number') {
+      const fromLine = labelAddrByFileLine.get(formatFileLineKey(fileKey, entry.line));
+      if (fromLine !== undefined) return fromLine;
+    }
+    return undefined;
+  };
+
+  const processEntry = (entry: any, fileKey?: string) => {
+    const normalizedFile = fileKey ? normalizeFileKey(fileKey) : undefined;
+    const addr = resolveAddress(entry, normalizedFile);
+    if (addr === undefined) return;
+    registerBreakpoint(addr, resolveEnabled(entry));
+  };
+
+  const bpData = tokens.breakpoints;
+  if (Array.isArray(bpData)) {
+    for (const entry of bpData) processEntry(entry);
+  } else if (bpData && typeof bpData === 'object') {
+    for (const [fileKey, entries] of Object.entries(bpData)) {
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) processEntry(entry, fileKey);
+    }
+  }
+
+  return resolved;
+}
+
+function parseAddressLike(value: any): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value & 0xffff;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (/^0x[0-9a-fA-F]+$/.test(trimmed)) return parseInt(trimmed.slice(2), 16) & 0xffff;
+    if (/^\$[0-9a-fA-F]+$/.test(trimmed)) return parseInt(trimmed.slice(1), 16) & 0xffff;
+    if (/^[0-9]+$/.test(trimmed)) return parseInt(trimmed, 10) & 0xffff;
+  }
+  return undefined;
+}
+
+function normalizeFileKey(filePath?: string): string | undefined {
+  if (!filePath) return undefined;
+  return path.basename(filePath).toLowerCase();
+}
+
+function formatFileLineKey(fileKey: string, line: number): string {
+  return `${fileKey}#${line}`;
 }
