@@ -231,7 +231,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(toggleBp);
 
-  // Intercept built-in toggle command to handle gutter clicks that toggle breakpoints
+// Intercept built-in toggle command to handle gutter clicks that toggle breakpoints
   async function toggleBreakpointFromArg(arg: any) {
     const outCh = vscode.window.createOutputChannel('Devector');
     try {
@@ -239,46 +239,133 @@ export function activate(context: vscode.ExtensionContext) {
       let uri: vscode.Uri | undefined;
       let line: number | undefined;
 
-      // Common shapes the editor may pass as arg
-      if (arg) {
-        if (arg.uri) {
-          if (typeof arg.uri === 'string') uri = vscode.Uri.parse(arg.uri);
-          else uri = arg.uri as vscode.Uri;
+      const parseUriString = (value: string): vscode.Uri | undefined => {
+        if (!value) return undefined;
+        const looksLikePath = path.isAbsolute(value) || /^[a-zA-Z]:[\/]/.test(value) || value.startsWith('\\');
+        if (looksLikePath) {
+          try { return vscode.Uri.file(value); } catch (_) { return undefined; }
         }
-        if (!uri && arg.location && arg.location.uri) {
-          if (typeof arg.location.uri === 'string') uri = vscode.Uri.parse(arg.location.uri);
-          else uri = arg.location.uri as vscode.Uri;
+        try { return vscode.Uri.parse(value); } catch (_) { return undefined; }
+      };
+
+      const setUri = (candidate: any) => {
+        if (!candidate || uri) return;
+        try {
+          if (candidate instanceof vscode.Uri) {
+            uri = candidate;
+            return;
+          }
+        } catch (_) {}
+        if (typeof candidate === 'string') {
+          const parsed = parseUriString(candidate);
+          if (parsed) { uri = parsed; return; }
         }
-        if (!uri && arg.source && arg.source.path) {
-          uri = vscode.Uri.file(arg.source.path);
+        if (candidate && typeof candidate === 'object') {
+          if ((candidate as any).fsPath || (candidate as any).path) {
+            const rawPath = (candidate as any).fsPath || (candidate as any).path;
+            const parsed = parseUriString(rawPath);
+            if (parsed) { uri = parsed; return; }
+          }
+          if ((candidate as any).scheme && (candidate as any).path !== undefined && (candidate as any).authority !== undefined) {
+            // looks like a raw Uri-like object
+            const scheme = (candidate as any).scheme;
+            if (scheme === 'file') {
+              const parsed = parseUriString((candidate as any).path as string);
+              if (parsed) { uri = parsed; return; }
+            } else {
+              try { uri = vscode.Uri.parse(`${scheme}://${(candidate as any).authority || ''}${(candidate as any).path}`); return; } catch (_) {}
+            }
+          }
         }
-        if (!uri && arg.resource) {
-          if (typeof arg.resource === 'string') uri = vscode.Uri.parse(arg.resource);
-          else uri = arg.resource as vscode.Uri;
+      };
+
+      const setLine = (candidate: any, opts: { oneBased?: boolean } = {}) => {
+        if (candidate === undefined || candidate === null) return;
+        if (typeof candidate !== 'number' || isNaN(candidate)) return;
+        const normalized = opts.oneBased ? candidate - 1 : candidate;
+        if (line === undefined) line = normalized;
+      };
+
+      const tryFromRange = (range: any) => {
+        if (!range) return;
+        if (typeof range.start?.line === 'number') {
+          setLine(range.start.line);
+          if (range.start.uri) setUri(range.start.uri);
+          return;
         }
-        // lines
-        if (typeof arg.line === 'number') {
-          line = (arg.line <= 0) ? arg.line : (arg.line - 1);
+        if (typeof range.startLine === 'number') {
+          setLine(range.startLine);
+          return;
         }
-        if (arg.location && arg.location.range) {
-          const r = arg.location.range;
-          if (r.start) line = r.start.line;
-          else if (typeof r.startLine === 'number') line = r.startLine - 1;
+        if (typeof range.startLineNumber === 'number') {
+          setLine(range.startLineNumber, { oneBased: true });
         }
-        if (!line && arg.range && arg.range.start) line = arg.range.start.line;
-      }
-      if (!uri) {
+      };
+
+      const tryFromEditor = (editorLike: any) => {
+        if (!editorLike) return;
+        const doc = editorLike.document;
+        if (doc && doc.uri) setUri(doc.uri);
+        const sel = editorLike.selection || (Array.isArray(editorLike.selections) ? editorLike.selections[0] : undefined);
+        if (sel) {
+          if (typeof sel.active?.line === 'number') setLine(sel.active.line);
+          else if (typeof sel.start?.line === 'number') setLine(sel.start.line);
+        }
+      };
+
+      const processCandidate = (candidate: any) => {
+        if (!candidate) return;
+        if (Array.isArray(candidate)) {
+          for (const item of candidate) processCandidate(item);
+          return;
+        }
+        setUri(candidate);
+        if ((candidate as any).uri) setUri((candidate as any).uri);
+        if ((candidate as any).location) {
+          setUri((candidate as any).location.uri);
+          tryFromRange((candidate as any).location.range);
+        }
+        if ((candidate as any).resource) setUri((candidate as any).resource);
+        if ((candidate as any).source?.path) setUri((candidate as any).source.path);
+        if ((candidate as any).document) {
+          setUri((candidate as any).document.uri);
+          tryFromEditor(candidate);
+        }
+        if ((candidate as any).textEditor) tryFromEditor((candidate as any).textEditor);
+        if ((candidate as any).editor) tryFromEditor((candidate as any).editor);
+        if ((candidate as any).range) tryFromRange((candidate as any).range);
+        if ((candidate as any).selection) {
+          const sel = (candidate as any).selection;
+          if (typeof sel.active?.line === 'number') setLine(sel.active.line);
+          else if (typeof sel.start?.line === 'number') setLine(sel.start.line);
+        }
+        if ((candidate as any).position && typeof (candidate as any).position.line === 'number') {
+          setLine((candidate as any).position.line);
+        }
+        if (typeof (candidate as any).lineNumber === 'number') setLine((candidate as any).lineNumber, { oneBased: true });
+        if (typeof (candidate as any).startLineNumber === 'number') setLine((candidate as any).startLineNumber, { oneBased: true });
+        if (typeof (candidate as any).line === 'number') setLine((candidate as any).line);
+      };
+
+      processCandidate(arg);
+
+      // Fallback: Use Active Editor Cursor
+      if (!uri || line === undefined) {
         const ed = vscode.window.activeTextEditor;
-        if (ed) uri = ed.document.uri;
+        if (ed) {
+          if (!uri) uri = ed.document.uri;
+          if (line === undefined) line = ed.selection.active.line;
+        }
       }
-      if (line === undefined || line === null) {
-        const ed = vscode.window.activeTextEditor;
-        if (ed) line = ed.selection.active.line;
-      }
+
       if (!uri || line === undefined || line === null) {
-        outCh.appendLine('Devector: toggleBreakpoint override - could not determine uri/line from args: ' + JSON.stringify(arg));
+        outCh.appendLine('Devector: toggleBreakpoint override - missing uri/line for toggle');
         return;
       }
+
+      // ensure integer and non-negative
+      line = Math.max(0, Math.floor(line as number));
+
       const existing = vscode.debug.breakpoints.filter((b) => {
         if (!(b instanceof vscode.SourceBreakpoint)) return false;
         const sb = b as vscode.SourceBreakpoint;
@@ -286,6 +373,7 @@ export function activate(context: vscode.ExtensionContext) {
         const sbPath = sb.location.uri.fsPath;
         return (sbPath === uri!.fsPath) && (sb.location.range.start.line === line);
       }) as vscode.SourceBreakpoint[];
+
       if (existing.length) {
         vscode.debug.removeBreakpoints(existing);
         outCh.appendLine(`Devector: Removed breakpoint at ${uri.fsPath}:${line+1}`);
@@ -299,6 +387,7 @@ export function activate(context: vscode.ExtensionContext) {
       outCh.appendLine('Devector: toggleBreakpoint override failed: ' + (e && (e as any).message ? (e as any).message : String(e)));
     }
   }
+
   const overrideBuiltinToggle = vscode.commands.registerCommand('editor.debug.action.toggleBreakpoint', (arg: any) => toggleBreakpointFromArg(arg));
   context.subscriptions.push(overrideBuiltinToggle);
   // Provide additional registrations for common variant commands the editor may use
