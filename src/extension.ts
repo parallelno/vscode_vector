@@ -14,6 +14,16 @@ export function activate(context: vscode.ExtensionContext) {
     } catch (e) { /* ignore output channel errors */ }
   };
 
+  const readMainTemplate = (): string => {
+    const templatePath = path.join(context.extensionPath, 'templates', 'main.asm');
+    try {
+      return fs.readFileSync(templatePath, 'utf8');
+    } catch (err) {
+      logOutput('Devector: Failed to read main.asm template, using fallback stub.', true);
+      return '; main.asm template missing. Please recreate templates/main.asm.';
+    }
+  };
+
   // gather included files (resolve .include recursively)
   function findIncludedFiles(srcPath: string, content: string, out = new Set<string>(), depth = 0): Set<string> {
     if (!srcPath) return out;
@@ -181,6 +191,7 @@ export function activate(context: vscode.ExtensionContext) {
     };
     const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const targetPath = path.join(workspaceRoot, `${safeName}.project.json`);
+    const mainAsmPath = path.join(workspaceRoot, 'main.asm');
     if (fs.existsSync(targetPath)) {
       const overwrite = await vscode.window.showWarningMessage(
         `${path.basename(targetPath)} already exists. Overwrite?`,
@@ -190,6 +201,11 @@ export function activate(context: vscode.ExtensionContext) {
       if (overwrite !== 'Overwrite') return;
     }
     try {
+      if (!fs.existsSync(mainAsmPath)) {
+        const mainTemplate = readMainTemplate();
+        fs.writeFileSync(mainAsmPath, mainTemplate, 'utf8');
+        logOutput(`Devector: Created ${mainAsmPath} from template`, true);
+      }
       fs.writeFileSync(targetPath, JSON.stringify(projectData, null, 4), 'utf8');
       logOutput(`Devector: Created project file ${targetPath}`, true);
       try {
