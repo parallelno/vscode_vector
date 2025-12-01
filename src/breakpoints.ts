@@ -5,26 +5,26 @@ import { BpStatus } from './breakpoint';
 
 
 export default class Breakpoints {
-  breakpoints = new Map<number, Breakpoint>();
+  private _breakpoints = new Map<number, Breakpoint>();
   private _updates: number = 0;
 
   Add(bp: Breakpoint): void {
     this._updates++;
-    if (this.breakpoints.has(bp.addr)) {
-      let old_bp = this.breakpoints.get(bp.addr)!;
+    if (this._breakpoints.has(bp.addr)) {
+      let old_bp = this._breakpoints.get(bp.addr)!;
       old_bp.Update(bp);
     }
-    this.breakpoints.set(bp.addr, bp);
+    this._breakpoints.set(bp.addr, bp);
   }
 
   Del(addr: number): void {
-    if (this.breakpoints.delete(addr)) {
+    if (this._breakpoints.delete(addr)) {
       this._updates++;
     }
   }
 
   Check(cpuState: CpuState, memState: MemState): boolean {
-    let bp = this.breakpoints.get(cpuState.regs.pc.word)
+    let bp = this._breakpoints.get(cpuState.regs.pc.word)
     if (bp === undefined) return false;
 
     let status = bp.CheckStatus(cpuState, memState);
@@ -38,22 +38,22 @@ export default class Breakpoints {
   }
 
   Clear(): void {
-    this.breakpoints.clear();
+    this._breakpoints.clear();
     this._updates++;
   }
 
   GetStatus(addr: number): BpStatus{
-    return this.breakpoints.get(addr)?.status ?? BpStatus.DELETED;
+    return this._breakpoints.get(addr)?.status ?? BpStatus.DELETED;
   }
 
   SetStatus(addr: number, status: BpStatus){
     this._updates++;
-    let bp = this.breakpoints.get(addr);
+    let bp = this._breakpoints.get(addr);
     if (bp !== undefined) {
       bp.status = status;
       return;
     }
-    this.breakpoints.set(addr, new Breakpoint(addr));
+    this._breakpoints.set(addr, new Breakpoint(addr));
   }
 
   get updates (): number {

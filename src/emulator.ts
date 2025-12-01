@@ -4,6 +4,7 @@ import * as pathModule from 'path';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { ROM_LOAD_ADDR } from './memory';
+import Debugger from './debugger';
 
 export type SettingsType = { [key: string]: any };
 
@@ -13,7 +14,8 @@ export class Emulator {
   private readonly EXT_FDD: string = ".FDD";
   private readonly EXT_REC: string = ".REC";
 
-  _hardware?: Hardware;
+  private _hardware?: Hardware;
+  private _debugger?: Debugger;
 
   ramDiskClearAfterRestart = true;
   // TODO: add ramDiskDataPath to settings
@@ -38,6 +40,7 @@ export class Emulator {
     // TODO: load these from settings
     this.ramDiskClearAfterRestart = true;
     this._hardware = new Hardware(pathBootData, this.ramDiskDataPath ?? '', this.ramDiskClearAfterRestart);
+    this._debugger = new Debugger(this._hardware);
   }
 
   BeforeLoad(){
@@ -99,5 +102,6 @@ export class Emulator {
   }
 
   get hardware(): Hardware | undefined { return this._hardware; }
+  get debugger(): Debugger | undefined { return this._debugger; }
 
 }

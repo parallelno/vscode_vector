@@ -59,7 +59,7 @@ export class MemMapping {
 type GetGlobalAddrFuncType = (addr: number, addrSpace: AddrSpace) => number;
 
 export class Update {
-  mappings: MemMapping[] = new Array(RAM_DISK_MAX);
+  mappings: MemMapping[] = Array.from({length: RAM_DISK_MAX}, () => new MemMapping());
   // current active mapping state
   ramdiskIdx = 0;
 };
@@ -92,7 +92,13 @@ export class Memory {
   constructor(pathBootData: string, ramDiskDataPath: string, ramDiskClearAfterRestart: boolean) {
     if (pathBootData) {
       try {
-        this.rom = fs.readFileSync(pathBootData);
+        // check if file exists
+        if (fs.existsSync(pathBootData)) {
+          this.rom = fs.readFileSync(pathBootData);
+        }
+        else {
+          console.error(`ROM file not found: ${pathBootData}`);
+        }
       } catch (err) {
         console.error(`Failed to load ROM from ${pathBootData}:`, err);
         process.exit(1);

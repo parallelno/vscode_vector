@@ -83,8 +83,6 @@ export class Hardware
   // TODO:
   // 1. reload, reset, update the palette, and other non-hardware-initiated
   //    operations have to reset the playback history
-  // 2. navigation. show data as data blocks in the disasm. take the list from the watchpoints
-  // 3. aggregation of consts, labels, funcs with default names
   async Execution()
   {
     while (this.status != Status.EXIT)
@@ -150,7 +148,7 @@ export class Hardware
     }
   }
 
-  // Output true if the execution breaks
+  // Returns true if the execution breaks
   ExecuteInstruction(): boolean
   {
     // mem debug init
@@ -240,9 +238,16 @@ export class Hardware
 
     case HardwareReq.EXECUTE_FRAME_NO_BREAKS:
     {
-      this.ExecuteFrameNoBreaks();
+      this.ExecuteFrame();
       break;
     }
+
+    case HardwareReq.EXECUTE_FRAME:
+    {
+      this.ExecuteFrame(true);
+      break;
+    }
+
     case HardwareReq.GET_CC:
       out = {"cc": this.cpu?.cc };
       break;
@@ -722,11 +727,14 @@ export class Hardware
   }
 
 */
-  ExecuteFrameNoBreaks()
+  ExecuteFrame(breaks: boolean = false)
   {
     const frameNum: number = this._display?.frameNum ?? 0;
     do {
-      this.ExecuteInstruction();
+      if (this.ExecuteInstruction() && breaks){
+        this.Stop();
+        break;
+      };
     } while (this._display?.frameNum === frameNum);
   }
 /*

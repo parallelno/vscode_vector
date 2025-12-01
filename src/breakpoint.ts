@@ -57,7 +57,8 @@ export class Breakpoint {
     this.comment = newBp.comment;
   }
 
-  CheckStatus(cpuState: CpuState, memState: MemState): boolean {
+  CheckStatus(cpuState: CpuState, memState: MemState): boolean
+  {
     const mapping = memState.update.mappings[memState.update.ramdiskIdx];
     const pageIdx = 1 + mapping.pageRam + 4 * memState.update.ramdiskIdx;
 

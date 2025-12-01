@@ -200,7 +200,7 @@ export default class Debugger {
       break;
 
     case HardwareReq.DEBUG_BREAKPOINT_ADD: {
-      this.debugData.breakpoints.Add(reqData["data"]);
+      this.debugData.breakpoints.Add(new Breakpoint(reqData["addr"]));
       break;
     }
     case HardwareReq.DEBUG_BREAKPOINT_SET_STATUS:

@@ -8,7 +8,8 @@ import { FRAME_H, FRAME_LEN, FRAME_W } from './display';
 import Memory, { AddrSpace } from './memory';
 import CPU, { CpuState } from './cpu_i8080';
 
-const logging = true;
+const log_every_frame = false;
+const log_tick_to_file = false;
 
 let currentPanelController: { pause: () => void; resume: () => void; runFrame: () => void; } | null = null;
 
@@ -46,7 +47,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext)
 
   // prepare instruction debug log next to the ROM file (now that emuOutput exists)
   try {
-    if (logging && romPath) {
+    if (log_tick_to_file && romPath) {
       const parsed = path.parse(romPath);
       const logName = parsed.name + '.debug.log';
       const logPath = path.join(parsed.dir, logName);
@@ -72,24 +73,31 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext)
     }, null, context.subscriptions
   );
 
-  let running = true;
-
   // attach debugger
   emu.hardware?.Request(HardwareReq.DEBUG_ATTACH, { data: true });
+  emu.hardware?.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr: 0x0100 });
 
   // expose pause/resume controls and a 'run N instructions' helper for external commands
   currentPanelController = {
     pause: () => {
-      running = false;
-      printDebugState('PAUSE', emu.hardware!, emuOutput, panel);
+      emu.hardware?.Request(HardwareReq.STOP);
+      printDebugState('Pause:', emu.hardware!, emuOutput, panel);
     },
-    resume: () => { if (!running) { running = true; tick(); } },
-    runFrame: () => { running = false; tick(true); }
+    resume: () => {
+      let running = emu.hardware?.Request(HardwareReq.IS_RUNNING)['isRunning'] ?? false;
+      if (!running) {
+        emu.hardware?.Request(HardwareReq.RUN);
+        tick();
+      }
+    },
+    runFrame: () => {
+      emu.hardware?.Request(HardwareReq.STOP);
+      tick(true); }
   };
 
   // attach per-instruction callback to hardware (if available)
   try {
-    if (logging && emu.hardware) {
+    if (log_every_frame && emu.hardware) {
       emu.hardware.debugInstructionCallback = (hw) => {
         try {
           const line = getDebugLine(hw)
@@ -114,23 +122,28 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext)
       //   }
       // }
     } else if (msg && msg.type === 'stop') {
-      running = false;
+      emu.hardware?.Request(HardwareReq.STOP);
     }
   }, undefined, context.subscriptions);
 
-  async function tick(logging: boolean = false)
+  async function tick(log_every_frame: boolean = false)
   {
-    const res = emu.hardware?.Request(HardwareReq.EXECUTE_FRAME_NO_BREAKS);
+    emu.hardware?.Request(HardwareReq.EXECUTE_FRAME);
     const out = emu.hardware?.display?.GetFrame() || new Uint32Array(FRAME_LEN);
-
-    if (logging){
-      printDebugState('hw stats:', emu.hardware!, emuOutput, panel);
-    }
-
     try {
       panel.webview.postMessage({ type: 'frame', width: FRAME_W, height: FRAME_H, data: out.buffer });
     }
     catch (e) { /* ignore frame conversion errors */ }
+
+
+    // logging
+    if (log_every_frame){
+      printDebugState('hw stats:', emu.hardware!, emuOutput, panel);
+    }
+    let running = emu.hardware?.Request(HardwareReq.IS_RUNNING)['isRunning'] ?? false;
+    if (!running) {
+      printDebugState('Break:', emu.hardware!, emuOutput, panel);
+    }
 
     if (!running) return;
     // schedule next frame at ~50fps
@@ -141,9 +154,6 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext)
 
   panel.onDidDispose(() => {
     // Stop the emulation hardware thread to free resources
-    try {
-      running = false;
-    } catch (e) {}
     try { emu.hardware?.Request(HardwareReq.EXIT); } catch (e) {}
     try { if (debugStream) { debugStream.end(); } } catch (e) {}
     currentPanelController = null;
@@ -151,7 +161,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext)
 }
 
 
-  // helper: read cpu/memory state and return a compact debug object
+// helper: read cpu/memory state and return a compact debug object
 function getDebugState(hardware: Hardware)
 {
   const state = hardware?.cpu?.state ?? new CpuState();
