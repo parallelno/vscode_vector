@@ -143,6 +143,148 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(compileCommand);
 
+  type ProjectInfo = {
+    projectPath: string;
+    name: string;
+    mainPath?: string;
+  };
+
+  function findProjectJsonFiles(workspaceRoot: string): string[] {
+    const candidates = [
+      path.join(workspaceRoot, 'test', 'project'),
+      path.join(workspaceRoot, 'project'),
+      workspaceRoot
+    ];
+    const results: string[] = [];
+    const seen = new Set<string>();
+    for (const folder of candidates) {
+      try {
+        const stat = fs.statSync(folder);
+        if (!stat.isDirectory()) continue;
+        const entries = fs.readdirSync(folder);
+        for (const entry of entries) {
+          if (!entry.toLowerCase().endsWith('.project.json')) continue;
+          const full = path.join(folder, entry);
+          if (seen.has(full)) continue;
+          seen.add(full);
+          results.push(full);
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+    return results;
+  }
+
+  function readProjectInfo(projectPath: string, opts: { quiet?: boolean } = {}): ProjectInfo | undefined {
+    try {
+      const text = fs.readFileSync(projectPath, 'utf8');
+      const data = JSON.parse(text);
+      const name = typeof data?.name === 'string' && data.name.trim().length ? data.name.trim() : path.basename(projectPath);
+      const mainEntry = typeof data?.main === 'string' ? data.main : undefined;
+      const mainPath = mainEntry ? (path.isAbsolute(mainEntry) ? mainEntry : path.resolve(path.dirname(projectPath), mainEntry)) : undefined;
+      return { projectPath, name, mainPath };
+    } catch (err) {
+      if (!opts.quiet) {
+        logOutput(`Devector: Failed to read ${projectPath}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return undefined;
+    }
+  }
+
+  function gatherProjectInfos(workspaceRoot: string, opts: { quiet?: boolean } = {}): ProjectInfo[] {
+    const files = findProjectJsonFiles(workspaceRoot);
+    const infos: ProjectInfo[] = [];
+    for (const file of files) {
+      const info = readProjectInfo(file, opts);
+      if (info) infos.push(info);
+    }
+    return infos;
+  }
+
+  async function compileProjectFile(projectPath: string, options: { notify?: boolean; reason?: string } = {}): Promise<boolean> {
+    const info = readProjectInfo(projectPath, { quiet: !options.notify });
+    if (!info) {
+      if (options.notify) vscode.window.showErrorMessage(`Failed to read ${path.basename(projectPath)}.`);
+      return false;
+    }
+    if (!info.mainPath) {
+      const msg = `${path.basename(projectPath)} is missing a "main" entry.`;
+      if (options.notify) vscode.window.showErrorMessage(msg);
+      else logOutput('Devector: ' + msg);
+      return false;
+    }
+    if (!fs.existsSync(info.mainPath)) {
+      const msg = `Main assembly file not found: ${info.mainPath}`;
+      if (options.notify) vscode.window.showErrorMessage(msg);
+      else logOutput('Devector: ' + msg);
+      return false;
+    }
+    let contents: string;
+    try {
+      contents = fs.readFileSync(info.mainPath, 'utf8');
+    } catch (err) {
+      const msg = `Failed to read ${info.mainPath}: ${err instanceof Error ? err.message : String(err)}`;
+      if (options.notify) vscode.window.showErrorMessage(msg);
+      else logOutput('Devector: ' + msg);
+      return false;
+    }
+    const success = await compileAsmSource(info.mainPath, contents);
+    if (success) {
+      const reason = options.reason ? ` (${options.reason})` : '';
+      logOutput(`Devector: Compiled project ${path.basename(projectPath)}${reason}`);
+      if (options.notify) {
+        vscode.window.showInformationMessage(`Compiled ${path.basename(info.mainPath)} from ${path.basename(projectPath)}`);
+      }
+    }
+    return success;
+  }
+
+  const pendingBreakpointAsmPaths = new Set<string>();
+  let breakpointCompilePromise: Promise<void> = Promise.resolve();
+
+  function collectAsmPathsFromEvent(ev: vscode.BreakpointsChangeEvent): Set<string> {
+    const result = new Set<string>();
+    const gather = (items?: readonly vscode.Breakpoint[]) => {
+      if (!items) return;
+      for (const bp of items) {
+        if (!(bp instanceof vscode.SourceBreakpoint)) continue;
+        const uri = bp.location?.uri;
+        if (!uri || uri.scheme !== 'file') continue;
+        if (!uri.fsPath.toLowerCase().endsWith('.asm')) continue;
+        result.add(path.resolve(uri.fsPath));
+      }
+    };
+    gather(ev.added);
+    gather(ev.removed);
+    gather(ev.changed);
+    return result;
+  }
+
+  async function compileProjectsForBreakpointChanges(paths: Set<string>) {
+    if (!paths.size) return;
+    if (!vscode.workspace.workspaceFolders || !vscode.workspace.workspaceFolders.length) return;
+    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const infos = gatherProjectInfos(workspaceRoot, { quiet: true });
+    if (!infos.length) return;
+    for (const info of infos) {
+      await compileProjectFile(info.projectPath, { notify: false, reason: 'breakpoint change' });
+    }
+  }
+
+  function scheduleBreakpointProjectCompile(paths: Set<string>) {
+    if (!paths.size) return;
+    for (const p of paths) pendingBreakpointAsmPaths.add(path.resolve(p));
+    breakpointCompilePromise = breakpointCompilePromise.then(async () => {
+      if (!pendingBreakpointAsmPaths.size) return;
+      const batch = new Set(pendingBreakpointAsmPaths);
+      pendingBreakpointAsmPaths.clear();
+      await compileProjectsForBreakpointChanges(batch);
+    }).catch((err) => {
+      logOutput('Devector: breakpoint-triggered project compile failed: ' + (err instanceof Error ? err.message : String(err)));
+    });
+  }
+
   const runDisposable = vscode.commands.registerCommand('i8080.run', async () => {
     openEmulatorPanel(context);
   });
@@ -200,63 +342,26 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
     const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
-
-    const candidateFolders = [
-      path.join(workspaceRoot, 'test', 'project'),
-      path.join(workspaceRoot, 'project'),
-      workspaceRoot
-    ];
-
-    let projectFolder = '';
-    let projectFiles: string[] = [];
-
-    for (const candidate of candidateFolders) {
-      try {
-        const stat = fs.statSync(candidate);
-        if (!stat.isDirectory()) continue;
-        const files = fs.readdirSync(candidate).filter((f) => f.toLowerCase().endsWith('.project.json'));
-        if (files.length) {
-          projectFolder = candidate;
-          projectFiles = files;
-          break;
-        }
-      } catch (_) {
-        continue;
-      }
-    }
-
-    if (!projectFolder) {
-      vscode.window.showErrorMessage('No *.project.json files found in test/project or the current workspace folder.');
+    const infos = gatherProjectInfos(workspaceRoot, { quiet: true });
+    if (!infos.length) {
+      vscode.window.showErrorMessage('No *.project.json files found in test/project, project, or the current workspace folder.');
       return;
     }
-    let selectedFile = projectFiles[0];
-    if (projectFiles.length > 1) {
-      const pick = await vscode.window.showQuickPick(projectFiles, { placeHolder: 'Select a project to compile' });
+
+    let targetPath = infos[0].projectPath;
+    if (infos.length > 1) {
+      const picks = infos.map((info) => ({
+        label: info.name,
+        description: path.relative(workspaceRoot, info.projectPath) || info.projectPath,
+        detail: info.mainPath ? `main: ${path.relative(workspaceRoot, info.mainPath)}` : 'main not set',
+        projectPath: info.projectPath
+      }));
+      const pick = await vscode.window.showQuickPick(picks, { placeHolder: 'Select a project to compile' });
       if (!pick) return;
-      selectedFile = pick;
+      targetPath = pick.projectPath;
     }
-    const projectPath = path.join(projectFolder, selectedFile);
-    try {
-      const projectText = fs.readFileSync(projectPath, 'utf8');
-      const projectData = JSON.parse(projectText);
-      const mainEntry = projectData?.main;
-      if (!mainEntry || typeof mainEntry !== 'string') {
-        vscode.window.showErrorMessage(`${path.basename(projectPath)} is missing a "main" entry.`);
-        return;
-      }
-      const mainPath = path.isAbsolute(mainEntry) ? mainEntry : path.resolve(path.dirname(projectPath), mainEntry);
-      if (!fs.existsSync(mainPath)) {
-        vscode.window.showErrorMessage(`Main assembly file not found: ${mainPath}`);
-        return;
-      }
-      const contents = fs.readFileSync(mainPath, 'utf8');
-      const success = await compileAsmSource(mainPath, contents);
-      if (success) {
-        vscode.window.showInformationMessage(`Compiled ${path.basename(mainPath)} from ${path.basename(projectPath)}`);
-      }
-    } catch (err) {
-      vscode.window.showErrorMessage('Failed to compile project: ' + (err instanceof Error ? err.message : String(err)));
-    }
+
+    await compileProjectFile(targetPath, { notify: true, reason: 'command' });
   });
   context.subscriptions.push(compileProjectDisposable);
 
@@ -553,6 +658,8 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.debug.onDidChangeBreakpoints(async (ev) => {
     // Only write tokens if we have an active asm editor
     await writeBreakpointsForActiveEditor();
+    const asmPaths = collectAsmPathsFromEvent(ev);
+    if (asmPaths.size) scheduleBreakpointProjectCompile(asmPaths);
   }));
 }
 

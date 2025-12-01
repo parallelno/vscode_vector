@@ -20,10 +20,15 @@
             "src": "main.asm",
             "line": 35
         },
-        "palette": {
+        "palette2": {
             "addr": "0x013B",
+            "src": "inc.asm",
+            "line": 2
+        },
+        "palette": {
+            "addr": "0x014B",
             "src": "main.asm",
-            "line": 51
+            "line": 54
         }
     },
     "consts": {},
