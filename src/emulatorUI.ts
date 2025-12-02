@@ -255,23 +255,32 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
 
   async function tick(log_every_frame: boolean = false)
   {
-    emu.hardware?.Request(HardwareReq.EXECUTE_FRAME);
-    sendFrameToWebview();
+    let running = true;
+
+    do {
+      let startTime = performance.now();
+
+      emu.hardware?.Request(HardwareReq.EXECUTE_FRAME);
+      sendFrameToWebview();
+
+      // logging
+      if (log_every_frame){
+        printDebugState('hw stats:', emu.hardware!, emuOutput, panel, false);
+      }
+
+      running = emu.hardware?.Request(HardwareReq.IS_RUNNING)['isRunning'] ?? false;
+
+      // throttle to approx real-time
+      const elapsed = performance.now() - startTime;
+      if (elapsed < 1000/60) {
+        await new Promise(resolve => setTimeout(resolve, 1000/60 - elapsed));
+      }
+
+    } while (running);
 
 
-    // logging
-    if (log_every_frame){
-      printDebugState('hw stats:', emu.hardware!, emuOutput, panel, false);
-    }
-    let running = emu.hardware?.Request(HardwareReq.IS_RUNNING)['isRunning'] ?? false;
-    if (!running) {
-      printDebugState('Break:', emu.hardware!, emuOutput, panel);
-      emitToolbarState(false);
-      return
-    }
-
-    // schedule next frame at ~50fps
-    setTimeout(tick, 1000 / 50);
+    printDebugState('Break:', emu.hardware!, emuOutput, panel);
+    emitToolbarState(false);
   }
 
   emitToolbarState(true);

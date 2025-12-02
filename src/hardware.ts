@@ -64,7 +64,6 @@ export class Hardware
     this._display = new Display(this.memory, this.io);
 
     this.Init();
-    this.Execution();
   }
 
   Destructor()
@@ -78,74 +77,6 @@ export class Hardware
     this.memory?.Init();
     this._display?.Init();
     this.io?.Init();
-  }
-
-  // TODO:
-  // 1. reload, reset, update the palette, and other non-hardware-initiated
-  //    operations have to reset the playback history
-  async Execution()
-  {
-    while (this.status != Status.EXIT)
-    {
-      let startCC = this.cpu?.cc ?? 0;
-      let startFrame = this._display?.frameNum ?? 0;
-      let startTime = performance.now();
-      let endFrameTime = performance.now();
-
-      while (this.status == Status.RUN)
-      {
-        let startFrameTime = performance.now();
-
-        let frameNum = this._display?.frameNum ?? 0;
-
-        do // rasterizes a frame
-        {
-          if (this.ExecuteInstruction())
-          {
-            this.Stop();
-            break;
-          };
-
-        } while (this.status == Status.RUN &&
-                this._display?.frameNum == frameNum);
-
-        // vsync
-        if (this.status == Status.RUN)
-        {
-          let currentTime = performance.now();
-            let frameExecutionDuration = currentTime - startFrameTime;
-
-          let targetFrameDuration = execDelays[this.execSpeed];
-
-          let frameDuration = Math.max(
-            frameExecutionDuration,
-            targetFrameDuration
-          );
-
-          endFrameTime += frameDuration;
-
-          while (performance.now() < endFrameTime)
-          {
-            await new Promise(resolve => setTimeout(resolve, 1));
-          }
-        }
-      }
-
-      // print out the break statistics
-      let elapsedCC = (this.cpu?.cc ?? 0) - startCC;
-      if (elapsedCC)
-      {
-        let elapsedFrames = (this._display?.frameNum ?? 0) - startFrame;
-        let elapsedTime = performance.now() - startTime;
-        let timeDurationSec = elapsedTime / 1000.0;
-        console.log(`Break: elapsed cpu cycles: ${elapsedCC}, elapsed frames: ${elapsedFrames}, elapsed seconds: ${timeDurationSec}`);
-      }
-
-      while (this.status == Status.STOP)
-      {
-        await new Promise(resolve => setTimeout(resolve, 10));
-      }
-    }
   }
 
   // Returns true if the execution breaks
