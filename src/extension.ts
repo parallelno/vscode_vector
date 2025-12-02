@@ -68,7 +68,13 @@ export function activate(context: vscode.ExtensionContext) {
     return true;
   };
 
-  const normalizeFsPath = (value: string) => path.normalize(value).toLowerCase();
+  const normalizeFsPath = (value: string) => {
+    try {
+      return path.resolve(value).replace(/\\/g, '/').toLowerCase();
+    } catch {
+      return value.toLowerCase();
+    }
+  };
 
   const getOpenDocumentByFsPath = (fsPath: string): vscode.TextDocument | undefined => {
     const target = normalizeFsPath(fsPath);
@@ -84,6 +90,24 @@ export function activate(context: vscode.ExtensionContext) {
       logOutput('Devector: Failed to open document for breakpoint validation: ' + (err instanceof Error ? err.message : String(err)));
       return undefined;
     }
+  };
+
+  const lookupLineAddress = (tokens: any, filePath: string, line: number): string | undefined => {
+    if (!tokens || !tokens.lineAddresses) return undefined;
+    const base = path.basename(filePath).toLowerCase();
+    const perFile = tokens.lineAddresses[base];
+    if (!perFile) return undefined;
+    const keyDirect = perFile[line];
+    if (typeof keyDirect === 'string' && keyDirect) return keyDirect;
+    const keyString = perFile[String(line)];
+    if (typeof keyString === 'string' && keyString) return keyString;
+    return undefined;
+  };
+
+  const attachAddressFromTokens = (tokens: any, filePath: string, line: number, entry: Record<string, any>) => {
+    if (!entry || entry.addr) return;
+    const addr = lookupLineAddress(tokens, filePath, line);
+    if (addr) entry.addr = addr;
   };
   async function compileAsmSource(srcPath: string, contents: string): Promise<boolean> {
     if (!srcPath) return false;
@@ -142,6 +166,7 @@ export function activate(context: vscode.ExtensionContext) {
                     }
                   } catch (e) {}
                 }
+                attachAddressFromTokens(tokens, bpPath, lineNum, entry);
               }
               if (!tokens.breakpoints[bpBase]) tokens.breakpoints[bpBase] = [];
               tokens.breakpoints[bpBase].push(entry);
@@ -708,6 +733,7 @@ export function activate(context: vscode.ExtensionContext) {
               } catch (e) {}
             }
           }
+          attachAddressFromTokens(tokens2, bpPath, lineNum, entry);
           if (!tokens2.breakpoints[bpBase]) tokens2.breakpoints[bpBase] = [];
           tokens2.breakpoints[bpBase].push(entry);
         }

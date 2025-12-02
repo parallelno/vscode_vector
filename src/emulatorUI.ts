@@ -373,7 +373,7 @@ function collectBreakpointAddresses(tokens: any): Map<number, BreakpointMeta> {
   if (!tokens || typeof tokens !== 'object') return resolved;
 
   const labelAddrByName = new Map<string, number>();
-  const labelAddrByFileLine = new Map<string, number>();
+  const lineAddrByFileLine = new Map<string, number>();
 
   if (tokens.labels && typeof tokens.labels === 'object') {
     for (const [labelName, rawInfo] of Object.entries(tokens.labels)) {
@@ -384,7 +384,22 @@ function collectBreakpointAddresses(tokens: any): Map<number, BreakpointMeta> {
       const srcBase = normalizeFileKey(typeof info?.src === 'string' ? info.src : undefined);
       const lineNum = typeof info?.line === 'number' ? info.line : undefined;
       if (srcBase && lineNum !== undefined) {
-        labelAddrByFileLine.set(formatFileLineKey(srcBase, lineNum), addr);
+        lineAddrByFileLine.set(formatFileLineKey(srcBase, lineNum), addr);
+      }
+    }
+  }
+
+  if (tokens.lineAddresses && typeof tokens.lineAddresses === 'object') {
+    for (const [fileKeyRaw, entries] of Object.entries(tokens.lineAddresses)) {
+      if (!entries || typeof entries !== 'object') continue;
+      const normalizedFileKey = typeof fileKeyRaw === 'string' ? fileKeyRaw.toLowerCase() : undefined;
+      if (!normalizedFileKey) continue;
+      for (const [lineKey, addrRaw] of Object.entries(entries as Record<string, any>)) {
+        const addr = parseAddressLike(addrRaw);
+        if (addr === undefined) continue;
+        const lineNum = Number(lineKey);
+        if (!Number.isFinite(lineNum)) continue;
+        lineAddrByFileLine.set(formatFileLineKey(normalizedFileKey, lineNum), addr);
       }
     }
   }
@@ -406,7 +421,7 @@ function collectBreakpointAddresses(tokens: any): Map<number, BreakpointMeta> {
     return undefined;
   };
 
-  const resolveAddress = (entry: any, fileKey?: string): number | undefined => {
+    const resolveAddress = (entry: any, fileKey?: string): number | undefined => {
     if (!entry || typeof entry !== 'object') return parseAddressLike(entry);
     const direct = parseAddressLike(entry.addr ?? entry.address);
     if (direct !== undefined) return direct;
@@ -415,7 +430,7 @@ function collectBreakpointAddresses(tokens: any): Map<number, BreakpointMeta> {
       if (byLabel !== undefined) return byLabel;
     }
     if (fileKey && typeof entry.line === 'number') {
-      const fromLine = labelAddrByFileLine.get(formatFileLineKey(fileKey, entry.line));
+        const fromLine = lineAddrByFileLine.get(formatFileLineKey(fileKey, entry.line));
       if (fromLine !== undefined) return fromLine;
     }
     return undefined;
