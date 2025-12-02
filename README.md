@@ -39,6 +39,7 @@ node .\scripts\run-assembler.js
 ```
 
 - Compile the active `test/project/*.project.json` configuration from VS Code via the **"Compile i8080 Project"** command. The command locates the project JSON inside `test/project`, reads its `main` ASM entry, and assembles it using the same pipeline as the standard `Compile i8080 Assembly` command.
+- Project builds emit `<project-name>.rom` (and the matching `<project-name>.debug.json` tokens file) beside the `.project.json`, so the name field controls the output artifact names.
 - Adding or removing a breakpoint inside any `.asm` file automatically reruns the project compile so the ROM and breakpoint metadata stay in sync.
 
 - Run the external emulator (example path shown for convenience):

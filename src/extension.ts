@@ -58,6 +58,13 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.setStatusBarMessage('Breakpoints can only target label or instruction lines.', 3000);
   };
 
+  const sanitizeFileName = (value: string | undefined, fallback: string): string => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return fallback;
+    const safe = trimmed.replace(/[^A-Za-z0-9_-]+/g, '_');
+    return safe.length ? safe : fallback;
+  };
+
   const isAsmBreakpointLine = (doc: vscode.TextDocument, line: number): boolean => {
     if (!doc || line < 0 || line >= doc.lineCount) return false;
     const text = doc.lineAt(line).text;
@@ -109,9 +116,9 @@ export function activate(context: vscode.ExtensionContext) {
     const addr = lookupLineAddress(tokens, filePath, line);
     if (addr) entry.addr = addr;
   };
-  async function compileAsmSource(srcPath: string, contents: string): Promise<boolean> {
+  async function compileAsmSource(srcPath: string, contents: string, options: { outPath?: string } = {}): Promise<boolean> {
     if (!srcPath) return false;
-    const outPath = srcPath.replace(/\.asm$/i, '.rom');
+    const outPath = options.outPath || srcPath.replace(/\.asm$/i, '.rom');
     const writeRes = assembleAndWrite(contents, outPath, srcPath);
     if (!writeRes.success) {
       const errMsg = writeRes.errors ? writeRes.errors.join('; ') : 'Assemble failed';
@@ -129,8 +136,8 @@ export function activate(context: vscode.ExtensionContext) {
     try {
       const includedFiles = new Set<string>(Array.from(findIncludedFiles(srcPath, contents)));
       let tokenPath: string;
-      if (/\.[^/.]+$/.test(outPath)) tokenPath = outPath.replace(/\.[^/.]+$/, '_.json');
-      else tokenPath = outPath + '_.json';
+      if (/\.[^/.]+$/.test(outPath)) tokenPath = outPath.replace(/\.[^/.]+$/, '.debug.json');
+      else tokenPath = outPath + '.debug.json';
       if (fs.existsSync(tokenPath)) {
         try {
           const tokenText = fs.readFileSync(tokenPath, 'utf8');
@@ -204,6 +211,7 @@ export function activate(context: vscode.ExtensionContext) {
     projectPath: string;
     name: string;
     mainPath?: string;
+    outputBase: string;
   };
 
   function findProjectJsonFiles(workspaceRoot: string): string[] {
@@ -237,10 +245,13 @@ export function activate(context: vscode.ExtensionContext) {
     try {
       const text = fs.readFileSync(projectPath, 'utf8');
       const data = JSON.parse(text);
-      const name = typeof data?.name === 'string' && data.name.trim().length ? data.name.trim() : path.basename(projectPath);
+      const rawName = typeof data?.name === 'string' && data.name.trim().length ? data.name.trim() : path.basename(projectPath);
+      const defaultBase = path.basename(projectPath).replace(/\.project\.json$/i, '') || 'vector_project';
+      const outputBase = sanitizeFileName(rawName, sanitizeFileName(defaultBase, 'vector_project'));
+      const name = rawName;
       const mainEntry = typeof data?.main === 'string' ? data.main : undefined;
       const mainPath = mainEntry ? (path.isAbsolute(mainEntry) ? mainEntry : path.resolve(path.dirname(projectPath), mainEntry)) : undefined;
-      return { projectPath, name, mainPath };
+      return { projectPath, name, mainPath, outputBase };
     } catch (err) {
       if (!opts.quiet) {
         logOutput(`Devector: Failed to read ${projectPath}: ${err instanceof Error ? err.message : String(err)}`);
@@ -286,12 +297,14 @@ export function activate(context: vscode.ExtensionContext) {
       else logOutput('Devector: ' + msg);
       return false;
     }
-    const success = await compileAsmSource(info.mainPath, contents);
+    const projectDir = path.dirname(projectPath);
+    const romPath = path.join(projectDir, `${info.outputBase}.rom`);
+    const success = await compileAsmSource(info.mainPath, contents, { outPath: romPath });
     if (success) {
       const reason = options.reason ? ` (${options.reason})` : '';
-      logOutput(`Devector: Compiled project ${path.basename(projectPath)}${reason}`);
+      logOutput(`Devector: Compiled project ${path.basename(projectPath)} -> ${path.basename(romPath)}${reason}`);
       if (options.notify) {
-        vscode.window.showInformationMessage(`Compiled ${path.basename(info.mainPath)} from ${path.basename(projectPath)}`);
+        vscode.window.showInformationMessage(`Compiled ${path.basename(info.mainPath)} to ${path.basename(romPath)}`);
       }
     }
     return success;
@@ -376,7 +389,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
     if (!name) return;
     const trimmed = name.trim();
-    const safeName = trimmed.replace(/[^A-Za-z0-9_-]+/g, '_') || 'vector_project';
+    const safeName = sanitizeFileName(trimmed, 'vector_project');
     const projectData = {
       name: trimmed,
       main: 'main.asm'
@@ -696,8 +709,8 @@ export function activate(context: vscode.ExtensionContext) {
       const included = findIncludedFiles(mainPath2, src2, new Set<string>());
       let tokenPath2: string;
       const outPath2 = mainPath2.replace(/\.asm$/i, '.rom');
-      if (/\.[^/.]+$/.test(outPath2)) tokenPath2 = outPath2.replace(/\.[^/.]+$/, '_.json');
-      else tokenPath2 = outPath2 + '_.json';
+      if (/\.[^/.]+$/.test(outPath2)) tokenPath2 = outPath2.replace(/\.[^/.]+$/, '.debug.json');
+      else tokenPath2 = outPath2 + '.debug.json';
       if (!fs.existsSync(tokenPath2)) return;
       const tokenText2 = fs.readFileSync(tokenPath2, 'utf8');
       const tokens2 = JSON.parse(tokenText2);

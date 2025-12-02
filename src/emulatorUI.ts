@@ -362,8 +362,8 @@ function loadBreakpointsFromToken(romPath: string, hardware: Hardware | undefine
 
 function deriveTokenPath(romPath: string): string {
   if (!romPath) return '';
-  if (/\.[^/.]+$/.test(romPath)) return romPath.replace(/\.[^/.]+$/, '_.json');
-  return romPath + '_.json';
+  if (/\.[^/.]+$/.test(romPath)) return romPath.replace(/\.[^/.]+$/, '.debug.json');
+  return romPath + '.debug.json';
 }
 
 type BreakpointMeta = { enabled?: boolean };
