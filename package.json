@@ -49,6 +49,13 @@
         "configuration": "./language-configuration.json"
       }
     ],
+    "grammars": [
+      {
+        "language": "asm",
+        "scopeName": "source.devector_8080",
+        "path": "./syntaxes/devector_8080.tmLanguage.json"
+      }
+    ],
     "breakpoints": [
       {
         "language": "asm"
