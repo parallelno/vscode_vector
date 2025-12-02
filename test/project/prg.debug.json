@@ -83,5 +83,13 @@
             "1": "0x015B"
         }
     },
-    "breakpoints": {}
+    "breakpoints": {
+        "main.asm": [
+            {
+                "line": 19,
+                "enabled": true,
+                "addr": "0x0118"
+            }
+        ]
+    }
 }

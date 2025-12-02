@@ -121,13 +121,25 @@ export function activate(context: vscode.ExtensionContext) {
     const outPath = options.outPath || srcPath.replace(/\.asm$/i, '.rom');
     const writeRes = assembleAndWrite(contents, outPath, srcPath);
     if (!writeRes.success) {
-      const errMsg = writeRes.errors ? writeRes.errors.join('; ') : 'Assemble failed';
-      logOutput(`Devector: Compilation failed:\n${errMsg}`, true);
+      const summarizeError = (raw: string): string => {
+        const firstLine = raw.split(/\r?\n/)[0]?.trim() || raw.trim();
+        return firstLine.replace(/ at \d+.*$/, '').trim();
+      };
       if (writeRes.errors && writeRes.errors.length) {
+        const summaries: string[] = [];
+        const seen = new Set<string>();
         for (const e of writeRes.errors) {
-          logOutput(e);
-          logOutput('');
+          const summary = summarizeError(typeof e === 'string' ? e : String(e));
+          if (!summary || seen.has(summary)) continue;
+          seen.add(summary);
+          summaries.push(summary);
         }
+        logOutput('Devector: Compilation failed:', true);
+        for (const summary of summaries) {
+          logOutput(summary);
+        }
+      } else {
+        logOutput('Devector: Compilation failed: Assemble failed', true);
       }
       return false;
     }
