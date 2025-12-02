@@ -28,6 +28,7 @@ const MEMORY_DUMP_TOTAL_BYTES = MEMORY_DUMP_LINE_BYTES * MEMORY_DUMP_LINES;
 const MEMORY_ADDRESS_MASK = 0xffff;
 let memoryDumpFollowPc = true;
 let memoryDumpStartAddr = 0;
+let memoryDumpAnchorAddr = 0;
 
 export async function openEmulatorPanel(context: vscode.ExtensionContext, logChannel?: vscode.OutputChannel)
 {
@@ -43,6 +44,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   currentToolbarIsRunning = true;
   memoryDumpFollowPc = true;
   memoryDumpStartAddr = 0;
+  memoryDumpAnchorAddr = 0;
 
   // Ask user to pick a ROM file (default: workspace root test.rom)
   const candidates: vscode.Uri[] | undefined = await vscode.window.showOpenDialog({
@@ -310,6 +312,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     highlightContext = null;
     memoryDumpFollowPc = true;
     memoryDumpStartAddr = 0;
+    memoryDumpAnchorAddr = 0;
   }, null, context.subscriptions);
 }
 
@@ -433,7 +436,11 @@ function getWebviewContent() {
     .memory-dump__content{background:#000;border:1px solid #333;font-family:Consolas,monospace;font-size:12px;padding:8px;overflow:auto;max-height:240px;line-height:1.4;white-space:pre-wrap}
     .memory-dump__content .pc-row{background:rgba(180,255,176,0.12)}
     .memory-dump__content .pc-byte{color:#000;background:#b4ffb0;padding:0 1px;border-radius:2px}
+    .memory-dump__content .anchor-row{background:rgba(255,209,121,0.12)}
+    .memory-dump__content .anchor-byte{color:#000;background:#ffd77a;padding:0 1px;border-radius:2px}
     .memory-dump__content .addr{color:#9ad0ff;margin-right:6px;display:inline-block;width:54px}
+    .memory-dump__content .anchor-addr{color:#ffd77a}
+    .memory-dump__pc-hint{font-size:11px;color:#b4ffb0;font-family:Consolas,monospace;letter-spacing:0.03em}
   </style>
 </head>
 <body>
@@ -452,6 +459,7 @@ function getWebviewContent() {
       <span class="memory-dump__title">Memory Dump</span>
       <label><input type="checkbox" id="memory-follow" checked /> Follow PC</label>
       <label>Start <input type="text" id="memory-start" value="0000" maxlength="6" spellcheck="false" /></label>
+      <span id="memory-pc-hint" class="memory-dump__pc-hint"></span>
       <div class="memory-dump__controls">
         <button type="button" data-mem-delta="-256">-0x100</button>
         <button type="button" data-mem-delta="-16">-0x10</button>
@@ -474,7 +482,9 @@ function getWebviewContent() {
     const memoryStartInput = document.getElementById('memory-start');
     const memoryDeltaButtons = document.querySelectorAll('[data-mem-delta]');
     const memoryRefreshButton = document.querySelector('[data-mem-action="refresh"]');
-    let memoryDumpState = { startAddr: 0, bytes: [], pc: 0, followPc: true };
+    const memoryPcHint = document.getElementById('memory-pc-hint');
+    const bytesPerRow = 16;
+    let memoryDumpState = { startAddr: 0, anchorAddr: 0, bytes: [], pc: 0, followPc: true };
 
     const setStepButtonsEnabled = (shouldEnable) => {
       if (!toolbar) return;
@@ -500,9 +510,18 @@ function getWebviewContent() {
 
     const clamp16 = (value) => (Number(value) >>> 0) & 0xffff;
     const formatAddress = (value) => clamp16(value).toString(16).toUpperCase().padStart(4, '0');
+    const formatAddressWithPrefix = (value) => '0x' + formatAddress(value);
     const formatByte = (value) => ((Number(value) >>> 0) & 0xff).toString(16).toUpperCase().padStart(2, '0');
     const escapeHtml = (value) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const wrapPc = (text, addr) => (clamp16(addr) === clamp16(memoryDumpState.pc) ? '<span class="pc-byte">' + text + '</span>' : text);
+    const wrapByte = (text, addr) => {
+      const normalized = clamp16(addr);
+      const classes = [];
+      if (normalized === clamp16(memoryDumpState.pc)) classes.push('pc-byte');
+      const anchorTarget = memoryDumpState.anchorAddr ?? memoryDumpState.startAddr;
+      if (normalized === clamp16(anchorTarget)) classes.push('anchor-byte');
+      if (!classes.length) return text;
+      return '<span class="' + classes.join(' ') + '">' + text + '</span>';
+    };
     const postMemoryCommand = (command, extra = {}) => {
       vscode.postMessage({ type: 'memoryDumpControl', command, ...extra });
     };
@@ -511,8 +530,18 @@ function getWebviewContent() {
         memoryFollowCheckbox.checked = memoryDumpState.followPc;
       }
       if (memoryStartInput instanceof HTMLInputElement) {
-        memoryStartInput.value = formatAddress(memoryDumpState.startAddr);
+        const isEditing = document.activeElement === memoryStartInput && !memoryDumpState.followPc;
+        if (!isEditing || memoryStartInput.value === '') {
+          const baseValue = memoryDumpState.anchorAddr ?? memoryDumpState.startAddr;
+          memoryStartInput.value = formatAddressWithPrefix(baseValue);
+        }
         memoryStartInput.disabled = memoryDumpState.followPc;
+        if (memoryDumpState.followPc && document.activeElement === memoryStartInput) {
+          memoryStartInput.blur();
+        }
+      }
+      if (memoryPcHint instanceof HTMLElement) {
+        memoryPcHint.textContent = memoryDumpState.followPc ? '' : 'PC: ' + formatAddressWithPrefix(memoryDumpState.pc);
       }
     };
     const renderMemoryDump = () => {
@@ -522,21 +551,29 @@ function getWebviewContent() {
         return;
       }
       const rows = [];
-      for (let offset = 0; offset < memoryDumpState.bytes.length; offset += 16) {
+      const normalizedStart = clamp16(memoryDumpState.startAddr);
+      const anchorTarget = clamp16(memoryDumpState.anchorAddr ?? memoryDumpState.startAddr);
+      const normalizedPc = clamp16(memoryDumpState.pc);
+      for (let offset = 0; offset < memoryDumpState.bytes.length; offset += bytesPerRow) {
         const rowStart = clamp16(memoryDumpState.startAddr + offset);
-        const rowBytes = memoryDumpState.bytes.slice(offset, offset + 16);
-        const lineHasPc = memoryDumpState.pc >= rowStart && memoryDumpState.pc < rowStart + rowBytes.length;
+        const rowBytes = memoryDumpState.bytes.slice(offset, offset + bytesPerRow);
+        const lineHasPc = normalizedPc >= rowStart && normalizedPc < rowStart + rowBytes.length;
+        const lineHasAnchor = anchorTarget >= rowStart && anchorTarget < rowStart + rowBytes.length;
         const hexParts = rowBytes.map((value, idx) => {
           const addr = clamp16(rowStart + idx);
-          return wrapPc(formatByte(value ?? 0), addr);
+          return wrapByte(formatByte(value ?? 0), addr);
         });
         const asciiParts = rowBytes.map((value, idx) => {
           const addr = clamp16(rowStart + idx);
           const char = value >= 0x20 && value <= 0x7e ? String.fromCharCode(value) : '.';
-          return wrapPc(escapeHtml(char), addr);
+          return wrapByte(escapeHtml(char), addr);
         });
-        const rowClass = 'dump-row' + (lineHasPc ? ' pc-row' : '');
-        rows.push('<div class="' + rowClass + '"><span class="addr">' + formatAddress(rowStart) + ':</span> ' + hexParts.join(' ') + '  ' + asciiParts.join('') + '</div>');
+        const rowClasses = ['dump-row'];
+        if (lineHasPc) rowClasses.push('pc-row');
+        if (lineHasAnchor) rowClasses.push('anchor-row');
+        const addrClasses = ['addr'];
+        if (lineHasAnchor) addrClasses.push('anchor-addr');
+        rows.push('<div class="' + rowClasses.join(' ') + '"><span class="' + addrClasses.join(' ') + '">' + formatAddress(rowStart) + ':</span> ' + hexParts.join(' ') + '  ' + asciiParts.join('') + '</div>');
       }
       memoryDumpContent.innerHTML = rows.join('');
     };
@@ -544,6 +581,7 @@ function getWebviewContent() {
       if (!payload || typeof payload !== 'object') return;
       memoryDumpState = {
         startAddr: clamp16(payload.startAddr ?? 0),
+        anchorAddr: clamp16(payload.anchorAddr ?? (payload.startAddr ?? 0)),
         bytes: Array.isArray(payload.bytes)
           ? payload.bytes.map(value => {
               const normalized = Number(value);
@@ -583,6 +621,9 @@ function getWebviewContent() {
     if (memoryFollowCheckbox instanceof HTMLInputElement) {
       memoryFollowCheckbox.addEventListener('change', () => {
         postMemoryCommand('follow', { value: memoryFollowCheckbox.checked });
+        if (!memoryFollowCheckbox.checked && memoryPcHint instanceof HTMLElement) {
+          memoryPcHint.textContent = 'PC: ' + formatAddressWithPrefix(memoryDumpState.pc);
+        }
       });
     }
 
@@ -599,6 +640,15 @@ function getWebviewContent() {
     if (memoryRefreshButton instanceof HTMLButtonElement) {
       memoryRefreshButton.addEventListener('click', () => postMemoryCommand('refresh'));
     }
+
+    const shouldForwardKey = (event) => {
+      const target = event.target;
+      if (!target) return true;
+      if (target instanceof HTMLInputElement) return false;
+      if (target instanceof HTMLTextAreaElement) return false;
+      if (target instanceof HTMLElement && target.isContentEditable) return false;
+      return true;
+    };
 
     if (toolbar) {
       toolbar.addEventListener('click', event => {
@@ -665,10 +715,12 @@ function getWebviewContent() {
     });
     // keyboard forwarding
     window.addEventListener('keydown', e => {
+      if (!shouldForwardKey(e)) return;
       vscode.postMessage({ type: 'key', kind: 'down', key: e.key, code: e.code });
       e.preventDefault();
     });
     window.addEventListener('keyup', e => {
+      if (!shouldForwardKey(e)) return;
       vscode.postMessage({ type: 'key', kind: 'up', key: e.key, code: e.code });
       e.preventDefault();
     });
@@ -822,6 +874,11 @@ function parseAddressLike(value: any): number | undefined {
     if (!trimmed) return undefined;
     if (/^0x[0-9a-fA-F]+$/.test(trimmed)) return parseInt(trimmed.slice(2), 16) & 0xffff;
     if (/^\$[0-9a-fA-F]+$/.test(trimmed)) return parseInt(trimmed.slice(1), 16) & 0xffff;
+    if (/^[0-9a-fA-F]+$/.test(trimmed)) {
+      // Treat bare alphanumeric strings containing hex digits as hex (useful for UI inputs like "AB00")
+      if (/[a-fA-F]/.test(trimmed)) return parseInt(trimmed, 16) & 0xffff;
+      return parseInt(trimmed, 10) & 0xffff;
+    }
     if (/^[0-9]+$/.test(trimmed)) return parseInt(trimmed, 10) & 0xffff;
   }
   return undefined;
@@ -948,11 +1005,18 @@ function updateMemoryDumpFromHardware(
 ) {
   if (!panel || !hardware || !hardware.memory) return;
   let nextBase = memoryDumpStartAddr;
+  let anchor = memoryDumpAnchorAddr;
   if (reason === 'pc' && memoryDumpFollowPc) {
-    nextBase = hardware.cpu?.state?.regs.pc.word ?? nextBase;
+    const pc = hardware.cpu?.state?.regs.pc.word;
+    if (pc !== undefined) {
+      anchor = pc;
+      nextBase = pc;
+    }
   } else if (explicitBase !== undefined) {
+    anchor = explicitBase;
     nextBase = explicitBase;
   }
+  memoryDumpAnchorAddr = normalizeMemoryAddress(anchor);
   memoryDumpStartAddr = alignMemoryDumpBase(nextBase);
   const bytes = readMemoryChunk(hardware.memory, memoryDumpStartAddr);
   const pc = hardware.cpu?.state?.regs.pc.word ?? 0;
@@ -962,7 +1026,8 @@ function updateMemoryDumpFromHardware(
       startAddr: memoryDumpStartAddr,
       bytes,
       pc,
-      followPc: memoryDumpFollowPc
+      followPc: memoryDumpFollowPc,
+      anchorAddr: memoryDumpAnchorAddr
     });
   } catch (e) {
     /* ignore memory dump sync errors */
