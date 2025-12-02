@@ -661,8 +661,8 @@ function ensureHighlightDecoration(context: vscode.ExtensionContext) {
   if (pausedLineDecoration) return;
   pausedLineDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
-    backgroundColor: 'rgba(152, 251, 152, 0.45)',
-    overviewRulerColor: 'rgba(152, 251, 152, 0.8)',
+    backgroundColor: 'rgba(129, 127, 38, 0.45)',
+    overviewRulerColor: 'rgba(200, 200, 175, 0.8)',
     overviewRulerLane: vscode.OverviewRulerLane.Full
   });
   context.subscriptions.push(pausedLineDecoration);
@@ -681,13 +681,14 @@ function highlightSourceFromHardware(hardware: Hardware | undefined | null) {
   if (!hardware || !highlightContext) return;
   try {
     const state = getDebugState(hardware);
-    highlightSourceAddress(state.global_addr);
+    const debugLine = getDebugLine(hardware);
+    highlightSourceAddress(state.global_addr, debugLine);
   } catch (e) {
     /* ignore highlight errors */
   }
 }
 
-function highlightSourceAddress(addr?: number) {
+function highlightSourceAddress(addr?: number, debugLine?: string) {
   if (!highlightContext || addr === undefined || addr === null) return;
   ensureHighlightDecoration(highlightContext);
   if (!pausedLineDecoration || !lastAddressSourceMap || lastAddressSourceMap.size === 0) return;
@@ -707,8 +708,19 @@ function highlightSourceAddress(addr?: number) {
       const idx = Math.min(Math.max(info.line - 1, 0), totalLines - 1);
       const lineText = doc.lineAt(idx).text;
       const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
+      const decoration: vscode.DecorationOptions = {
+        range,
+        renderOptions: debugLine ? {
+          after: {
+            contentText: '  ' + debugLine,
+            color: '#b4ffb0',
+            fontStyle: 'normal',
+            fontWeight: 'normal'
+          }
+        } : undefined
+      };
       clearHighlightedSourceLine();
-      editor.setDecorations(pausedLineDecoration!, [range]);
+      editor.setDecorations(pausedLineDecoration!, [decoration]);
       editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
       lastHighlightedEditor = editor;
     } catch (err) {
@@ -723,8 +735,16 @@ function buildAddressToSourceMap(tokens: any, tokenPath: string): Map<number, So
   const map = new Map<number, SourceLineRef>();
   const linesByFile = tokens.lineAddresses;
   if (!linesByFile || typeof linesByFile !== 'object') return map;
+  const normalizedEntries = new Map<string, Record<string, any>>();
+  for (const [rawKey, perLine] of Object.entries(linesByFile as Record<string, Record<string, any>>)) {
+    if (!perLine || typeof perLine !== 'object') continue;
+    // Only keep keys that look like actual filenames (contain a dot)
+    if (typeof rawKey !== 'string' || !rawKey.includes('.')) continue;
+    normalizedEntries.set(rawKey, perLine);
+  }
+  if (!normalizedEntries.size) return map;
   const baseDir = tokenPath ? path.dirname(tokenPath) : '';
-  for (const [fileKey, perLine] of Object.entries(linesByFile as Record<string, Record<string, any>>)) {
+  for (const [fileKey, perLine] of normalizedEntries.entries()) {
     if (!perLine || typeof perLine !== 'object') continue;
     const resolvedPath = path.isAbsolute(fileKey) ? path.normalize(fileKey) : path.resolve(baseDir, fileKey);
     for (const [lineKey, addrRaw] of Object.entries(perLine)) {

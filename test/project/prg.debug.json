@@ -117,5 +117,13 @@
             "16": "0x017A"
         }
     },
-    "breakpoints": {}
+    "breakpoints": {
+        "main.asm": [
+            {
+                "line": 47,
+                "enabled": true,
+                "addr": "0x013D"
+            }
+        ]
+    }
 }
