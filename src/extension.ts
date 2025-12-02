@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { assembleAndWrite } from './assembler';
-import { openEmulatorPanel, pauseEmulatorPanel, resumeEmulatorPanel, runFramePanel, reloadEmulatorBreakpointsFromFile } from './emulatorUI';
+import { openEmulatorPanel, pauseEmulatorPanel, resumeEmulatorPanel, stepFramePanel, reloadEmulatorBreakpointsFromFile } from './emulatorUI';
 
 export function activate(context: vscode.ExtensionContext) {
   const devectorOutput = vscode.window.createOutputChannel('Devector');
@@ -496,11 +496,11 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(resumeDisposable);
 
-  const runFrameDisposable = vscode.commands.registerCommand('i8080.runFrame', async () => {
+  const runFrameDisposable = vscode.commands.registerCommand('i8080.stepFrame', async () => {
     // Ensure the emulator panel is open before running instructions
     await openEmulatorPanel(context, devectorOutput);
     // then run the instruction batch
-    runFramePanel();
+    stepFramePanel();
   });
   context.subscriptions.push(runFrameDisposable);
 

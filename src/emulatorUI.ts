@@ -13,7 +13,7 @@ const log_tick_to_file = false;
 
 let lastBreakpointSource: { romPath: string; hardware?: Hardware | null; log?: vscode.OutputChannel } | null = null;
 
-let currentPanelController: { pause: () => void; resume: () => void; runFrame: () => void; } | null = null;
+let currentPanelController: { pause: () => void; resume: () => void; stepFrame: () => void; } | null = null;
 
 export async function openEmulatorPanel(context: vscode.ExtensionContext, logChannel?: vscode.OutputChannel)
 {
@@ -90,24 +90,6 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
 
   lastBreakpointSource = { romPath, hardware: emu.hardware, log: emuOutput };
 
-  // expose pause/resume controls and a 'run N instructions' helper for external commands
-  currentPanelController = {
-    pause: () => {
-      emu.hardware?.Request(HardwareReq.STOP);
-      printDebugState('Pause:', emu.hardware!, emuOutput, panel);
-    },
-    resume: () => {
-      let running = emu.hardware?.Request(HardwareReq.IS_RUNNING)['isRunning'] ?? false;
-      if (!running) {
-        emu.hardware?.Request(HardwareReq.RUN);
-        tick();
-      }
-    },
-    runFrame: () => {
-      emu.hardware?.Request(HardwareReq.STOP);
-      tick(true); }
-  };
-
   // attach per-instruction callback to hardware (if available)
   try {
     if (log_every_frame && emu.hardware) {
@@ -121,6 +103,99 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
       };
     }
   } catch (e) { }
+
+  const sendFrameToWebview = () => {
+    const out = emu.hardware?.display?.GetFrame() || new Uint32Array(FRAME_LEN);
+    try {
+      panel.webview.postMessage({ type: 'frame', width: FRAME_W, height: FRAME_H, data: out.buffer });
+    }
+    catch (e) { /* ignore frame conversion errors */ }
+  };
+
+  const emitToolbarState = (isRunning: boolean) => {
+    try {
+      panel.webview.postMessage({ type: 'toolbarState', isRunning });
+    } catch (e) { /* ignore toolbar sync errors */ }
+  };
+
+  const handleDebugAction = (action?: string) => {
+    if (!action || !emu.hardware) return;
+    switch (action) {
+      case 'pause':
+        emu.hardware.Request(HardwareReq.STOP);
+        sendFrameToWebview();
+        printDebugState('Pause:', emu.hardware, emuOutput, panel);
+        emitToolbarState(false);
+        break;
+      case 'run':
+        emu.hardware.Request(HardwareReq.RUN);
+        emitToolbarState(true);
+        tick();
+        break;
+      case 'stepInto':
+        emu.hardware.Request(HardwareReq.STOP);
+        emu.hardware?.Request(HardwareReq.EXECUTE_INSTR);
+        sendFrameToWebview();
+        printDebugState('Step into:', emu.hardware, emuOutput, panel);
+        break;
+      case 'stepOver':
+        emu.hardware.Request(HardwareReq.STOP);
+        // TODO: implement proper step over by setting a temporary breakpoint after the CALL/RET
+        emu.hardware?.Request(HardwareReq.EXECUTE_INSTR);
+        sendFrameToWebview();
+        printDebugState('Step over (NOT IMPLEMENTED):', emu.hardware, emuOutput, panel);
+        break;
+      case 'stepOut':
+        emu.hardware.Request(HardwareReq.STOP);
+        // TODO: implement proper step out
+        emu.hardware?.Request(HardwareReq.EXECUTE_INSTR);
+        sendFrameToWebview();
+        printDebugState('Step out (NOT IMPLEMENTED):', emu.hardware, emuOutput, panel);
+        break;
+      case 'stepFrame':
+        emu.hardware.Request(HardwareReq.STOP);
+        emu.hardware.Request(HardwareReq.EXECUTE_FRAME_NO_BREAKS);
+        sendFrameToWebview();
+        printDebugState('Run frame:', emu.hardware, emuOutput, panel);
+        emitToolbarState(false);
+        break;
+      case 'restart':
+        emu.hardware.Request(HardwareReq.STOP);
+        emu.hardware.Request(HardwareReq.RESET);
+        emu.hardware.Request(HardwareReq.RESTART);
+        emu.Load(romPath);
+        emu.hardware.Request(HardwareReq.RUN);
+        emitToolbarState(true);
+        tick();
+        break;
+      default:
+        break;
+    }
+  };
+
+  currentPanelController = {
+    pause: () => {
+      emu.hardware?.Request(HardwareReq.STOP);
+      printDebugState('Pause:', emu.hardware!, emuOutput, panel);
+      emitToolbarState(false);
+    },
+    resume: () => {
+      let running = emu.hardware?.Request(HardwareReq.IS_RUNNING)['isRunning'] ?? false;
+      if (!running) {
+        emu.hardware?.Request(HardwareReq.RUN);
+        emitToolbarState(true);
+        tick();
+      }
+    },
+    stepFrame: () => {
+      if (!emu.hardware) return;
+      emu.hardware.Request(HardwareReq.STOP);
+      emu.hardware.Request(HardwareReq.EXECUTE_FRAME_NO_BREAKS);
+      sendFrameToWebview();
+      printDebugState('Run frame:', emu.hardware, emuOutput, panel);
+      emitToolbarState(false);
+    }
+  };
 
   panel.webview.onDidReceiveMessage(msg => {
     if (msg && msg.type === 'key') {
@@ -136,17 +211,16 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
       // }
     } else if (msg && msg.type === 'stop') {
       emu.hardware?.Request(HardwareReq.STOP);
+      emitToolbarState(false);
+    } else if (msg && msg.type === 'debugAction') {
+      handleDebugAction(msg.action);
     }
   }, undefined, context.subscriptions);
 
   async function tick(log_every_frame: boolean = false)
   {
     emu.hardware?.Request(HardwareReq.EXECUTE_FRAME);
-    const out = emu.hardware?.display?.GetFrame() || new Uint32Array(FRAME_LEN);
-    try {
-      panel.webview.postMessage({ type: 'frame', width: FRAME_W, height: FRAME_H, data: out.buffer });
-    }
-    catch (e) { /* ignore frame conversion errors */ }
+    sendFrameToWebview();
 
 
     // logging
@@ -163,6 +237,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     setTimeout(tick, 1000 / 50);
   }
 
+  emitToolbarState(true);
   tick();
 
   panel.onDidDispose(() => {
@@ -178,7 +253,6 @@ export function reloadEmulatorBreakpointsFromFile(): number {
   if (!lastBreakpointSource) return 0;
   return loadBreakpointsFromToken(lastBreakpointSource.romPath, lastBreakpointSource.hardware, lastBreakpointSource.log);
 }
-
 
 // helper: read cpu/memory state and return a compact debug object
 function getDebugState(hardware: Hardware)
@@ -202,10 +276,6 @@ function printDebugState(
   try {
     emuOutput.appendLine((header ? header + ' ' : '') + line);
   } catch (e) {}
-
-  // try { panel.webview.postMessage(
-  //       { type: 'pause', addr: s.pc, opcode: s.opcode, regs: s.state.regs, m: mVal, pc: s.state.regs.pc.word });
-  //     } catch (e) {}
 }
 
 function getDebugLine(hardware: Hardware): string {
@@ -261,9 +331,9 @@ export function resumeEmulatorPanel() {
   else vscode.window.showWarningMessage('Emulator panel not open');
 }
 
-export function runFramePanel() {
-  if (currentPanelController && currentPanelController.runFrame) {
-    currentPanelController.runFrame();
+export function stepFramePanel() {
+  if (currentPanelController && currentPanelController.stepFrame) {
+    currentPanelController.stepFrame();
   } else {
     vscode.window.showWarningMessage('Emulator panel not open');
   }
@@ -274,14 +344,70 @@ function getWebviewContent() {
 <html>
 <head>
   <meta charset="utf-8" />
-  <style>body{margin:0;background:#000;color:#fff}canvas{display:block;margin:0 auto;background:#111}</style>
+  <style>
+    body{margin:0;background:#000;color:#fff;font-family:Consolas,monospace;display:flex;flex-direction:column;height:100vh}
+    .toolbar{display:flex;gap:8px;padding:8px;background:#111;border-bottom:1px solid #333;flex-wrap:wrap}
+    .toolbar button{background:#1e1e1e;border:1px solid #555;color:#fff;padding:3px 5px;border-radius:3px;cursor:pointer;font-size:10px;text-transform:uppercase;letter-spacing:0.05em}
+    .toolbar button[data-toggle="run-pause"]{min-width:72px;text-align:center}
+    .toolbar button:hover:not(:disabled){background:#2c2c2c}
+    .toolbar button:disabled{opacity:0.4;cursor:not-allowed}
+    canvas{display:block;margin:16px auto;background:#111;max-width:100%;height:auto}
+  </style>
 </head>
 <body>
+  <div class="toolbar">
+    <button type="button" data-action="pause" data-toggle="run-pause">Pause</button>
+    <button type="button" data-action="stepOver">Step Over</button>
+    <button type="button" data-action="stepInto">Step Into</button>
+    <button type="button" data-action="stepOut">Step Out</button>
+    <button type="button" data-action="stepFrame">Step Frame</button>
+    <button type="button" data-action="restart">Restart</button>
+  </div>
   <canvas id="screen" width="256" height="256"></canvas>
   <script>
     const vscode = acquireVsCodeApi();
     const canvas = document.getElementById('screen');
     const ctx = canvas.getContext('2d');
+    const toolbar = document.querySelector('.toolbar');
+    const pauseRunButton = toolbar ? toolbar.querySelector('button[data-action="pause"]') : null;
+    const stepButtonActions = ['stepOver','stepInto','stepOut','stepFrame'];
+
+    const setStepButtonsEnabled = (shouldEnable) => {
+      if (!toolbar) return;
+      stepButtonActions.forEach(action => {
+        const btn = toolbar.querySelector('button[data-action="' + action + '"]');
+        if (btn instanceof HTMLButtonElement) {
+          btn.disabled = !shouldEnable;
+        }
+      });
+    };
+
+    const setRunButtonState = (isRunning) => {
+      setStepButtonsEnabled(!isRunning);
+      if (!(pauseRunButton instanceof HTMLButtonElement)) return;
+      if (isRunning) {
+        pauseRunButton.textContent = 'Pause';
+        pauseRunButton.setAttribute('data-action', 'pause');
+      } else {
+        pauseRunButton.textContent = 'Run';
+        pauseRunButton.setAttribute('data-action', 'run');
+      }
+    };
+
+    setStepButtonsEnabled(false);
+
+    if (toolbar) {
+      toolbar.addEventListener('click', event => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        const btn = target.closest('button');
+        if (!(btn instanceof HTMLButtonElement)) return;
+        const action = btn.getAttribute('data-action');
+        if (!action || btn.disabled) return;
+        vscode.postMessage({ type: 'debugAction', action });
+      });
+    }
+
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.type === 'frame') {
@@ -323,6 +449,8 @@ function getWebviewContent() {
           const pcHex = (msg.pc !== undefined) ? (msg.pc & 0xffff).toString(16).padStart(4,'0') : ((msg.regs && msg.regs.PC) ? (msg.regs.PC & 0xffff).toString(16).padStart(4,'0') : '????');
           console.log('--- PAUSED --- CPU ' + a + ': ' + o + ' PC=' + pcHex + ' M=' + mHex + ' ' + flagsStr, msg.regs);
         } catch (e) { /* ignore malformed messages */ }
+      } else if (msg.type === 'toolbarState') {
+        setRunButtonState(!!msg.isRunning);
       }
       else if (msg.type === 'romLoaded') {
         try {

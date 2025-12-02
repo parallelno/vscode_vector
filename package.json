@@ -35,7 +35,7 @@
     "onCommand:i8080.run",
     "onCommand:i8080.pause",
     "onCommand:i8080.resume",
-    "onCommand:i8080.runFrame",
+    "onCommand:i8080.stepFrame",
     "onCommand:i8080.compileProject",
     "onCommand:i8080.createProject",
     "onDebug"
@@ -72,7 +72,7 @@
         "title": "Resume i8080 Emulator"
       },
       {
-        "command": "i8080.runFrame",
+        "command": "i8080.stepFrame",
         "title": "Run one frame and Pause"
       }
       ,
