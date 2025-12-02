@@ -53,6 +53,38 @@ export function activate(context: vscode.ExtensionContext) {
     }
     return out;
   }
+
+  const reportInvalidBreakpointLine = () => {
+    vscode.window.setStatusBarMessage('Breakpoints can only target label or instruction lines.', 3000);
+  };
+
+  const isAsmBreakpointLine = (doc: vscode.TextDocument, line: number): boolean => {
+    if (!doc || line < 0 || line >= doc.lineCount) return false;
+    const text = doc.lineAt(line).text;
+    const trimmed = text.trim();
+    if (!trimmed.length) return false;
+    if (trimmed.startsWith(';') || trimmed.startsWith('//')) return false;
+    if (trimmed.startsWith('.')) return false;
+    return true;
+  };
+
+  const normalizeFsPath = (value: string) => path.normalize(value).toLowerCase();
+
+  const getOpenDocumentByFsPath = (fsPath: string): vscode.TextDocument | undefined => {
+    const target = normalizeFsPath(fsPath);
+    return vscode.workspace.textDocuments.find((doc) => normalizeFsPath(doc.uri.fsPath) === target);
+  };
+
+  const ensureDocument = async (uri: vscode.Uri): Promise<vscode.TextDocument | undefined> => {
+    const existing = getOpenDocumentByFsPath(uri.fsPath);
+    if (existing) return existing;
+    try {
+      return await vscode.workspace.openTextDocument(uri);
+    } catch (err) {
+      logOutput('Devector: Failed to open document for breakpoint validation: ' + (err instanceof Error ? err.message : String(err)));
+      return undefined;
+    }
+  };
   async function compileAsmSource(srcPath: string, contents: string): Promise<boolean> {
     if (!srcPath) return false;
     const outPath = srcPath.replace(/\.asm$/i, '.rom');
@@ -242,6 +274,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const pendingBreakpointAsmPaths = new Set<string>();
   let breakpointCompilePromise: Promise<void> = Promise.resolve();
+  let suppressBreakpointValidation = false;
 
   function collectAsmPathsFromEvent(ev: vscode.BreakpointsChangeEvent): Set<string> {
     const result = new Set<string>();
@@ -283,6 +316,22 @@ export function activate(context: vscode.ExtensionContext) {
     }).catch((err) => {
       logOutput('Devector: breakpoint-triggered project compile failed: ' + (err instanceof Error ? err.message : String(err)));
     });
+  }
+
+  async function findInvalidBreakpoints(items?: readonly vscode.Breakpoint[]): Promise<vscode.SourceBreakpoint[]> {
+    const invalid: vscode.SourceBreakpoint[] = [];
+    if (!items) return invalid;
+    for (const bp of items) {
+      if (!(bp instanceof vscode.SourceBreakpoint)) continue;
+      const uri = bp.location?.uri;
+      if (!uri || uri.scheme !== 'file') continue;
+      if (!uri.fsPath.toLowerCase().endsWith('.asm')) continue;
+      const doc = await ensureDocument(uri);
+      if (!doc) continue;
+      const line = bp.location.range.start.line;
+      if (!isAsmBreakpointLine(doc, line)) invalid.push(bp);
+    }
+    return invalid;
   }
 
   const runDisposable = vscode.commands.registerCommand('i8080.run', async () => {
@@ -410,7 +459,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (!ed) return;
     const doc = ed.document;
     // Only operate on files (not untitled) and only asm
-    if (!doc || doc.isUntitled || !doc.fileName.endsWith('.asm')) return;
+    if (!doc || doc.isUntitled || !doc.fileName.toLowerCase().endsWith('.asm')) return;
     const line = ed.selection.active.line;
     const uri = doc.uri;
     const existing = vscode.debug.breakpoints.filter((b) => {
@@ -424,6 +473,10 @@ export function activate(context: vscode.ExtensionContext) {
     if (existing.length) {
       vscode.debug.removeBreakpoints(existing);
     } else {
+      if (!isAsmBreakpointLine(doc, line)) {
+        reportInvalidBreakpointLine();
+        return;
+      }
       const loc = new vscode.Location(uri, new vscode.Position(line, 0));
       const sb = new vscode.SourceBreakpoint(loc, true);
       vscode.debug.addBreakpoints([sb]);
@@ -557,23 +610,34 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      const targetUri = uri;
+
       const targetLine = Math.max(0, Math.floor(line));
       const matching = vscode.debug.breakpoints.filter((bp) => {
         if (!(bp instanceof vscode.SourceBreakpoint)) return false;
         const sb = bp as vscode.SourceBreakpoint;
         const bpUri = sb.location?.uri;
         if (!bpUri) return false;
-        return (bpUri.fsPath === uri!.fsPath) && (sb.location.range.start.line === targetLine);
+        return (bpUri.fsPath === targetUri.fsPath) && (sb.location.range.start.line === targetLine);
       }) as vscode.SourceBreakpoint[];
 
       if (matching.length) {
         vscode.debug.removeBreakpoints(matching);
-        logOutput(`Devector: Removed breakpoint at ${uri.fsPath}:${targetLine + 1}`);
-      } else {
-        const newBp = new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(targetLine, 0)), true);
-        vscode.debug.addBreakpoints([newBp]);
-        logOutput(`Devector: Added breakpoint at ${uri.fsPath}:${targetLine + 1}`);
+        logOutput(`Devector: Removed breakpoint at ${targetUri.fsPath}:${targetLine + 1}`);
+        return;
       }
+
+      if (targetUri.scheme === 'file' && targetUri.fsPath.toLowerCase().endsWith('.asm')) {
+        const doc = await ensureDocument(targetUri);
+        if (doc && !isAsmBreakpointLine(doc, targetLine)) {
+          reportInvalidBreakpointLine();
+          return;
+        }
+      }
+
+      const newBp = new vscode.SourceBreakpoint(new vscode.Location(targetUri, new vscode.Position(targetLine, 0)), true);
+      vscode.debug.addBreakpoints([newBp]);
+      logOutput(`Devector: Added breakpoint at ${targetUri.fsPath}:${targetLine + 1}`);
     } catch (e) {
       logOutput('Devector: toggleBreakpoint override failed: ' + (e instanceof Error ? e.message : String(e)));
     }
@@ -656,6 +720,24 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Persist breakpoints whenever they change in the debugger model
   context.subscriptions.push(vscode.debug.onDidChangeBreakpoints(async (ev) => {
+    if (suppressBreakpointValidation) {
+      await writeBreakpointsForActiveEditor();
+      return;
+    }
+
+    const invalidAdded = await findInvalidBreakpoints(ev.added);
+    if (invalidAdded.length) {
+      reportInvalidBreakpointLine();
+      try {
+        suppressBreakpointValidation = true;
+        vscode.debug.removeBreakpoints(invalidAdded);
+      } finally {
+        suppressBreakpointValidation = false;
+      }
+      await writeBreakpointsForActiveEditor();
+      return;
+    }
+
     // Only write tokens if we have an active asm editor
     await writeBreakpointsForActiveEditor();
     const asmPaths = collectAsmPathsFromEvent(ev);

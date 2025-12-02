@@ -32,5 +32,14 @@
         }
     },
     "consts": {},
-    "breakpoints": {}
+    "breakpoints": {
+        "main.asm": [
+            {
+                "line": 35,
+                "enabled": true,
+                "label": "@loop_0",
+                "addr": "0x0128"
+            }
+        ]
+    }
 }

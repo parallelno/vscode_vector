@@ -58,6 +58,7 @@ Features and notes
 
 - Tokens file: the assembler writes a JSON alongside the ROM (e.g., `test.json`) containing `labels` with addresses (hex), and the original `src` basename and `line` where each label was defined. This is useful for setting breakpoints by name in the emulator/debugger.
   - Note: When compiling through the VS Code extension `i8080.compile` command, the extension also appends a `breakpoints` section to the tokens JSON that records per-file breakpoints (line numbers, enabled status, and label/addr where available) discovered in the editor across the main file and recursive includes.
+  - Breakpoints can be toggled only on meaningful lines (labels or instructions). Empty lines, pure comment lines, or lines containing compiler commands `.<cmd>` are ignored when you click the gutter or press `F9`.
 
 - Warnings for immediates/addresses: if an immediate or address exceeds the instruction width (8-bit or 16-bit), the assembler emits a warning and truncates the value to the appropriate width. These are currently non-fatal warnings.
 
