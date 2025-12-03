@@ -692,6 +692,10 @@ function getWebviewContent() {
     .hw-ramdisk__grid span{color:#999;font-size:10px;text-transform:uppercase;letter-spacing:0.05em}
     .hw-ramdisk__grid strong{display:block;font-family:Consolas,monospace;color:#fff}
     .hw-ramdisk__modes{margin-bottom:6px}
+    .hw-ramdisk__details{position:relative;margin-top:8px;font-size:11px;color:#bbb}
+    .hw-ramdisk__details-note{display:inline-block;padding:4px 6px;border:1px dashed #555;border-radius:3px;background:#111;cursor:help}
+    .hw-ramdisk__table-wrapper{display:none;position:absolute;top:110%;left:0;z-index:20;background:#050505;border:1px solid #333;border-radius:4px;padding:8px;box-shadow:0 4px 12px rgba(0,0,0,0.4);min-width:320px;max-height:240px;overflow:auto}
+    .hw-ramdisk__details:hover .hw-ramdisk__table-wrapper{display:block}
     .hw-ramdisk__table{width:100%;border-collapse:collapse;font-size:11px}
     .hw-ramdisk__table th,.hw-ramdisk__table td{border:1px solid #1a1a1a;padding:3px 4px;text-align:left;font-family:Consolas,monospace}
     .hw-ramdisk__table th{background:#101010;color:#bbb;font-size:10px;text-transform:uppercase;letter-spacing:0.06em}
@@ -744,14 +748,19 @@ function getWebviewContent() {
               <div><span>Mapping Byte</span><strong>—</strong></div>
             </div>
             <div id="hw-ramdisk-modes" class="hw-ramdisk__modes"></div>
-            <table class="hw-ramdisk__table">
-              <thead>
-                <tr><th>Idx</th><th>Enabled</th><th>RAM</th><th>Stack</th><th>Byte</th></tr>
-              </thead>
-              <tbody id="hw-ramdisk-table-body">
-                <tr><td colspan="5">Waiting for data...</td></tr>
-              </tbody>
-            </table>
+              <div class="hw-ramdisk__details">
+                <span class="hw-ramdisk__details-note">Hover to view all RAM Disk mappings</span>
+                <div class="hw-ramdisk__table-wrapper" role="tooltip" aria-label="RAM Disk mapping details">
+                  <table class="hw-ramdisk__table">
+                    <thead>
+                      <tr><th>Idx</th><th>Enabled</th><th>RAM</th><th>Stack</th><th>Byte</th></tr>
+                    </thead>
+                    <tbody id="hw-ramdisk-table-body">
+                      <tr><td colspan="5">Waiting for data...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
           </div>
         </div>
         <div class="hw-peripheral">
@@ -983,14 +992,16 @@ function getWebviewContent() {
       hwMetricsEl.innerHTML = metrics.map(([label, value]) => '<dt>' + label + '</dt><dd>' + value + '</dd>').join('');
     };
     const renderRamDisk = (stats) => {
-      if (!(hwRamdiskSummary instanceof HTMLElement) || !(hwRamdiskTableBody instanceof HTMLElement)) return;
+      if (!(hwRamdiskSummary instanceof HTMLElement)) return;
       const ramDisk = stats?.peripherals?.ramDisk;
       if (!ramDisk) {
         hwRamdiskSummary.innerHTML = '<div><span>Active</span><strong>—</strong></div>';
         if (hwRamdiskModes instanceof HTMLElement) {
           hwRamdiskModes.innerHTML = '';
         }
-        hwRamdiskTableBody.innerHTML = '<tr><td colspan="5">No RAM Disk info</td></tr>';
+        if (hwRamdiskTableBody instanceof HTMLElement) {
+          hwRamdiskTableBody.innerHTML = '<tr><td colspan="5">No RAM Disk info</td></tr>';
+        }
         return;
       }
       const active = ramDisk.activeMapping;
@@ -1015,16 +1026,18 @@ function getWebviewContent() {
           hwRamdiskModes.innerHTML = '<span class="hw-chip">No mapping</span>';
         }
       }
-      const mappings = Array.isArray(ramDisk.mappings) ? ramDisk.mappings : [];
-      if (!mappings.length) {
-        hwRamdiskTableBody.innerHTML = '<tr><td colspan="5">No mappings</td></tr>';
-        return;
+      if (hwRamdiskTableBody instanceof HTMLElement) {
+        const mappings = Array.isArray(ramDisk.mappings) ? ramDisk.mappings : [];
+        if (!mappings.length) {
+          hwRamdiskTableBody.innerHTML = '<tr><td colspan="5">No mappings</td></tr>';
+        } else {
+          hwRamdiskTableBody.innerHTML = mappings.map(mapping => {
+            const rowClass = mapping.idx === ramDisk.activeIndex ? ' class="is-active"' : '';
+            const enabled = mapping.enabled ? 'ON' : 'OFF';
+            return '<tr' + rowClass + '><td>' + mapping.idx + '</td><td>' + enabled + '</td><td>' + mapping.pageRam + '</td><td>' + mapping.pageStack + '</td><td>0x' + formatByte(mapping.byte) + '</td></tr>';
+          }).join('');
+        }
       }
-      hwRamdiskTableBody.innerHTML = mappings.map(mapping => {
-        const rowClass = mapping.idx === ramDisk.activeIndex ? ' class="is-active"' : '';
-        const enabled = mapping.enabled ? 'ON' : 'OFF';
-        return '<tr' + rowClass + '><td>' + mapping.idx + '</td><td>' + enabled + '</td><td>' + mapping.pageRam + '</td><td>' + mapping.pageStack + '</td><td>0x' + formatByte(mapping.byte) + '</td></tr>';
-      }).join('');
     };
     const renderHardwareStats = (stats) => {
       if (!stats) return;
