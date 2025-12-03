@@ -65,6 +65,103 @@ export function activate(context: vscode.ExtensionContext) {
     return safe.length ? safe : fallback;
   };
 
+  const toWorkspaceVariablePath = (absoluteTarget: string, workspaceRoot: string | undefined): string => {
+    if (!workspaceRoot) return absoluteTarget;
+    try {
+      const relative = path.relative(workspaceRoot, absoluteTarget);
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+        return absoluteTarget;
+      }
+      const normalized = relative.split(path.sep).join('/');
+      const workspaceToken = '${workspaceFolder}';
+      return normalized ? `${workspaceToken}/${normalized}` : workspaceToken;
+    } catch {
+      return absoluteTarget;
+    }
+  };
+
+  const resolveWorkspaceVariablePath = (value: string | undefined, workspaceRoot: string | undefined): string | undefined => {
+    if (!value) return undefined;
+    if (!workspaceRoot) return value;
+    try {
+      const replaced = value.replace(/\$\{workspaceFolder\}/g, workspaceRoot);
+      return path.resolve(replaced);
+    } catch {
+      return value;
+    }
+  };
+
+  const ensureLaunchConfiguration = (workspaceRoot: string, romAbsolutePath: string, opts: { configName?: string } = {}): boolean => {
+    if (!workspaceRoot) return false;
+    const vscodeDir = path.join(workspaceRoot, '.vscode');
+    const launchPath = path.join(vscodeDir, 'launch.json');
+    const desiredName = opts.configName || 'Run ROM';
+    const workspaceProgramPath = toWorkspaceVariablePath(romAbsolutePath, workspaceRoot);
+
+    let launchData: { version?: string; configurations?: any[] } = { version: '0.2.0', configurations: [] };
+    let dirty = false;
+
+    if (fs.existsSync(launchPath)) {
+      try {
+        const raw = fs.readFileSync(launchPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          launchData = parsed;
+        }
+      } catch (err) {
+        logOutput('Devector: Failed to parse existing launch.json, recreating.');
+        dirty = true;
+      }
+    } else {
+      dirty = true;
+    }
+
+    if (!Array.isArray(launchData.configurations)) {
+      launchData.configurations = [];
+      dirty = true;
+    }
+
+    if (!launchData.version) {
+      launchData.version = '0.2.0';
+      dirty = true;
+    }
+
+    const configs = launchData.configurations as any[];
+    let targetConfig = configs.find((cfg) => cfg && cfg.name === desiredName);
+
+    const resolvedProgram = resolveWorkspaceVariablePath(targetConfig?.program, workspaceRoot);
+    if (targetConfig) {
+      if (resolvedProgram !== romAbsolutePath || targetConfig.type !== 'i8080' || targetConfig.request !== 'launch') {
+        targetConfig.type = 'i8080';
+        targetConfig.request = 'launch';
+        targetConfig.program = workspaceProgramPath;
+        dirty = true;
+      }
+    } else {
+      targetConfig = {
+        name: desiredName,
+        type: 'i8080',
+        request: 'launch',
+        program: workspaceProgramPath
+      } as any;
+      configs.push(targetConfig);
+      dirty = true;
+    }
+
+    if (!dirty) return false;
+
+    try {
+      if (!fs.existsSync(vscodeDir)) {
+        fs.mkdirSync(vscodeDir, { recursive: true });
+      }
+      fs.writeFileSync(launchPath, JSON.stringify(launchData, null, 4), 'utf8');
+      return true;
+    } catch (err) {
+      logOutput('Devector: Failed to write launch.json: ' + (err instanceof Error ? err.message : String(err)), true);
+      return false;
+    }
+  };
+
   const isAsmBreakpointLine = (doc: vscode.TextDocument, line: number): boolean => {
     if (!doc || line < 0 || line >= doc.lineCount) return false;
     const text = doc.lineAt(line).text;
@@ -410,6 +507,8 @@ export function activate(context: vscode.ExtensionContext) {
     const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const targetPath = path.join(workspaceRoot, `${safeName}.project.json`);
     const mainAsmPath = path.join(workspaceRoot, 'main.asm');
+    const romBaseName = sanitizeFileName(trimmed, safeName);
+    const romPath = path.join(workspaceRoot, `${romBaseName}.rom`);
     if (fs.existsSync(targetPath)) {
       const overwrite = await vscode.window.showWarningMessage(
         `${path.basename(targetPath)} already exists. Overwrite?`,
@@ -426,6 +525,10 @@ export function activate(context: vscode.ExtensionContext) {
       }
       fs.writeFileSync(targetPath, JSON.stringify(projectData, null, 4), 'utf8');
       logOutput(`Devector: Created project file ${targetPath}`, true);
+      const launchUpdated = ensureLaunchConfiguration(workspaceRoot, romPath, { configName: 'Run ROM' });
+      if (launchUpdated) {
+        logOutput(`Devector: Ensured launch configuration for ${path.basename(romPath)}`, true);
+      }
       try {
         const doc = await vscode.workspace.openTextDocument(targetPath);
         await vscode.window.showTextDocument(doc);
