@@ -52,7 +52,7 @@
     "grammars": [
       {
         "language": "asm",
-        "scopeName": "source.devector_8080",
+        "scopeName": "source.retroasm_8080",
         "path": "./syntaxes/devector_8080.tmLanguage.json"
       }
     ],
