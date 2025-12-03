@@ -391,8 +391,6 @@ type HardwareStatsMessage = {
     bc: number;
     de: number;
     hl: number;
-    wz: number;
-    ir: number;
     m: number | null;
   };
   flags: {
@@ -506,8 +504,6 @@ function collectHardwareStats(hardware: Hardware | undefined | null): HardwareSt
       bc: clamp16(cpuState.regs.bc.word),
       de: clamp16(cpuState.regs.de.word),
       hl: hlWord,
-      wz: clamp16(cpuState.regs.wz.word),
-      ir: cpuState.regs.ir.v & 0xff,
       m: mByte
     },
     flags: {
@@ -667,12 +663,12 @@ function getWebviewContent() {
     .hw-stats{background:#050505;padding:12px;border-top:1px solid #222;border-bottom:1px solid #222;display:grid;gap:12px;flex:1 1 360px;min-width:300px;max-width:420px}
     .hw-stats__group{background:#0b0b0b;border:1px solid #1f1f1f;padding:10px;border-radius:4px}
     .hw-stats__group-title{font-weight:bold;text-transform:uppercase;font-size:10px;letter-spacing:0.08em;color:#9ad0ff;margin-bottom:6px}
-    .hw-regs__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px;font-size:12px}
-    .hw-regs__item{background:#000;padding:6px;border:1px solid #222;border-radius:3px;display:flex;justify-content:space-between;align-items:center}
-    .hw-regs__item span{color:#888;font-size:10px;text-transform:uppercase}
-    .hw-regs__item strong{font-family:Consolas,monospace;color:#fff}
-    .hw-regs__flags{margin-top:8px;display:flex;gap:4px;flex-wrap:wrap}
-    .hw-flag{border:1px solid #333;padding:2px 4px;border-radius:3px;font-size:10px;letter-spacing:0.03em;color:#888}
+    .hw-regs__grid{display:flex;flex-direction:column;gap:4px;font-size:11px}
+    .hw-regs__row{display:grid;grid-template-columns:repeat(4,minmax(0,auto));gap:6px;align-items:center;background:#000;padding:4px;border:1px solid #222;border-radius:3px}
+    .hw-regs__label{color:#888;font-size:9px;text-transform:uppercase;letter-spacing:0.04em}
+    .hw-regs__value{font-family:Consolas,monospace;color:#fff;font-size:12px}
+    .hw-regs__flags{margin-top:6px;display:flex;gap:3px;flex-wrap:wrap;font-size:9px}
+    .hw-flag{border:1px solid #333;padding:1px 4px;border-radius:3px;letter-spacing:0.03em;color:#888}
     .hw-flag--on{border-color:#4caf50;color:#4caf50}
     .hw-stack-table{width:100%;border-collapse:collapse;font-size:12px}
     .hw-stack-table th,.hw-stack-table td{border:1px solid #1e1e1e;padding:4px 6px;text-align:left;font-family:Consolas,monospace}
@@ -936,11 +932,18 @@ function getWebviewContent() {
         ['BC', formatAddressWithPrefix(regs.bc)],
         ['DE', formatAddressWithPrefix(regs.de)],
         ['HL', formatAddressWithPrefix(regs.hl)],
-        ['WZ', formatAddressWithPrefix(regs.wz)],
-        ['IR', '0x' + formatByte(regs.ir ?? 0)],
         ['M', regs.m === null || regs.m === undefined ? '—' : '0x' + formatByte(regs.m)]
       ];
-      hwRegsEl.innerHTML = items.map(([label, value]) => '<div class="hw-regs__item"><span>' + label + '</span><strong>' + value + '</strong></div>').join('');
+      const rows = [];
+      for (let i = 0; i < items.length; i += 2) {
+        const pair = items.slice(i, i + 2);
+        if (pair.length < 2) {
+          pair.push(['', '']);
+        }
+        const cells = pair.map(([label, value]) => '<span class="hw-regs__label">' + (label ?? '') + '</span><strong class="hw-regs__value">' + (value ?? '') + '</strong>');
+        rows.push('<div class="hw-regs__row">' + cells.join('') + '</div>');
+      }
+      hwRegsEl.innerHTML = rows.join('');
       const flags = stats.flags || {};
       const flagOrder = [
         { key: 's', label: 'S' },
