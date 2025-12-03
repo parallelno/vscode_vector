@@ -95,6 +95,19 @@ Value = 3
   sta $d020
 .endif
 ```
+- `.loop` / `.endloop`: repeat a block of source lines `LoopCount` times (maximum per loop: 100,000). Loop counts are evaluated with the same expression engine as `.if`, so you can reference previously defined constants or simple expressions. Loop bodies can nest other `.loop` or `.if` blocks, and any constant assignments inside the block execute on each iteration because the assembler expands the body inline:
+
+```
+Value = 0
+Step  = 4
+
+.loop (Step / 2)
+  db Value
+  Value = Value + 1
+.endloop
+```
+
+The example above emits `Value` three times (0, 1, 2) and leaves `Value` set to 3 for subsequent code.
 
 Macros
 ------
