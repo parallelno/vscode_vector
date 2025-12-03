@@ -28,8 +28,37 @@ let currentToolbarIsRunning = true;
 let currentPanelController: { pause: () => void; resume: () => void; stepFrame: () => void; } | null = null;
 
 
-export async function openEmulatorPanel(context: vscode.ExtensionContext, logChannel?: vscode.OutputChannel)
+type OpenEmulatorOptions = { romPath?: string };
+
+export async function openEmulatorPanel(context: vscode.ExtensionContext, logChannel?: vscode.OutputChannel, options?: OpenEmulatorOptions)
 {
+  const pickRomFromDialog = async (): Promise<string> => {
+    const defaultUri = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length
+      ? vscode.Uri.file(path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, 'test.rom'))
+      : undefined;
+    const candidates = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      defaultUri,
+      filters: { 'ROM': ['rom', 'bin', '*'] }
+    });
+    return candidates && candidates.length ? candidates[0].fsPath : '';
+  };
+
+  let romPath = (options?.romPath || '').trim();
+  if (!romPath) {
+    romPath = await pickRomFromDialog();
+  }
+
+  if (!romPath) {
+    vscode.window.showWarningMessage('ROM selection cancelled. Emulator not started.');
+    return;
+  }
+
+  if (!fs.existsSync(romPath)) {
+    vscode.window.showErrorMessage(`ROM file not found: ${romPath}`);
+    return;
+  }
+
   const panel = vscode.window.createWebviewPanel('Devector', 'Vector-06C Emulator', vscode.ViewColumn.One, {
     enableScripts: true,
     localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'images'))]
@@ -43,14 +72,6 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   resetHardwareStatsTracking();
   resetMemoryDumpState();
 
-  // Ask user to pick a ROM file (default: workspace root test.rom)
-  const candidates: vscode.Uri[] | undefined = await vscode.window.showOpenDialog({
-    canSelectMany: false,
-    defaultUri: vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length ? vscode.Uri.file(path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, 'test.rom')) : undefined,
-    filters: { 'ROM': ['rom', 'bin', '*'] }
-  });
-
-  let romPath: string = candidates && candidates.length ? candidates[0].fsPath : '';
   const emu = new Emulator('', {}, romPath);
 
   let debugStream: fs.WriteStream | null = null;

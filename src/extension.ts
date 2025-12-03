@@ -137,12 +137,17 @@ export function activate(context: vscode.ExtensionContext) {
         targetConfig.program = workspaceProgramPath;
         dirty = true;
       }
+      if (targetConfig.runProjectRom !== true) {
+        targetConfig.runProjectRom = true;
+        dirty = true;
+      }
     } else {
       targetConfig = {
         name: desiredName,
         type: 'i8080',
         request: 'launch',
-        program: workspaceProgramPath
+        program: workspaceProgramPath,
+        runProjectRom: true
       } as any;
       configs.push(targetConfig);
       dirty = true;
@@ -420,6 +425,63 @@ export function activate(context: vscode.ExtensionContext) {
     return success;
   }
 
+  async function pickProjectRomPath(): Promise<{ project: ProjectInfo; romPath: string } | undefined> {
+    if (!vscode.workspace.workspaceFolders || !vscode.workspace.workspaceFolders.length) {
+      vscode.window.showErrorMessage('Open a folder before running a ROM.');
+      return undefined;
+    }
+
+    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const infos = gatherProjectInfos(workspaceRoot, { quiet: true });
+    if (!infos.length) {
+      vscode.window.showErrorMessage('No *.project.json files found in test/project, project, or the workspace root.');
+      return undefined;
+    }
+
+    let selected = infos[0];
+    if (infos.length > 1) {
+      const picks = infos.map((info) => ({
+        label: info.name,
+        description: path.relative(workspaceRoot, info.projectPath) || info.projectPath,
+        detail: `${info.outputBase}.rom`,
+        target: info
+      }));
+      const pick = await vscode.window.showQuickPick(picks, { placeHolder: 'Select a project ROM to run' });
+      if (!pick) return undefined;
+      selected = pick.target;
+    }
+
+    const romPath = path.join(path.dirname(selected.projectPath), `${selected.outputBase}.rom`);
+    const ensureRomReady = async (): Promise<boolean> => {
+      if (fs.existsSync(romPath)) return true;
+      const action = await vscode.window.showWarningMessage(
+        `${path.basename(romPath)} not found. Compile ${selected.name}?`,
+        'Compile',
+        'Cancel'
+      );
+      if (action !== 'Compile') return false;
+      const compiled = await compileProjectFile(selected.projectPath, { notify: true, reason: 'run rom' });
+      return compiled && fs.existsSync(romPath);
+    };
+
+    const ready = await ensureRomReady();
+    if (!ready) {
+      if (!fs.existsSync(romPath)) {
+        vscode.window.showErrorMessage(`ROM not found: ${romPath}`);
+      }
+      return undefined;
+    }
+
+    return { project: selected, romPath };
+  }
+
+  async function launchProjectRomEmulator(): Promise<boolean> {
+    const romSelection = await pickProjectRomPath();
+    if (!romSelection) return false;
+    await openEmulatorPanel(context, devectorOutput, { romPath: romSelection.romPath });
+    return true;
+  }
+
   const pendingBreakpointAsmPaths = new Set<string>();
   let breakpointCompilePromise: Promise<void> = Promise.resolve();
   let suppressBreakpointValidation = false;
@@ -483,7 +545,7 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   const runDisposable = vscode.commands.registerCommand('i8080.run', async () => {
-    openEmulatorPanel(context, devectorOutput);
+    await openEmulatorPanel(context, devectorOutput);
   });
   context.subscriptions.push(runDisposable);
 
@@ -573,12 +635,16 @@ export function activate(context: vscode.ExtensionContext) {
   const dbgProvider: vscode.DebugConfigurationProvider = {
     provideDebugConfigurations(folder, token) {
       return [
-        {
-          type: 'i8080', request: 'launch', name: 'Launch i8080', program: '${file}'
-        }
+        { type: 'i8080', request: 'launch', name: 'Launch i8080', program: '${file}' },
+        { type: 'i8080', request: 'launch', name: 'Run ROM', runProjectRom: true }
       ];
     },
-    resolveDebugConfiguration(folder, config, token) {
+    async resolveDebugConfiguration(folder, config, token) {
+      if (config && (config.runProjectRom || config.name === 'Run ROM')) {
+        await launchProjectRomEmulator();
+        return undefined;
+      }
+
       // If no program is set, try to use the active editor file
       if (!config || !config.program) {
         const ed = vscode.window.activeTextEditor;
