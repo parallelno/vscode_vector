@@ -92,7 +92,7 @@ export function getWebviewContent() {
       <div class="hw-stats__group-title">Registers</div>
       <div id="hw-regs" class="hw-regs__grid">Waiting for data...</div>
     </div>
-    <div class="hw-stats__group">
+    <div class="hw-stats__group hw-stats__group--narrow">
       <div class="hw-stats__group-title">Stack</div>
       <table class="hw-stack-table">
         <thead>
