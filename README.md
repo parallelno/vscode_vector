@@ -108,6 +108,14 @@ Step  = 4
 ```
 
 The example above emits `Value` three times (0, 1, 2) and leaves `Value` set to 3 for subsequent code.
+- `.print`: emit compile-time diagnostics to the console during the second pass. Arguments are comma-separated and can mix string literals (`"PC="`), numeric literals, labels, or arbitrary expressions. Each argument is evaluated with the same expression engine as `.if`, so you can dump intermediate values or addresses while assembling:
+
+```
+.print "Copying from", SourceAddr, "to", DestAddr
+.print "Loop count:", (EndAddr - StartAddr) / 16
+```
+
+Strings honor standard escapes (`\n`, `\t`, `\"`, etc.). Non-string arguments are printed in decimal.
 
 Macros
 ------

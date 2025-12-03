@@ -241,6 +241,35 @@ function parseCharLiteral(expr: string, start: number): { value: number; nextInd
   return { value, nextIndex: i + 1 };
 }
 
+function parseStringLiteral(text: string): string | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  if (trimmed.length < 2) return null;
+  const quote = trimmed[0];
+  if ((quote !== '"' && quote !== '\'') || trimmed[trimmed.length - 1] !== quote) return null;
+  let result = '';
+  for (let i = 1; i < trimmed.length - 1; i++) {
+    let ch = trimmed[i]!;
+    if (ch === '\\') {
+      i++;
+      if (i >= trimmed.length - 1) throw new Error('Unterminated escape in string literal');
+      const esc = trimmed[i]!;
+      switch (esc) {
+        case 'n': ch = '\n'; break;
+        case 'r': ch = '\r'; break;
+        case 't': ch = '\t'; break;
+        case '0': ch = '\0'; break;
+        case '\\': ch = '\\'; break;
+        case '\'': ch = '\''; break;
+        case '"': ch = '"'; break;
+        default: ch = esc;
+      }
+    }
+    result += ch;
+  }
+  return result;
+}
+
 function tokenizeConditionExpression(expr: string): ExprToken[] {
   const tokens: ExprToken[] = [];
   let i = 0;
@@ -1154,6 +1183,11 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       errors.push(`Labels are not allowed on .endif directives at ${originDesc}`);
       continue;
     }
+    const labelPrintMatch = line.match(/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s*\.print\b/i);
+    if (labelPrintMatch && line[0] !== '.') {
+      errors.push(`Labels are not allowed on .print directives at ${originDesc}`);
+      continue;
+    }
 
     const endifMatch = line.match(/^\.endif\b(.*)$/i);
     if (endifMatch) {
@@ -1197,6 +1231,10 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     const blockActive = ifStack.length === 0 ? true : ifStack[ifStack.length - 1].effective;
     if (!blockActive) continue;
+
+    if (/^\.print\b/i.test(line)) {
+      continue;
+    }
 
     const tokens = line.split(/\s+/);
     let labelHere: string | null = null;
@@ -1555,6 +1593,11 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       errors.push(`Labels are not allowed on .endif directives at ${originDesc}`);
       continue;
     }
+    const labelPrintMatch = line.match(/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s*\.print\b/i);
+    if (labelPrintMatch && line[0] !== '.') {
+      errors.push(`Labels are not allowed on .print directives at ${originDesc}`);
+      continue;
+    }
 
     const endifMatch = line.match(/^\.endif\b(.*)$/i);
     if (endifMatch) {
@@ -1598,6 +1641,48 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     const blockActive = ifStackSecond.length === 0 ? true : ifStackSecond[ifStackSecond.length - 1].effective;
     if (!blockActive) continue;
+
+    const printMatch = line.match(/^\.print\b(.*)$/i);
+    if (printMatch) {
+      map[srcLine] = addr;
+      const argsText = (printMatch[1] || '').trim();
+      const parts = argsText.length ? splitTopLevelArgs(argsText) : [];
+      const fragments: string[] = [];
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+      let failed = false;
+      for (const partRaw of parts) {
+        const part = partRaw.trim();
+        if (!part.length) continue;
+        try {
+          const literal = parseStringLiteral(part);
+          if (literal !== null) {
+            fragments.push(literal);
+            continue;
+          }
+        } catch (err: any) {
+          errors.push(`Invalid string literal in .print at ${originDesc}: ${err?.message || err}`);
+          failed = true;
+          break;
+        }
+        try {
+          const value = evaluateConditionExpression(part, ctx, true);
+          fragments.push(String(value));
+        } catch (err: any) {
+          errors.push(`Failed to evaluate .print expression '${part}' at ${originDesc}: ${err?.message || err}`);
+          failed = true;
+          break;
+        }
+      }
+      if (!failed) {
+        const output = fragments.length ? fragments.join(' ') : '';
+        try {
+          console.log(output);
+        } catch (err) {
+          // ignore console output errors
+        }
+      }
+      continue;
+    }
 
     if (/^[A-Za-z_][A-Za-z0-9_]*:$/.test(line)) continue; // label only
 
