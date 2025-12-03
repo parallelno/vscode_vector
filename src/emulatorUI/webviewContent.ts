@@ -149,10 +149,10 @@ export function getWebviewContent() {
       <label>Start <input type="text" id="memory-start" value="0000" maxlength="6" spellcheck="false" /></label>
       <span id="memory-pc-hint" class="memory-dump__pc-hint"></span>
       <div class="memory-dump__controls">
-        <button type="button" data-mem-delta="-256">-0x100</button>
-        <button type="button" data-mem-delta="-16">-0x10</button>
-        <button type="button" data-mem-delta="16">+0x10</button>
-        <button type="button" data-mem-delta="256">+0x100</button>
+        <button type="button" data-mem-delta="-256">-100</button>
+        <button type="button" data-mem-delta="-16">-10</button>
+        <button type="button" data-mem-delta="16">+10</button>
+        <button type="button" data-mem-delta="256">+100</button>
         <button type="button" data-mem-action="refresh">Refresh</button>
       </div>
     </div>
@@ -257,7 +257,7 @@ export function getWebviewContent() {
         }
       }
       if (memoryPcHint instanceof HTMLElement) {
-        memoryPcHint.textContent = memoryDumpState.followPc ? '' : 'PC: ' + formatAddressWithPrefix(memoryDumpState.pc);
+        memoryPcHint.textContent = memoryDumpState.followPc ? '' : 'PC: ' + formatAddress(memoryDumpState.pc);
       }
     };
     const renderMemoryDump = () => {
@@ -310,13 +310,13 @@ export function getWebviewContent() {
       ];
       const flagHtml = flagOrder.map(flag => '<span class="hw-flag ' + (flags[flag.key] ? 'hw-flag--on' : '') + '">' + flag.label + '</span>').join('');
       const bodyItems = [
-        ['AF', formatAddressWithPrefix(regs.af)],
-        ['BC', formatAddressWithPrefix(regs.bc)],
-        ['DE', formatAddressWithPrefix(regs.de)],
-        ['HL', formatAddressWithPrefix(regs.hl)],
-        ['SP', formatAddressWithPrefix(regs.sp)],
-        ['PC', formatAddressWithPrefix(regs.pc)],
-        ['M', regs.m === null || regs.m === undefined ? '—' : '0x' + formatByte(regs.m)]
+        ['AF', formatAddress(regs.af)],
+        ['BC', formatAddress(regs.bc)],
+        ['DE', formatAddress(regs.de)],
+        ['HL', formatAddress(regs.hl)],
+        ['SP', formatAddress(regs.sp)],
+        ['PC', formatAddress(regs.pc)],
+        ['M', regs.m === null || regs.m === undefined ? '—' : formatByte(regs.m)]
       ];
       const bodyHtml = bodyItems.map(([label, value]) => '<div class="hw-regs__item"><span>' + label + '</span><strong>' + value + '</strong></div>').join('');
       hwRegsEl.innerHTML = '<div class="hw-regs__flags" title="Flags">' + flagHtml + '</div>' + bodyHtml;
@@ -331,7 +331,7 @@ export function getWebviewContent() {
       }
       hwStackBody.innerHTML = entries.map(entry => {
         const offset = formatSigned(entry.offset ?? 0);
-        const value = formatAddressWithPrefix(entry.value ?? 0);
+        const value = formatAddress(entry.value ?? 0);
         const rowClass = entry.offset === 0 ? ' class="is-sp"' : '';
         return '<tr' + rowClass + '><td>' + offset + '</td><td>' + value + '</td></tr>';
       }).join('');
@@ -350,7 +350,7 @@ export function getWebviewContent() {
         ['Frames', formatNumber(hw.frames)],
         ['Frame CC', formatNumber(hw.frameCc)],
         ['Raster', hw.rasterLine + ':' + hw.rasterPixel],
-        ['Scroll', '0x' + formatByte(hw.scrollIdx ?? 0)],
+        ['Scroll', formatByte(hw.scrollIdx ?? 0)],
         ['Display', hw.displayMode + ' px'],
         ['Rus/Lat', hw.rusLat ? 'LAT' : 'RUS'],
         ['INT', hw.inte ? 'Enabled' : 'Disabled'],
@@ -378,16 +378,16 @@ export function getWebviewContent() {
         { label: 'Status', value: active ? (active.enabled ? 'Enabled' : 'Disabled') : '—' },
         { label: 'RAM Page', value: active && active.pageRam !== undefined ? active.pageRam.toString() : '—' },
         { label: 'Stack Page', value: active && active.pageStack !== undefined ? active.pageStack.toString() : '—' },
-        { label: 'Mapping Byte', value: active ? '0x' + formatByte(active.byte) : '—' }
+        { label: 'Mapping Byte', value: active ? formatByte(active.byte) : '—' }
       ];
       hwRamdiskSummary.innerHTML = summaryItems.map(item => '<div><span>' + item.label + '</span><strong>' + item.value + '</strong></div>').join('');
       if (hwRamdiskModes instanceof HTMLElement) {
         if (active) {
           const chips = [
             { label: 'Stack', enabled: active.modeStack },
-            { label: '0x8000', enabled: active.modeRam8 },
-            { label: '0xA000', enabled: active.modeRamA },
-            { label: '0xE000', enabled: active.modeRamE }
+            { label: '8000', enabled: active.modeRam8 },
+            { label: 'A000', enabled: active.modeRamA },
+            { label: 'E000', enabled: active.modeRamE }
           ];
           hwRamdiskModes.innerHTML = chips.map(chip => '<span class="hw-chip ' + (chip.enabled ? 'hw-chip--on' : '') + '">' + chip.label + '</span>').join('');
         } else {
@@ -402,7 +402,7 @@ export function getWebviewContent() {
           hwRamdiskTableBody.innerHTML = mappings.map(mapping => {
             const rowClass = mapping.idx === ramDisk.activeIndex ? ' class="is-active"' : '';
             const enabled = mapping.enabled ? 'ON' : 'OFF';
-            return '<tr' + rowClass + '><td>' + mapping.idx + '</td><td>' + enabled + '</td><td>' + mapping.pageRam + '</td><td>' + mapping.pageStack + '</td><td>0x' + formatByte(mapping.byte) + '</td></tr>';
+            return '<tr' + rowClass + '><td>' + mapping.idx + '</td><td>' + enabled + '</td><td>' + mapping.pageRam + '</td><td>' + mapping.pageStack + '</td><td>' + formatByte(mapping.byte) + '</td></tr>';
           }).join('');
         }
       }
@@ -459,7 +459,7 @@ export function getWebviewContent() {
       memoryFollowCheckbox.addEventListener('change', () => {
         postMemoryCommand('follow', { value: memoryFollowCheckbox.checked });
         if (!memoryFollowCheckbox.checked && memoryPcHint instanceof HTMLElement) {
-          memoryPcHint.textContent = 'PC: ' + formatAddressWithPrefix(memoryDumpState.pc);
+          memoryPcHint.textContent = 'PC: ' + formatAddress(memoryDumpState.pc);
         }
       });
     }
