@@ -91,12 +91,13 @@ export function activate(context: vscode.ExtensionContext) {
     }
   };
 
-  const ensureLaunchConfiguration = (workspaceRoot: string, romAbsolutePath: string, opts: { configName?: string } = {}): boolean => {
+  const ensureLaunchConfiguration = (workspaceRoot: string, romAbsolutePath: string, opts: { configName?: string; extraProps?: Record<string, any> } = {}): boolean => {
     if (!workspaceRoot) return false;
     const vscodeDir = path.join(workspaceRoot, '.vscode');
     const launchPath = path.join(vscodeDir, 'launch.json');
     const desiredName = opts.configName || 'Run ROM';
     const workspaceProgramPath = toWorkspaceVariablePath(romAbsolutePath, workspaceRoot);
+    const enforcedProps = { runProjectRom: true, ...(opts.extraProps || {}) } as Record<string, any>;
 
     let launchData: { version?: string; configurations?: any[] } = { version: '0.2.0', configurations: [] };
     let dirty = false;
@@ -137,18 +138,22 @@ export function activate(context: vscode.ExtensionContext) {
         targetConfig.program = workspaceProgramPath;
         dirty = true;
       }
-      if (targetConfig.runProjectRom !== true) {
-        targetConfig.runProjectRom = true;
-        dirty = true;
+      for (const [key, value] of Object.entries(enforcedProps)) {
+        if (targetConfig[key] !== value) {
+          targetConfig[key] = value;
+          dirty = true;
+        }
       }
     } else {
       targetConfig = {
         name: desiredName,
         type: 'i8080',
         request: 'launch',
-        program: workspaceProgramPath,
-        runProjectRom: true
+        program: workspaceProgramPath
       } as any;
+      for (const [key, value] of Object.entries(enforcedProps)) {
+        targetConfig[key] = value;
+      }
       configs.push(targetConfig);
       dirty = true;
     }
@@ -425,7 +430,7 @@ export function activate(context: vscode.ExtensionContext) {
     return success;
   }
 
-  async function pickProjectRomPath(): Promise<{ project: ProjectInfo; romPath: string } | undefined> {
+  async function pickProjectRomPath(options: { compileBeforeRun?: boolean } = {}): Promise<{ project: ProjectInfo; romPath: string } | undefined> {
     if (!vscode.workspace.workspaceFolders || !vscode.workspace.workspaceFolders.length) {
       vscode.window.showErrorMessage('Open a folder before running a ROM.');
       return undefined;
@@ -453,6 +458,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     const romPath = path.join(path.dirname(selected.projectPath), `${selected.outputBase}.rom`);
     const ensureRomReady = async (): Promise<boolean> => {
+      if (options.compileBeforeRun) {
+        const compiled = await compileProjectFile(selected.projectPath, { notify: true, reason: 'compile & run' });
+        return compiled && fs.existsSync(romPath);
+      }
       if (fs.existsSync(romPath)) return true;
       const action = await vscode.window.showWarningMessage(
         `${path.basename(romPath)} not found. Compile ${selected.name}?`,
@@ -475,8 +484,8 @@ export function activate(context: vscode.ExtensionContext) {
     return { project: selected, romPath };
   }
 
-  async function launchProjectRomEmulator(): Promise<boolean> {
-    const romSelection = await pickProjectRomPath();
+  async function launchProjectRomEmulator(options: { compileBeforeRun?: boolean } = {}): Promise<boolean> {
+    const romSelection = await pickProjectRomPath({ compileBeforeRun: options.compileBeforeRun });
     if (!romSelection) return false;
     await openEmulatorPanel(context, devectorOutput, { romPath: romSelection.romPath });
     return true;
@@ -587,9 +596,13 @@ export function activate(context: vscode.ExtensionContext) {
       }
       fs.writeFileSync(targetPath, JSON.stringify(projectData, null, 4), 'utf8');
       logOutput(`Devector: Created project file ${targetPath}`, true);
-      const launchUpdated = ensureLaunchConfiguration(workspaceRoot, romPath, { configName: 'Run ROM' });
-      if (launchUpdated) {
-        logOutput(`Devector: Ensured launch configuration for ${path.basename(romPath)}`, true);
+      const runLaunchUpdated = ensureLaunchConfiguration(workspaceRoot, romPath, { configName: 'Run ROM' });
+      if (runLaunchUpdated) {
+        logOutput(`Devector: Ensured Run ROM launch for ${path.basename(romPath)}`, true);
+      }
+      const compileLaunchUpdated = ensureLaunchConfiguration(workspaceRoot, romPath, { configName: 'Compile & Run', extraProps: { compileBeforeRun: true } });
+      if (compileLaunchUpdated) {
+        logOutput(`Devector: Ensured Compile & Run launch for ${path.basename(romPath)}`, true);
       }
       try {
         const doc = await vscode.workspace.openTextDocument(targetPath);
@@ -636,12 +649,13 @@ export function activate(context: vscode.ExtensionContext) {
     provideDebugConfigurations(folder, token) {
       return [
         { type: 'i8080', request: 'launch', name: 'Launch i8080', program: '${file}' },
-        { type: 'i8080', request: 'launch', name: 'Run ROM', runProjectRom: true }
+        { type: 'i8080', request: 'launch', name: 'Run ROM', runProjectRom: true },
+        { type: 'i8080', request: 'launch', name: 'Compile & Run', runProjectRom: true, compileBeforeRun: true }
       ];
     },
     async resolveDebugConfiguration(folder, config, token) {
-      if (config && (config.runProjectRom || config.name === 'Run ROM')) {
-        await launchProjectRomEmulator();
+      if (config && (config.runProjectRom || config.name === 'Run ROM' || config.name === 'Compile & Run')) {
+        await launchProjectRomEmulator({ compileBeforeRun: !!config.compileBeforeRun || config.name === 'Compile & Run' });
         return undefined;
       }
 
