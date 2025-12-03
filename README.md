@@ -85,6 +85,16 @@ Features and notes
 
 - Diagnostics: invalid mnemonics or bad operands are reported as errors with file/line and the offending source text. The assembler rejects invalid operations such as `MOV M,M`.
 - `.macro` / `.endmacro`: build parameterized macros (with defaults, nested calls, and per-invocation label namespaces) that expand inline before assembly.
+- `.if` / `.endif`: wrap any sequence of source lines in a conditional block that assembles only when its expression evaluates to non-zero. You can nest `.if` directives freely, and the parser short-circuits inactive branches so forward references inside skipped blocks do not trigger errors. Expressions support decimal/hex/binary literals, character constants, symbol names (labels, constants, `@local` labels), arithmetic (`+ - * / % << >>`), comparisons (`== != < <= > >=`), bitwise logic (`& | ^ ~`), and boolean operators (`! && ||`). Example:
+
+```
+Value = 3
+
+.if (Value >= 2) && (SomeFlag == TRUE)
+  mvi a, #$00
+  sta $d020
+.endif
+```
 
 Macros
 ------

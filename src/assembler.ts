@@ -166,6 +166,438 @@ function parseAddressToken(v: string, labels?: Map<string, { addr: number; line:
   return null;
 }
 
+type LocalLabelRecord = { key: string; line: number };
+type LocalLabelScopeIndex = Map<string, Map<string, LocalLabelRecord[]>>;
+
+type ExpressionEvalContext = {
+  labels: Map<string, { addr: number; line: number; src?: string }>;
+  consts: Map<string, number>;
+  localsIndex: LocalLabelScopeIndex;
+  scopes: string[];
+  lineIndex: number; // 1-based index in the expanded source list
+};
+
+type IfFrame = {
+  effective: boolean;
+  suppressed: boolean;
+  origin?: SourceOrigin;
+  lineIndex: number;
+};
+
+type ExprToken =
+  | { type: 'number'; value: number }
+  | { type: 'identifier'; name: string }
+  | { type: 'operator'; op: string }
+  | { type: 'paren'; value: '(' | ')' };
+
+const MULTI_CHAR_OPERATORS = ['&&', '||', '==', '!=', '<=', '>=', '<<', '>>'];
+const SINGLE_CHAR_OPERATORS = new Set(['+', '-', '*', '/', '%', '&', '|', '^', '!', '~', '<', '>']);
+
+function isIdentifierStart(ch: string): boolean {
+  return /[A-Za-z_@]/.test(ch);
+}
+
+function isIdentifierPart(ch: string): boolean {
+  return /[A-Za-z0-9_@.]/.test(ch);
+}
+
+function parseCharLiteral(expr: string, start: number): { value: number; nextIndex: number } {
+  const quote = expr[start]!;
+  let i = start + 1;
+  let buffer = '';
+  while (i < expr.length && expr[i] !== quote) {
+    let ch = expr[i]!;
+    if (ch === '\\') {
+      i++;
+      if (i >= expr.length) throw new Error('Unterminated character literal in expression');
+      const esc = expr[i]!;
+      switch (esc) {
+        case 'n': ch = '\n'; break;
+        case 'r': ch = '\r'; break;
+        case 't': ch = '\t'; break;
+        case '0': ch = '\0'; break;
+        case '\\': ch = '\\'; break;
+        case '\'': ch = '\''; break;
+        case '"': ch = '"'; break;
+        default: ch = esc;
+      }
+    }
+    buffer += ch;
+    i++;
+  }
+  if (i >= expr.length || expr[i] !== quote) {
+    throw new Error('Unterminated character literal in expression');
+  }
+  if (!buffer.length) throw new Error('Empty character literal in expression');
+  if (buffer.length > 1) throw new Error('Multi-character literals are not supported in expressions');
+  const value = buffer.charCodeAt(0) & 0xff;
+  return { value, nextIndex: i + 1 };
+}
+
+function tokenizeConditionExpression(expr: string): ExprToken[] {
+  const tokens: ExprToken[] = [];
+  let i = 0;
+  while (i < expr.length) {
+    const ch = expr[i]!;
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+    const two = expr.slice(i, i + 2);
+    if (MULTI_CHAR_OPERATORS.includes(two)) {
+      tokens.push({ type: 'operator', op: two });
+      i += 2;
+      continue;
+    }
+    if (ch === '(' || ch === ')') {
+      tokens.push({ type: 'paren', value: ch });
+      i++;
+      continue;
+    }
+    if (SINGLE_CHAR_OPERATORS.has(ch)) {
+      tokens.push({ type: 'operator', op: ch });
+      i++;
+      continue;
+    }
+    if (ch === '\'' || ch === '"') {
+      const literal = parseCharLiteral(expr, i);
+      tokens.push({ type: 'number', value: literal.value });
+      i = literal.nextIndex;
+      continue;
+    }
+    if (ch === '$') {
+      let j = i + 1;
+      while (j < expr.length && /[0-9a-fA-F]/.test(expr[j]!)) j++;
+      if (j === i + 1) throw new Error('Malformed hex literal in expression');
+      const value = parseInt(expr.slice(i + 1, j), 16);
+      tokens.push({ type: 'number', value });
+      i = j;
+      continue;
+    }
+    if (ch === '0' && (expr[i + 1] === 'x' || expr[i + 1] === 'X')) {
+      let j = i + 2;
+      while (j < expr.length && /[0-9a-fA-F]/.test(expr[j]!)) j++;
+      if (j === i + 2) throw new Error('Malformed hex literal in expression');
+      const value = parseInt(expr.slice(i + 2, j), 16);
+      tokens.push({ type: 'number', value });
+      i = j;
+      continue;
+    }
+    if (ch === '0' && (expr[i + 1] === 'b' || expr[i + 1] === 'B')) {
+      let j = i + 2;
+      while (j < expr.length && /[01_]/.test(expr[j]!)) j++;
+      if (j === i + 2) throw new Error('Malformed binary literal in expression');
+      const value = parseInt(expr.slice(i + 2, j).replace(/_/g, ''), 2);
+      tokens.push({ type: 'number', value });
+      i = j;
+      continue;
+    }
+    if (ch === '%') {
+      let j = i + 1;
+      while (j < expr.length && /[01_]/.test(expr[j]!)) j++;
+      if (j === i + 1) throw new Error('Malformed binary literal in expression');
+      const value = parseInt(expr.slice(i + 1, j).replace(/_/g, ''), 2);
+      tokens.push({ type: 'number', value });
+      i = j;
+      continue;
+    }
+    if (/[0-9]/.test(ch)) {
+      let j = i + 1;
+      while (j < expr.length && /[0-9]/.test(expr[j]!)) j++;
+      const value = parseInt(expr.slice(i, j), 10);
+      tokens.push({ type: 'number', value });
+      i = j;
+      continue;
+    }
+    if (isIdentifierStart(ch)) {
+      let j = i + 1;
+      while (j < expr.length && isIdentifierPart(expr[j]!)) j++;
+      const ident = expr.slice(i, j);
+      if (/^b[01_]+$/i.test(ident)) {
+        const value = parseInt(ident.slice(1).replace(/_/g, ''), 2);
+        tokens.push({ type: 'number', value });
+      } else {
+        tokens.push({ type: 'identifier', name: ident });
+      }
+      i = j;
+      continue;
+    }
+    throw new Error(`Unexpected character '${ch}' in expression`);
+  }
+  return tokens;
+}
+
+function resolveSymbolValue(name: string, ctx: ExpressionEvalContext): number | null {
+  if (!name) return null;
+  const lowered = name.toLowerCase();
+  if (lowered === 'true') return 1;
+  if (lowered === 'false') return 0;
+  if (ctx.consts.has(name)) return ctx.consts.get(name)!;
+  if (ctx.labels.has(name)) return ctx.labels.get(name)!.addr;
+  if (name[0] === '@') {
+    if (ctx.lineIndex <= 0) return null;
+    const scopeKey = ctx.scopes[ctx.lineIndex - 1];
+    if (!scopeKey) return null;
+    const fileMap = ctx.localsIndex.get(scopeKey);
+    if (!fileMap) return null;
+    const arr = fileMap.get(name.slice(1));
+    if (!arr || !arr.length) return null;
+    let chosen = arr[0];
+    for (const entry of arr) {
+      if ((entry.line || 0) <= ctx.lineIndex) chosen = entry;
+      else break;
+    }
+    const key = chosen.key;
+    if (ctx.labels.has(key)) return ctx.labels.get(key)!.addr;
+    return null;
+  }
+  return null;
+}
+
+class ConditionExpressionParser {
+  private index = 0;
+
+  constructor(private readonly tokens: ExprToken[], private readonly ctx: ExpressionEvalContext) {}
+
+  parseExpression(allowEval: boolean): number {
+    const value = this.parseLogicalOr(allowEval);
+    if (this.index < this.tokens.length) {
+      throw new Error(`Unexpected token '${this.describeToken(this.tokens[this.index]!)}' in expression`);
+    }
+    return allowEval ? value : 0;
+  }
+
+  private parseLogicalOr(allowEval: boolean): number {
+    let value = this.parseLogicalAnd(allowEval);
+    let matched = false;
+    while (this.matchOperator('||')) {
+      matched = true;
+      const rhs = this.parseLogicalAnd(allowEval && value === 0);
+      if (allowEval) value = (value !== 0 || rhs !== 0) ? 1 : 0;
+    }
+    if (!allowEval) return 0;
+    return matched ? (value !== 0 ? 1 : 0) : value;
+  }
+
+  private parseLogicalAnd(allowEval: boolean): number {
+    let value = this.parseBitwiseOr(allowEval);
+    let matched = false;
+    while (this.matchOperator('&&')) {
+      matched = true;
+      const rhs = this.parseBitwiseOr(allowEval && value !== 0);
+      if (allowEval) value = (value !== 0 && rhs !== 0) ? 1 : 0;
+    }
+    if (!allowEval) return 0;
+    return matched ? (value !== 0 ? 1 : 0) : value;
+  }
+
+  private parseBitwiseOr(allowEval: boolean): number {
+    let value = this.parseBitwiseXor(allowEval);
+    while (this.matchOperator('|')) {
+      const rhs = this.parseBitwiseXor(allowEval);
+      if (allowEval) value = (value | 0) | (rhs | 0);
+    }
+    return allowEval ? value : 0;
+  }
+
+  private parseBitwiseXor(allowEval: boolean): number {
+    let value = this.parseBitwiseAnd(allowEval);
+    while (this.matchOperator('^')) {
+      const rhs = this.parseBitwiseAnd(allowEval);
+      if (allowEval) value = (value | 0) ^ (rhs | 0);
+    }
+    return allowEval ? value : 0;
+  }
+
+  private parseBitwiseAnd(allowEval: boolean): number {
+    let value = this.parseEquality(allowEval);
+    while (this.matchOperator('&')) {
+      const rhs = this.parseEquality(allowEval);
+      if (allowEval) value = (value | 0) & (rhs | 0);
+    }
+    return allowEval ? value : 0;
+  }
+
+  private parseEquality(allowEval: boolean): number {
+    let value = this.parseRelational(allowEval);
+    let matched = false;
+    while (true) {
+      if (this.matchOperator('==')) {
+        matched = true;
+        const rhs = this.parseRelational(allowEval);
+        if (allowEval) value = value === rhs ? 1 : 0;
+      } else if (this.matchOperator('!=')) {
+        matched = true;
+        const rhs = this.parseRelational(allowEval);
+        if (allowEval) value = value !== rhs ? 1 : 0;
+      } else {
+        break;
+      }
+    }
+    if (!allowEval) return 0;
+    return matched ? (value !== 0 ? 1 : 0) : value;
+  }
+
+  private parseRelational(allowEval: boolean): number {
+    let value = this.parseShift(allowEval);
+    let matched = false;
+    while (true) {
+      if (this.matchOperator('<')) {
+        matched = true;
+        const rhs = this.parseShift(allowEval);
+        if (allowEval) value = value < rhs ? 1 : 0;
+      } else if (this.matchOperator('>')) {
+        matched = true;
+        const rhs = this.parseShift(allowEval);
+        if (allowEval) value = value > rhs ? 1 : 0;
+      } else if (this.matchOperator('<=')) {
+        matched = true;
+        const rhs = this.parseShift(allowEval);
+        if (allowEval) value = value <= rhs ? 1 : 0;
+      } else if (this.matchOperator('>=')) {
+        matched = true;
+        const rhs = this.parseShift(allowEval);
+        if (allowEval) value = value >= rhs ? 1 : 0;
+      } else {
+        break;
+      }
+    }
+    if (!allowEval) return 0;
+    return matched ? (value !== 0 ? 1 : 0) : value;
+  }
+
+  private parseShift(allowEval: boolean): number {
+    let value = this.parseAdditive(allowEval);
+    while (true) {
+      if (this.matchOperator('<<')) {
+        const rhs = this.parseAdditive(allowEval);
+        if (allowEval) value = (value | 0) << (rhs & 31);
+      } else if (this.matchOperator('>>')) {
+        const rhs = this.parseAdditive(allowEval);
+        if (allowEval) value = (value | 0) >> (rhs & 31);
+      } else {
+        break;
+      }
+    }
+    return allowEval ? value : 0;
+  }
+
+  private parseAdditive(allowEval: boolean): number {
+    let value = this.parseMultiplicative(allowEval);
+    while (true) {
+      if (this.matchOperator('+')) {
+        const rhs = this.parseMultiplicative(allowEval);
+        if (allowEval) value = value + rhs;
+      } else if (this.matchOperator('-')) {
+        const rhs = this.parseMultiplicative(allowEval);
+        if (allowEval) value = value - rhs;
+      } else {
+        break;
+      }
+    }
+    return allowEval ? value : 0;
+  }
+
+  private parseMultiplicative(allowEval: boolean): number {
+    let value = this.parseUnary(allowEval);
+    while (true) {
+      if (this.matchOperator('*')) {
+        const rhs = this.parseUnary(allowEval);
+        if (allowEval) value = value * rhs;
+      } else if (this.matchOperator('/')) {
+        const rhs = this.parseUnary(allowEval);
+        if (allowEval) {
+          if (rhs === 0) throw new Error('Division by zero in expression');
+          value = value / rhs;
+        }
+      } else if (this.matchOperator('%')) {
+        const rhs = this.parseUnary(allowEval);
+        if (allowEval) {
+          if (rhs === 0) throw new Error('Modulo by zero in expression');
+          value = value % rhs;
+        }
+      } else {
+        break;
+      }
+    }
+    return allowEval ? value : 0;
+  }
+
+  private parseUnary(allowEval: boolean): number {
+    if (this.matchOperator('+')) return this.parseUnary(allowEval);
+    if (this.matchOperator('-')) {
+      const val = this.parseUnary(allowEval);
+      return allowEval ? -val : 0;
+    }
+    if (this.matchOperator('!')) {
+      const val = this.parseUnary(allowEval);
+      return allowEval ? (val ? 0 : 1) : 0;
+    }
+    if (this.matchOperator('~')) {
+      const val = this.parseUnary(allowEval);
+      return allowEval ? (~val) | 0 : 0;
+    }
+    return this.parsePrimary(allowEval);
+  }
+
+  private parsePrimary(allowEval: boolean): number {
+    const token = this.tokens[this.index];
+    if (!token) throw new Error('Unexpected end of expression');
+    if (token.type === 'paren' && token.value === '(') {
+      this.index++;
+      const value = this.parseLogicalOr(allowEval);
+      if (!this.matchParen(')')) throw new Error('Unmatched ( in expression');
+      return allowEval ? value : 0;
+    }
+    if (token.type === 'number') {
+      this.index++;
+      return allowEval ? token.value : 0;
+    }
+    if (token.type === 'identifier') {
+      this.index++;
+      if (!allowEval) return 0;
+      const resolved = resolveSymbolValue(token.name, this.ctx);
+      if (resolved === null) throw new Error(`Undefined symbol '${token.name}' in expression`);
+      return resolved;
+    }
+    if (token.type === 'paren' && token.value === ')') {
+      throw new Error('Unmatched ) in expression');
+    }
+    throw new Error(`Unexpected token '${this.describeToken(token)}' in expression`);
+  }
+
+  private matchOperator(op: string): boolean {
+    const token = this.tokens[this.index];
+    if (token && token.type === 'operator' && token.op === op) {
+      this.index++;
+      return true;
+    }
+    return false;
+  }
+
+  private matchParen(value: '(' | ')'): boolean {
+    const token = this.tokens[this.index];
+    if (token && token.type === 'paren' && token.value === value) {
+      this.index++;
+      return true;
+    }
+    return false;
+  }
+
+  private describeToken(token: ExprToken): string {
+    if (token.type === 'number') return token.value.toString();
+    if (token.type === 'identifier') return token.name;
+    if (token.type === 'operator') return token.op;
+    return token.value;
+  }
+}
+
+function evaluateConditionExpression(expr: string, ctx: ExpressionEvalContext, allowEval = true): number {
+  const tokens = tokenizeConditionExpression(expr);
+  const parser = new ConditionExpressionParser(tokens, ctx);
+  return parser.parseExpression(allowEval);
+}
+
 function resolveLocalLabelKey(name: string, originFile?: string, sourcePath?: string): string {
   if (!name || name[0] !== '@') return name;
   // strip leading @ and append '_' + basename without extension of the file
@@ -527,7 +959,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const labels = new Map<string, { addr: number; line: number; src?: string }>();
   const consts = new Map<string, number>();
   // localsIndex: scopeKey -> (localName -> array of { key, line }) ordered by appearance
-  const localsIndex = new Map<string, Map<string, Array<{ key: string; line: number }>>>();
+  const localsIndex: LocalLabelScopeIndex = new Map();
   // global numeric id counters per local name to ensure exported keys are unique
   const globalLocalCounters = new Map<string, number>();
   const scopes: string[] = new Array(lines.length);
@@ -546,15 +978,14 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const warnings: string[] = [];
   const origins = macroExpanded.origins;
 
+  const ifStack: IfFrame[] = [];
+
   // First pass: labels and address calculation
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
-    const line = raw.replace(/\/\/.*$|;.*$/, '').trim();
+    const line = stripInlineComment(raw).trim();
     if (!line) continue;
-    // handle optional leading label (either with colon or bare before an opcode/directive)
-    const tokens = line.split(/\s+/);
-    let labelHere: string | null = null;
-    // If the origin file changed from the previous line, treat it as a scope boundary
+
     if (i > 0) {
       const prev = origins[i - 1];
       const curr = origins[i];
@@ -564,14 +995,70 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         directiveCounter++;
       }
     }
-    // record current scope key for this line (before any .org on this line takes effect)
     scopes[i] = getScopeKey(origins[i]);
+    const originDesc = describeOrigin(origins[i], i + 1, sourcePath);
+
+    const labelIfMatch = line.match(/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s*\.if\b/i);
+    if (labelIfMatch && line[0] !== '.') {
+      errors.push(`Labels are not allowed on .if directives at ${originDesc}`);
+      continue;
+    }
+    const labelEndifMatch = line.match(/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s*\.endif\b/i);
+    if (labelEndifMatch && line[0] !== '.') {
+      errors.push(`Labels are not allowed on .endif directives at ${originDesc}`);
+      continue;
+    }
+
+    const endifMatch = line.match(/^\.endif\b(.*)$/i);
+    if (endifMatch) {
+      const remainder = (endifMatch[1] || '').trim();
+      if (remainder.length) errors.push(`Unexpected tokens after .endif at ${originDesc}`);
+      if (!ifStack.length) errors.push(`.endif without matching .if at ${originDesc}`);
+      else ifStack.pop();
+      continue;
+    }
+
+    const ifMatch = line.match(/^\.if\b(.*)$/i);
+    if (ifMatch) {
+      const expr = (ifMatch[1] || '').trim();
+      const parentActive = ifStack.length === 0 ? true : ifStack[ifStack.length - 1].effective;
+      if (!expr.length) {
+        errors.push(`Missing expression for .if at ${originDesc}`);
+        ifStack.push({ effective: false, suppressed: !parentActive, origin: origins[i], lineIndex: i + 1 });
+        continue;
+      }
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
+      let conditionResult = false;
+      if (!parentActive) {
+        try {
+          evaluateConditionExpression(expr, ctx, false);
+        } catch (err: any) {
+          errors.push(`Failed to parse .if expression at ${originDesc}: ${err?.message || err}`);
+        }
+      } else {
+        try {
+          const value = evaluateConditionExpression(expr, ctx, true);
+          conditionResult = value !== 0;
+        } catch (err: any) {
+          errors.push(`Failed to evaluate .if at ${originDesc}: ${err?.message || err}`);
+          conditionResult = false;
+        }
+      }
+      const effective = parentActive && conditionResult;
+      ifStack.push({ effective, suppressed: !parentActive, origin: origins[i], lineIndex: i + 1 });
+      continue;
+    }
+
+    const blockActive = ifStack.length === 0 ? true : ifStack[ifStack.length - 1].effective;
+    if (!blockActive) continue;
+
+    const tokens = line.split(/\s+/);
+    let labelHere: string | null = null;
 
     // simple constant / EQU handling: "NAME = expr" or "NAME EQU expr"
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
       const name = tokens[0];
       const rhs = tokens.slice(2).join(' ').trim();
-      // try numeric then label/const resolution
       let val: number | null = parseNumberFull(rhs);
       if (val === null) {
         if (consts.has(rhs)) val = consts.get(rhs)!;
@@ -584,7 +1071,6 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       }
       continue;
     }
-    // also support forms with no whitespace tokens (e.g. "NAME=16") or explicit EQU
     const assignMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
     if (assignMatch) {
       const name = assignMatch[1];
@@ -618,14 +1104,12 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       tokens.shift();
       const org = origins[i];
       const scopeKey = scopes[i];
-      // local label
       if (labelHere && labelHere[0] === '@') {
         const localName = labelHere.slice(1);
         let fileMap = localsIndex.get(scopeKey);
         if (!fileMap) { fileMap = new Map(); localsIndex.set(scopeKey, fileMap); }
         let arr = fileMap.get(localName);
         if (!arr) { arr = []; fileMap.set(localName, arr); }
-        // assign a globally unique integer id for this local name
         const gid = globalLocalCounters.get(localName) || 0;
         globalLocalCounters.set(localName, gid + 1);
         const key = '@' + localName + '_' + gid;
@@ -645,7 +1129,6 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         continue;
       }
     } else if (tokens.length >= 2 && /^\.?org$/i.test(tokens[1])) {
-      // bare label before a directive, e.g. "start .org 0x100"
       labelHere = tokens[0];
       tokens.shift();
     }
@@ -813,6 +1296,13 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     errors.push(`Unknown or unsupported opcode '${op}' at line ${i + 1}`);
   }
 
+  if (ifStack.length) {
+    for (let idx = ifStack.length - 1; idx >= 0; idx--) {
+      const frame = ifStack[idx];
+      errors.push(`Missing .endif for .if at ${describeOrigin(frame.origin, frame.lineIndex, sourcePath)}`);
+    }
+  }
+
   if (errors.length) return { success: false, errors, origins };
 
   // Second pass: generate bytes and source-line map
@@ -899,14 +1389,72 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     return null;
   }
 
+  const ifStackSecond: IfFrame[] = [];
+
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const srcLine = i + 1;
-    const line = raw.replace(/\/\/.*$|;.*$/, '').trim();
+    const line = stripInlineComment(raw).trim();
     if (!line) continue;
+
+    const originDesc = describeOrigin(origins[i], srcLine, sourcePath);
+
+    const labelIfMatch = line.match(/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s*\.if\b/i);
+    if (labelIfMatch && line[0] !== '.') {
+      errors.push(`Labels are not allowed on .if directives at ${originDesc}`);
+      continue;
+    }
+    const labelEndifMatch = line.match(/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s*\.endif\b/i);
+    if (labelEndifMatch && line[0] !== '.') {
+      errors.push(`Labels are not allowed on .endif directives at ${originDesc}`);
+      continue;
+    }
+
+    const endifMatch = line.match(/^\.endif\b(.*)$/i);
+    if (endifMatch) {
+      const remainder = (endifMatch[1] || '').trim();
+      if (remainder.length) errors.push(`Unexpected tokens after .endif at ${originDesc}`);
+      if (!ifStackSecond.length) errors.push(`.endif without matching .if at ${originDesc}`);
+      else ifStackSecond.pop();
+      continue;
+    }
+
+    const ifMatch = line.match(/^\.if\b(.*)$/i);
+    if (ifMatch) {
+      const expr = (ifMatch[1] || '').trim();
+      const parentActive = ifStackSecond.length === 0 ? true : ifStackSecond[ifStackSecond.length - 1].effective;
+      if (!expr.length) {
+        errors.push(`Missing expression for .if at ${originDesc}`);
+        ifStackSecond.push({ effective: false, suppressed: !parentActive, origin: origins[i], lineIndex: srcLine });
+        continue;
+      }
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+      let conditionResult = false;
+      if (!parentActive) {
+        try {
+          evaluateConditionExpression(expr, ctx, false);
+        } catch (err: any) {
+          errors.push(`Failed to parse .if expression at ${originDesc}: ${err?.message || err}`);
+        }
+      } else {
+        try {
+          const value = evaluateConditionExpression(expr, ctx, true);
+          conditionResult = value !== 0;
+        } catch (err: any) {
+          errors.push(`Failed to evaluate .if at ${originDesc}: ${err?.message || err}`);
+          conditionResult = false;
+        }
+      }
+      const effective = parentActive && conditionResult;
+      ifStackSecond.push({ effective, suppressed: !parentActive, origin: origins[i], lineIndex: srcLine });
+      continue;
+    }
+
+    const blockActive = ifStackSecond.length === 0 ? true : ifStackSecond[ifStackSecond.length - 1].effective;
+    if (!blockActive) continue;
+
     if (/^[A-Za-z_][A-Za-z0-9_]*:$/.test(line)) continue; // label only
 
-    // handle optional leading label on the same line
     const tokens = line.split(/\s+/);
     let labelHere: string | null = null;
     if (tokens[0].endsWith(':')) {
@@ -920,7 +1468,6 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     map[srcLine] = addr;
 
-    // skip simple constant definitions in second pass (NAME = expr, NAME=expr or NAME EQU expr)
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
       continue;
     }
@@ -1333,6 +1880,13 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (op === 'NOP') { out.push(0x00); addr += 1; continue; }
 
     errors.push(`Unhandled opcode '${op}' at ${srcLine}`);
+  }
+
+  if (ifStackSecond.length) {
+    for (let idx = ifStackSecond.length - 1; idx >= 0; idx--) {
+      const frame = ifStackSecond[idx];
+      errors.push(`Missing .endif for .if at ${describeOrigin(frame.origin, frame.lineIndex, sourcePath)}`);
+    }
   }
 
   if (errors.length) return { success: false, errors, origins };
