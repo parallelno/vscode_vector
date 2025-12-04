@@ -41,7 +41,24 @@
             "line": 9
         }
     },
-    "consts": {},
+    "consts": {
+        "OPCODE_EI": {
+            "value": 251,
+            "hex": "0x00FB"
+        },
+        "OPCODE_RET": {
+            "value": 201,
+            "hex": "0x00C9"
+        },
+        "PALETTE_LEN": {
+            "value": 16,
+            "hex": "0x0010"
+        },
+        "TEMP_BYTE": {
+            "value": 0,
+            "hex": "0x0000"
+        }
+    },
     "lineAddresses": {
         "prg_main.asm": {
             "3": "0x0000",
@@ -108,13 +125,5 @@
             "16": "0x0222"
         }
     },
-    "breakpoints": {
-        "prg_main.asm": [
-            {
-                "line": 9,
-                "enabled": true,
-                "addr": "0x0100"
-            }
-        ]
-    }
+    "breakpoints": {}
 }

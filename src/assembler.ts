@@ -1160,8 +1160,10 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   // convert labels map to plain object for return
   const labelsOut: Record<string, { addr: number; line: number; src?: string }> = {};
   for (const [k, v] of labels) labelsOut[k] = { addr: v.addr, line: v.line, src: v.src };
+  const constsOut: Record<string, number> = {};
+  for (const [k, v] of consts) constsOut[k] = v;
 
-  return { success: true, output: Buffer.from(out), map, labels: labelsOut, warnings, printMessages, origins };
+  return { success: true, output: Buffer.from(out), map, labels: labelsOut, consts: constsOut, warnings, printMessages, origins };
 }
 
 // convenience when using from extension
@@ -1277,6 +1279,15 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
           addr: '0x' + info.addr.toString(16).toUpperCase().padStart(4, '0'),
           src: info.src || (sourcePath ? path.basename(sourcePath) : undefined),
           line: info.line
+        };
+      }
+    }
+    if (res.consts) {
+      for (const [name, value] of Object.entries(res.consts)) {
+        const normalized = ((value % 0x10000) + 0x10000) % 0x10000;
+        tokens.consts[name] = {
+          value,
+          hex: '0x' + normalized.toString(16).toUpperCase().padStart(4, '0')
         };
       }
     }

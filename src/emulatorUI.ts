@@ -20,6 +20,13 @@ type SourceLineRef = { file: string; line: number };
 
 let lastBreakpointSource: { romPath: string; hardware?: Hardware | null; log?: vscode.OutputChannel } | null = null;
 let lastAddressSourceMap: Map<number, SourceLineRef> | null = null;
+type SymbolMeta = { value: number; kind: 'label' | 'const' };
+type SymbolCache = {
+  byName: Map<string, SymbolMeta>;
+  byLowerCase: Map<string, SymbolMeta>;
+  lineAddresses: Map<string, Map<number, number>>;
+};
+let lastSymbolCache: SymbolCache | null = null;
 let highlightContext: vscode.ExtensionContext | null = null;
 let pausedLineDecoration: vscode.TextEditorDecorationType | null = null;
 let lastHighlightedEditor: vscode.TextEditor | null = null;
@@ -340,6 +347,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     lastBreakpointSource = null;
     clearHighlightedSourceLine();
     lastAddressSourceMap = null;
+    clearSymbolMetadataCache();
     highlightContext = null;
     resetMemoryDumpState();
     disposeHardwareStatsTracking();
@@ -388,9 +396,34 @@ export function stepFramePanel() {
   }
 }
 
+export type HoverSymbolInfo = { value: number; kind: 'label' | 'const' | 'line' };
+
+export function resolveEmulatorHoverSymbol(identifier: string, location?: { filePath?: string; line?: number }): HoverSymbolInfo | undefined {
+  if (!lastSymbolCache) return undefined;
+  const token = (identifier || '').trim();
+  if (token) {
+    const exact = lastSymbolCache.byName.get(token) || lastSymbolCache.byLowerCase.get(token.toLowerCase());
+    if (exact) return exact;
+  }
+  if (location?.filePath && location.line !== undefined) {
+    const fileKey = normalizeFileKey(location.filePath);
+    const perLine = fileKey ? lastSymbolCache.lineAddresses.get(fileKey) : undefined;
+    const addr = perLine?.get(location.line);
+    if (addr !== undefined) {
+      return { value: addr, kind: 'line' };
+    }
+  }
+  return undefined;
+}
+
+export function isEmulatorPanelPaused(): boolean {
+  return !!currentPanelController && !currentToolbarIsRunning;
+}
+
 
 function loadBreakpointsFromToken(romPath: string, hardware: Hardware | undefined | null, log?: vscode.OutputChannel): number {
   lastAddressSourceMap = null;
+  clearSymbolMetadataCache();
   if (!hardware || !romPath) return 0;
   const tokenPath = deriveTokenPath(romPath);
   if (!tokenPath || !fs.existsSync(tokenPath)) return 0;
@@ -398,6 +431,7 @@ function loadBreakpointsFromToken(romPath: string, hardware: Hardware | undefine
   let tokens: any;
   try {
     tokens = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
+    cacheSymbolMetadata(tokens);
   } catch (err) {
     try { log?.appendLine(`Failed to parse token file ${tokenPath}: ${err}`); } catch (e) {}
     return 0;
@@ -533,6 +567,75 @@ function normalizeFileKey(filePath?: string): string | undefined {
 
 function formatFileLineKey(fileKey: string, line: number): string {
   return `${fileKey}#${line}`;
+}
+
+function clearSymbolMetadataCache() {
+  lastSymbolCache = null;
+}
+
+function cacheSymbolMetadata(tokens: any) {
+  if (!tokens || typeof tokens !== 'object') {
+    clearSymbolMetadataCache();
+    return;
+  }
+  const byName = new Map<string, SymbolMeta>();
+  const byLowerCase = new Map<string, SymbolMeta>();
+  const registerSymbol = (name: string | undefined, meta: SymbolMeta) => {
+    if (!name) return;
+    byName.set(name, meta);
+    const lower = name.toLowerCase();
+    if (lower) {
+      byLowerCase.set(lower, meta);
+    }
+  };
+  if (tokens.labels && typeof tokens.labels === 'object') {
+    for (const [labelName, rawInfo] of Object.entries(tokens.labels as Record<string, any>)) {
+      const info: any = rawInfo;
+      const addr = parseAddressLike(info?.addr ?? info?.address);
+      if (addr === undefined) continue;
+      registerSymbol(labelName, { value: addr, kind: 'label' });
+    }
+  }
+  if (tokens.consts && typeof tokens.consts === 'object') {
+    for (const [constName, rawValue] of Object.entries(tokens.consts as Record<string, any>)) {
+      let resolved: number | undefined;
+      if (rawValue && typeof rawValue === 'object') {
+        if (typeof rawValue.value === 'number' && Number.isFinite(rawValue.value)) {
+          resolved = rawValue.value;
+        } else if (rawValue.hex !== undefined) {
+          resolved = parseAddressLike(rawValue.hex);
+        } else {
+          resolved = parseAddressLike(rawValue.value);
+        }
+      } else {
+        resolved = parseAddressLike(rawValue);
+      }
+      if (resolved === undefined) continue;
+      registerSymbol(constName, { value: resolved, kind: 'const' });
+    }
+  }
+
+  const lineAddresses = new Map<string, Map<number, number>>();
+  if (tokens.lineAddresses && typeof tokens.lineAddresses === 'object') {
+    for (const [fileKeyRaw, entries] of Object.entries(tokens.lineAddresses as Record<string, any>)) {
+      if (!entries || typeof entries !== 'object') continue;
+      const normalizedKey = normalizeFileKey(fileKeyRaw);
+      if (!normalizedKey) continue;
+      const perLine = new Map<number, number>();
+      for (const [lineKey, addrRaw] of Object.entries(entries as Record<string, any>)) {
+        const addr = parseAddressLike(addrRaw);
+        if (addr === undefined) continue;
+        const lineNum = Number(lineKey);
+        if (!Number.isFinite(lineNum)) continue;
+        perLine.set(lineNum, addr & 0xffff);
+      }
+      if (perLine.size) {
+        lineAddresses.set(normalizedKey, perLine);
+      }
+    }
+  }
+
+  lastSymbolCache = { byName, byLowerCase, lineAddresses };
 }
 
 function ensureHighlightDecoration(context: vscode.ExtensionContext) {
