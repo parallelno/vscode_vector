@@ -1016,9 +1016,9 @@ export function activate(context: vscode.ExtensionContext) {
       const lineText = line.text;
 
       // Match .include "filename" or .include 'filename'
-      // Strip comments first for the match
+      // Strip trailing comments first for the match (uses same pattern as findIncludedFiles)
       const textWithoutComment = lineText.replace(/\/\/.*$|;.*$/, '');
-      // Capture both the full match and the path to get position information
+      // Capture groups: (1) prefix including whitespace and .include keyword + space, (2) quote char, (3) path
       const includeRegex = /^(\s*\.include\s+)(["'])([^"']+)\2/i;
       const includeMatch = textWithoutComment.match(includeRegex);
       if (!includeMatch) {
@@ -1027,12 +1027,13 @@ export function activate(context: vscode.ExtensionContext) {
 
       const includedPath = includeMatch[3];
       // Calculate the range of the path string based on the match
-      // includeMatch[1] is the prefix ".include " part, includeMatch[2] is the quote char
-      const pathStartIndex = includeMatch[1].length + 1; // +1 for the opening quote
+      // includeMatch[1] is the prefix ".include " part (including leading whitespace)
+      // +1 for the opening quote character
+      const pathStartIndex = includeMatch[1].length + 1;
       const pathEndIndex = pathStartIndex + includedPath.length;
 
-      // Check if the cursor position is within the path
-      if (position.character < pathStartIndex || position.character > pathEndIndex) {
+      // Check if the cursor position is within the path (exclusive end)
+      if (position.character < pathStartIndex || position.character >= pathEndIndex) {
         return undefined;
       }
 
