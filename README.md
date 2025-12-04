@@ -116,6 +116,18 @@ The example above emits `Value` three times (0, 1, 2) and leaves `Value` set to 
 ```
 
 Strings honor standard escapes (`\n`, `\t`, `\"`, etc.). Non-string arguments are printed in decimal.
+- `.align value`: pad the output with zero bytes until the program counter reaches the next multiple of `value`, then resume emitting instructions. The argument can be any expression understood by the `.if` evaluator, must be positive, and has to be a power of two (1, 2, 4, 8, ...). If the current address is already aligned no padding is emitted. Example:
+
+```
+.org $100
+Start:
+  db 0, 1, 2
+.align 16   ; next instructions start at $110
+AlignedLabel:
+  mvi a, 0
+```
+
+`AlignedLabel` is assigned the aligned address ($110) and the gap between `$103` and `$10F` is filled with zeros.
 
 Macros
 ------

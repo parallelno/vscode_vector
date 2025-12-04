@@ -53,7 +53,7 @@ function splitTopLevelArgs(text: string): string[] {
   let depth = 0;
   let inSingle = false;
   let inDouble = false;
-  for (let i = 0; i < text.length; i++) {
+    for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     const prev = i > 0 ? text[i - 1] : '';
     if (!inDouble && ch === '\'' && prev !== '\\') {
@@ -1138,6 +1138,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   // global numeric id counters per local name to ensure exported keys are unique
   const globalLocalCounters = new Map<string, number>();
   const scopes: string[] = new Array(lines.length);
+  const alignDirectives: Array<{ value: number }> = new Array(lines.length);
   let directiveCounter = 0;
   function getFileKey(orig?: SourceOrigin) {
     return (orig && orig.file) ? path.resolve(orig.file) : (sourcePath ? path.resolve(sourcePath) : '<memory>');
@@ -1154,6 +1155,36 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const origins = loopExpanded.origins;
 
   const ifStack: IfFrame[] = [];
+
+  function registerLabel(name: string, address: number, origin: SourceOrigin | undefined, fallbackLine: number, scopeKey: string) {
+    if (!name) return;
+    const srcName = origin && origin.file ? path.basename(origin.file) : (sourcePath ? path.basename(sourcePath) : undefined);
+    if (name[0] === '@') {
+      const localName = name.slice(1);
+      let fileMap = localsIndex.get(scopeKey);
+      if (!fileMap) {
+        fileMap = new Map();
+        localsIndex.set(scopeKey, fileMap);
+      }
+      let arr = fileMap.get(localName);
+      if (!arr) {
+        arr = [];
+        fileMap.set(localName, arr);
+      }
+      const gid = globalLocalCounters.get(localName) || 0;
+      globalLocalCounters.set(localName, gid + 1);
+      const key = '@' + localName + '_' + gid;
+      arr.push({ key, line: origin ? origin.line : fallbackLine });
+      labels.set(key, { addr: address, line: origin ? origin.line : fallbackLine, src: srcName });
+    } else {
+      if (labels.has(name)) {
+        const prev = labels.get(name)!;
+        errors.push(`Duplicate label '${name}' at ${fallbackLine} (previously at ${prev.line})`);
+      } else {
+        labels.set(name, { addr: address, line: origin ? origin.line : fallbackLine, src: srcName });
+      }
+    }
+  }
 
   // First pass: labels and address calculation
   for (let i = 0; i < lines.length; i++) {
@@ -1237,7 +1268,8 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     const tokens = line.split(/\s+/);
-    let labelHere: string | null = null;
+    let pendingDirectiveLabel: string | null = null;
+    const isDirectiveToken = (value: string | undefined) => !!value && /^\.?(org|align)$/i.test(value);
 
     // simple constant / EQU handling: "NAME = expr" or "NAME EQU expr"
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
@@ -1284,36 +1316,19 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
 
     if (tokens[0].endsWith(':')) {
-      labelHere = tokens[0].slice(0, -1);
+      const candidate = tokens[0].slice(0, -1);
       tokens.shift();
-      const org = origins[i];
-      const scopeKey = scopes[i];
-      if (labelHere && labelHere[0] === '@') {
-        const localName = labelHere.slice(1);
-        let fileMap = localsIndex.get(scopeKey);
-        if (!fileMap) { fileMap = new Map(); localsIndex.set(scopeKey, fileMap); }
-        let arr = fileMap.get(localName);
-        if (!arr) { arr = []; fileMap.set(localName, arr); }
-        const gid = globalLocalCounters.get(localName) || 0;
-        globalLocalCounters.set(localName, gid + 1);
-        const key = '@' + localName + '_' + gid;
-        arr.push({ key, line: org ? org.line : i + 1 });
-        labels.set(key, { addr, line: org ? org.line : i + 1, src: org && org.file ? path.basename(org.file) : (sourcePath ? path.basename(sourcePath) : undefined) });
+      const nextToken = tokens.length ? tokens[0] : '';
+      if (isDirectiveToken(nextToken)) {
+        pendingDirectiveLabel = candidate;
       } else {
-        const key = labelHere;
-        if (labels.has(key)) {
-          const prev = labels.get(key)!;
-          errors.push(`Duplicate label '${labelHere}' at ${i + 1} (previously at ${prev.line})`);
-        } else {
-          const org = origins[i];
-          labels.set(key, { addr, line: org ? org.line : i + 1, src: org && org.file ? path.basename(org.file) : (sourcePath ? path.basename(sourcePath) : undefined) });
-        }
+        registerLabel(candidate, addr, origins[i], i + 1, scopes[i]);
       }
       if (!tokens.length) {
         continue;
       }
-    } else if (tokens.length >= 2 && /^\.?org$/i.test(tokens[1])) {
-      labelHere = tokens[0];
+    } else if (tokens.length >= 2 && isDirectiveToken(tokens[1])) {
+      pendingDirectiveLabel = tokens[0];
       tokens.shift();
     }
 
@@ -1371,26 +1386,52 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       addr = val;
       // .org defines a new (narrower) scope region for subsequent labels
       directiveCounter++;
-      if (labelHere) {
+      if (pendingDirectiveLabel) {
         const org = origins[i];
         const newScope = getScopeKey(org);
-        if (labelHere[0] === '@') {
-          const localName = labelHere.slice(1);
-          let fileMap = localsIndex.get(newScope);
-          if (!fileMap) { fileMap = new Map(); localsIndex.set(newScope, fileMap); }
-          let arr = fileMap.get(localName);
-          if (!arr) { arr = []; fileMap.set(localName, arr); }
-          const gid = globalLocalCounters.get(localName) || 0;
-          globalLocalCounters.set(localName, gid + 1);
-          const key = '@' + localName + '_' + gid;
-          arr.push({ key, line: org ? org.line : i + 1 });
-          labels.set(key, { addr, line: org ? org.line : i + 1, src: org && org.file ? path.basename(org.file) : (sourcePath ? path.basename(sourcePath) : undefined) });
-        } else {
-          const key = labelHere;
-          if (labels.has(key)) errors.push(`Duplicate label ${labelHere} at ${i + 1}`);
-          labels.set(key, { addr, line: org ? org.line : i + 1, src: org && org.file ? path.basename(org.file) : (sourcePath ? path.basename(sourcePath) : undefined) });
-        }
+        const fallbackLine = org && typeof org.line === 'number' ? org.line : (i + 1);
+        registerLabel(pendingDirectiveLabel, addr, org, fallbackLine, newScope);
+        pendingDirectiveLabel = null;
       }
+      continue;
+    }
+
+    if (op === '.ALIGN' || op === 'ALIGN') {
+      const exprText = tokens.slice(1).join(' ').trim();
+      if (!exprText.length) {
+        errors.push(`Missing value for .align at ${originDesc}`);
+        continue;
+      }
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
+      let alignment = 0;
+      try {
+        alignment = evaluateConditionExpression(exprText, ctx, true);
+      } catch (err: any) {
+        errors.push(`Failed to evaluate .align at ${originDesc}: ${err?.message || err}`);
+        continue;
+      }
+      if (alignment <= 0) {
+        errors.push(`.align value must be positive at ${originDesc}`);
+        continue;
+      }
+      if ((alignment & (alignment - 1)) !== 0) {
+        errors.push(`.align value must be a power of two at ${originDesc}`);
+        continue;
+      }
+      const remainder = addr % alignment;
+      const alignedAddr = remainder === 0 ? addr : addr + (alignment - remainder);
+      if (alignedAddr > 0x10000) {
+        errors.push(`.align would move address beyond 0x10000 at ${originDesc}`);
+        continue;
+      }
+      alignDirectives[i] = { value: alignment };
+      if (pendingDirectiveLabel) {
+        const origin = origins[i];
+        const fallbackLine = origin && typeof origin.line === 'number' ? origin.line : (i + 1);
+        registerLabel(pendingDirectiveLabel, alignedAddr, origin, fallbackLine, scopes[i]);
+        pendingDirectiveLabel = null;
+      }
+      addr = alignedAddr;
       continue;
     }
 
@@ -1737,6 +1778,19 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       if (val === null) { errors.push(`Bad ORG address '${aTok}' at ${srcLine}`); continue; }
       addr = val;
       // label for this ORG (if present) was already registered in first pass; nothing to emit
+      continue;
+    }
+
+    if (op === '.ALIGN' || op === 'ALIGN') {
+      const directive = alignDirectives[i];
+      if (!directive) { continue; }
+      const alignment = directive.value;
+      if (alignment <= 0) { continue; }
+      const remainder = addr % alignment;
+      if (remainder === 0) { continue; }
+      const gap = alignment - remainder;
+      for (let k = 0; k < gap; k++) out.push(0);
+      addr += gap;
       continue;
     }
 
