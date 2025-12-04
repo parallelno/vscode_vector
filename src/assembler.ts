@@ -280,9 +280,9 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     const op = tokens[0].toUpperCase();
 
-    if (op === 'DB') {
+    if (op === 'DB' || op === '.BYTE') {
       // DB value [,value]
-      const rest = line.slice(2).trim();
+      const rest = tokens.slice(1).join(' ').trim();
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
       // account for multi-char quoted strings which emit multiple bytes
       for (const p of parts) {
@@ -296,15 +296,15 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       continue;
     }
 
-    if (op === '.WORD' || op === 'WORD') {
+    if (op === 'DW' || op === '.WORD') {
       const rest = tokens.slice(1).join(' ').trim();
       if (!rest.length) {
-        errors.push(`Missing value for .word at ${originDesc}`);
+        errors.push(`Missing value for ${op} at ${originDesc}`);
         continue;
       }
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
       if (!parts.length) {
-        errors.push(`Missing value for .word at ${originDesc}`);
+        errors.push(`Missing value for ${op} at ${originDesc}`);
         continue;
       }
       for (const part of parts) {
@@ -716,8 +716,8 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     const op = tokens[0].toUpperCase();
 
-    if (op === 'DB') {
-      const rest = line.slice(2).trim();
+    if (op === 'DB' || op === '.BYTE') {
+      const rest = tokens.slice(1).join(' ').trim();
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
       for (const p of parts) {
         if (/^'.*'$/.test(p)) {
@@ -729,7 +729,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         } else {
           let val = toByte(p);
           if (val === null) {
-            errors.push(`Bad DB value '${p}' at ${srcLine}`);
+            errors.push(`Bad ${op} value '${p}' at ${srcLine}`);
             val = 0;
           }
           out.push(val & 0xff);
@@ -739,15 +739,15 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       continue;
     }
 
-    if (op === '.WORD' || op === 'WORD') {
+    if (op === 'DW' || op === '.WORD') {
       const rest = tokens.slice(1).join(' ').trim();
       if (!rest.length) {
-        errors.push(`Missing value for .word at ${originDesc}`);
+        errors.push(`Missing value for ${op} at ${originDesc}`);
         continue;
       }
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
       if (!parts.length) {
-        errors.push(`Missing value for .word at ${originDesc}`);
+        errors.push(`Missing value for ${op} at ${originDesc}`);
         continue;
       }
       for (const part of parts) {

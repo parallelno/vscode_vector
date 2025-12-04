@@ -136,6 +136,18 @@ AlignedLabel:
 
 The snippet above outputs `34 12 2A 00 0F 00 FB FF`.
 
+Alternative: `DW`
+
+- `.byte value[, values...]`: emit one or more bytes at the current address. Accepts the numeric literal forms (decimal/hex/binary) and supports comma-separated lists. Example:
+
+```
+.byte $10, b1111_0000, 255, 0x100, b11_000_111
+```
+
+The snippet above emits `41 42 43 10 F0 FF` (ASCII string plus raw bytes).
+
+Alternative: `DB`
+
 Macros
 ------
 
