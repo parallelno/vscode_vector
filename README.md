@@ -35,6 +35,37 @@ npm run test-directives
 The command recompiles the TypeScript sources and executes every test case under `test/assembler/directives`, reporting a PASS/FAIL line for each directive scenario plus a summary total. The process exits with a non-zero status when a failure is detected, so it can plug directly into CI.
 Current coverage includes `.org`, `.align` (success + failure paths), `.if`/`.endif`, `.loop`/`.endloop` (standalone and inside macros), `.include` (flat + nested + missing-file errors), `.print`, `DS`, literal/binary/hex formats with expression evaluation, and both macro-bodied plus standalone local-label resolution. Add more fixture `.asm` files under `test/assembler/directives` and register them in `src/tools/run_directive_tests.ts` to grow the matrix.
 
+Emulator tests
+--------------
+
+Run the i8080 CPU emulator test suite at any time:
+
+```pwsh
+npm run test-emulator
+```
+
+The command recompiles the TypeScript sources and executes all emulator test cases stored in `.test/emulator/`. The test runner:
+
+- Assembles each `.asm` test file
+- Loads the resulting ROM into the emulator
+- Executes a specified number of instructions
+- Validates CPU state (registers, flags) and memory against expected values
+- Generates a comprehensive report grouped by test category
+
+Current coverage includes:
+- **Data Transfer**: MVI, MOV, LXI, LDA, STA, MOV M,r
+- **Arithmetic**: ADD, SUB, INR, DCR, DAD, ADC, SBB, INX, DCX
+- **Logical**: ANA, ORA, XRA, CMP, CMA
+- **Rotate**: RLC, RRC
+- **Control Flow**: JMP, JNZ, JZ, CALL, RET
+- **Stack**: PUSH, POP
+- **Flags**: STC, CMC
+
+Add more test `.asm` files under `.test/emulator/` and register them in `src/tools/run_emulator_tests.ts` to expand the test matrix. Each test case specifies:
+- Source file name
+- Number of instructions to execute
+- Expected register values, flag states, and/or memory contents
+
 How to assemble and run
 -----------------------
 
