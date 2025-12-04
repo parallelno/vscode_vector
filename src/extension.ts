@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { assembleAndWrite } from './assembler';
+import type { PrintMessage } from './assembler/types';
 import { openEmulatorPanel, pauseEmulatorPanel, resumeEmulatorPanel, stepFramePanel, reloadEmulatorBreakpointsFromFile } from './emulatorUI';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -12,6 +13,32 @@ export function activate(context: vscode.ExtensionContext) {
       devectorOutput.appendLine(message);
       if (reveal) devectorOutput.show(true);
     } catch (e) { /* ignore output channel errors */ }
+  };
+
+  const emitPrintMessages = (messages?: PrintMessage[]) => {
+    if (!messages || !messages.length) return;
+    for (const msg of messages) {
+      let originLabel: string | undefined;
+      if (msg.origin?.file) {
+        const base = path.basename(msg.origin.file);
+        if (msg.origin.line) originLabel = `${base}:${msg.origin.line}`;
+        else originLabel = base;
+      } else if (msg.origin?.line) {
+        originLabel = `line ${msg.origin.line}`;
+      } else if (msg.lineIndex) {
+        originLabel = `line ${msg.lineIndex}`;
+      }
+      const prefix = originLabel ? `[.print ${originLabel}]` : '[.print]';
+      const text = (msg.text ?? '').toString();
+      logOutput(`${prefix} ${text}`, true);
+    }
+  };
+
+  const emitWarnings = (warnings?: string[]) => {
+    if (!warnings || !warnings.length) return;
+    for (const warning of warnings) {
+      logOutput(`Devector warning: ${warning}`, true);
+    }
   };
 
   const readMainTemplate = (): string => {
@@ -227,6 +254,8 @@ export function activate(context: vscode.ExtensionContext) {
     if (!srcPath) return false;
     const outPath = options.outPath || srcPath.replace(/\.asm$/i, '.rom');
     const writeRes = assembleAndWrite(contents, outPath, srcPath);
+    emitPrintMessages(writeRes.printMessages);
+    emitWarnings(writeRes.warnings);
     if (!writeRes.success) {
       const summarizeError = (raw: string): string => {
         const firstLine = raw.split(/\r?\n/)[0]?.trim() || raw.trim();

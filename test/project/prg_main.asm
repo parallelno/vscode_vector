@@ -70,8 +70,9 @@ set_palette: ; non-local label
 			jp	@loop
 			ei
 			ret
-
+.align 0x100
 palette:
+.print "palette addr: ", palette
 	  		.byte 0x10, 0x30, %1111_0000, b00_000_010
 			DB 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
 			.word $EE, 0x03,

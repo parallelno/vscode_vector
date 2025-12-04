@@ -23,6 +23,18 @@ npm run compile
 
 3. Assemble and run the included test ROM (see below).
 
+Assembler directive tests
+--------------------------
+
+Run the focused directive regression suite at any time:
+
+```pwsh
+npm run test-directives
+```
+
+The command recompiles the TypeScript sources and executes every test case under `test/assembler/directives`, reporting a PASS/FAIL line for each directive scenario plus a summary total. The process exits with a non-zero status when a failure is detected, so it can plug directly into CI.
+Current coverage includes `.org`, `.align` (success + failure paths), `.if`/`.endif`, `.loop`/`.endloop` (standalone and inside macros), `.include` (flat + nested + missing-file errors), `.print`, `DS`, literal/binary/hex formats with expression evaluation, and both macro-bodied plus standalone local-label resolution. Add more fixture `.asm` files under `test/assembler/directives` and register them in `src/tools/run_directive_tests.ts` to grow the matrix.
+
 How to assemble and run
 -----------------------
 

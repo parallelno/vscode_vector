@@ -1,0 +1,14 @@
+CONST_A = 4
+CONST_B EQU 0x0010
+CONST_BIN = b1100_0011
+
+        .org 0x0010
+literal_block:
+        db 255
+        db 0x1A
+        db b1010_0001
+        db %1100
+        .word $1234
+        .if ((CONST_B - CONST_A) == 0x000C) && ((CONST_BIN & 0x0003) == 0x0003)
+        db 0xEE
+        .endif

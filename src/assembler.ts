@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { AssembleResult, ExpressionEvalContext, IfFrame, LocalLabelScopeIndex, SourceOrigin } from './assembler/types';
+import { AssembleResult, AssembleWriteResult, ExpressionEvalContext, IfFrame, LocalLabelScopeIndex, PrintMessage, SourceOrigin } from './assembler/types';
 import {
   stripInlineComment,
   splitTopLevelArgs,
@@ -98,6 +98,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   let addr = 0;
   const errors: string[] = [];
   const warnings: string[] = [];
+  const printMessages: PrintMessage[] = [];
   const origins = loopExpanded.origins;
 
   const ifStack: IfFrame[] = [];
@@ -677,6 +678,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       }
       if (!failed) {
         const output = fragments.length ? fragments.join(' ') : '';
+        printMessages.push({ text: output, origin: origins[i], lineIndex: srcLine });
         try {
           console.log(output);
         } catch (err) {
@@ -1159,11 +1161,11 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const labelsOut: Record<string, { addr: number; line: number; src?: string }> = {};
   for (const [k, v] of labels) labelsOut[k] = { addr: v.addr, line: v.line, src: v.src };
 
-  return { success: true, output: Buffer.from(out), map, labels: labelsOut, warnings, origins };
+  return { success: true, output: Buffer.from(out), map, labels: labelsOut, warnings, printMessages, origins };
 }
 
 // convenience when using from extension
-export function assembleAndWrite(source: string, outPath: string, sourcePath?: string): { success: boolean; path?: string; errors?: string[] } {
+export function assembleAndWrite(source: string, outPath: string, sourcePath?: string): AssembleWriteResult {
   const startTime = Date.now();
   const res = assemble(source, sourcePath);
   if (!res.success || !res.output) {
@@ -1212,7 +1214,12 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
         console.error('');
       }
     }
-    return { success: false, errors: formatted.length ? formatted : res.errors };
+    return {
+      success: false,
+      errors: formatted.length ? formatted : res.errors,
+      warnings: res.warnings,
+      printMessages: res.printMessages
+    };
   }
 
   // Print warnings (non-fatal) in a similar formatted style so they are visible
@@ -1299,5 +1306,11 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
     console.log(`Devector: Compilation succeeded to ${outPath} (${res.output ? res.output.length : 0} bytes) in ${durationMs} ms`);
   } catch (e) {}
 
-  return { success: true, path: outPath, timeMs: durationMs } as any;
+  return {
+    success: true,
+    path: outPath,
+    timeMs: durationMs,
+    warnings: res.warnings,
+    printMessages: res.printMessages
+  };
 }

@@ -18,7 +18,8 @@
     "watch": "tsc -w -p .",
     "prepublish": "npm run compile",
     "run-rom-ts": "npm run compile && node ./out/tools/runRom.js",
-    "run-frames": "npm run compile && node ./out/tools/run_frames.js"
+    "run-frames": "npm run compile && node ./out/tools/run_frames.js",
+    "test-directives": "npm run compile && node ./out/tools/run_directive_tests.js"
   },
   "devDependencies": {
     "@types/node": "^18.15.11",

@@ -12,14 +12,30 @@ export type SourceOrigin = {
   };
 };
 
+export type PrintMessage = {
+  text: string;
+  origin?: SourceOrigin;
+  lineIndex?: number;
+};
+
 export type AssembleResult = {
   success: boolean;
   output?: Buffer;
   map?: Record<number, number>;
   errors?: string[];
   warnings?: string[];
+  printMessages?: PrintMessage[];
   labels?: Record<string, { addr: number; line: number; src?: string }>;
   origins?: SourceOrigin[];
+};
+
+export type AssembleWriteResult = {
+  success: boolean;
+  path?: string;
+  errors?: string[];
+  warnings?: string[];
+  printMessages?: PrintMessage[];
+  timeMs?: number;
 };
 
 export type MacroParam = { name: string; defaultValue?: string };
