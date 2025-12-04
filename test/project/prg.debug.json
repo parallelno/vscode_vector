@@ -125,5 +125,29 @@
             "16": "0x0222"
         }
     },
+    "dataLines": {
+        "prg_main.asm": {
+            "76": {
+                "addr": "0x0200",
+                "byteLength": 4,
+                "unitBytes": 1
+            },
+            "77": {
+                "addr": "0x0204",
+                "byteLength": 8,
+                "unitBytes": 1
+            },
+            "78": {
+                "addr": "0x020C",
+                "byteLength": 4,
+                "unitBytes": 2
+            },
+            "79": {
+                "addr": "0x0210",
+                "byteLength": 6,
+                "unitBytes": 2
+            }
+        }
+    },
     "breakpoints": {}
 }

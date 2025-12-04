@@ -496,6 +496,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   addr = 0;
   const out: number[] = [];
   const map: Record<number, number> = {};
+  const dataLineSpans: Array<{ start: number; byteLength: number; unitBytes: number } | undefined> = new Array(lines.length);
 
   // Resolve an address token in second pass: numeric, local (@) or global label
   function resolveAddressToken(arg: string, lineIndex: number): number | null {
@@ -702,6 +703,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     map[srcLine] = addr;
+    const lineStartAddr = addr;
 
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
       continue;
@@ -715,6 +717,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (op === 'DB' || op === '.BYTE') {
       const rest = tokens.slice(1).join(' ').trim();
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
+      let emitted = 0;
       for (const p of parts) {
         let val = toByte(p);
         if (val === null) {
@@ -723,6 +726,10 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         }
         out.push(val & 0xff);
         addr++;
+        emitted++;
+      }
+      if (emitted > 0) {
+        dataLineSpans[i] = { start: lineStartAddr, byteLength: emitted, unitBytes: 1 };
       }
       continue;
     }
@@ -738,6 +745,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         errors.push(`Missing value for ${op} at ${originDesc}`);
         continue;
       }
+      let emitted = 0;
       for (const part of parts) {
         const parsed = parseWordLiteral(part);
         let value = 0;
@@ -749,6 +757,10 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         out.push(value & 0xff);
         out.push((value >> 8) & 0xff);
         addr += 2;
+        emitted += 2;
+      }
+      if (emitted > 0) {
+        dataLineSpans[i] = { start: lineStartAddr, byteLength: emitted, unitBytes: 2 };
       }
       continue;
     }
@@ -1162,8 +1174,14 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   for (const [k, v] of labels) labelsOut[k] = { addr: v.addr, line: v.line, src: v.src };
   const constsOut: Record<string, number> = {};
   for (const [k, v] of consts) constsOut[k] = v;
+  const dataSpanOut: Record<number, { start: number; byteLength: number; unitBytes: number }> = {};
+  for (let idx = 0; idx < dataLineSpans.length; idx++) {
+    const span = dataLineSpans[idx];
+    if (!span) continue;
+    dataSpanOut[idx + 1] = span;
+  }
 
-  return { success: true, output: Buffer.from(out), map, labels: labelsOut, consts: constsOut, warnings, printMessages, origins };
+  return { success: true, output: Buffer.from(out), map, labels: labelsOut, consts: constsOut, dataLineSpans: dataSpanOut, warnings, printMessages, origins };
 }
 
 // convenience when using from extension
@@ -1303,6 +1321,24 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
         const base = path.basename(originFile).toLowerCase();
         if (!tokens.lineAddresses[base]) tokens.lineAddresses[base] = {};
         tokens.lineAddresses[base][origin.line] = '0x' + (addrVal & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+      }
+    }
+    if (res.dataLineSpans && res.origins) {
+      tokens.dataLines = tokens.dataLines || {};
+      for (const [lineStr, span] of Object.entries(res.dataLineSpans)) {
+        const lineIndex = parseInt(lineStr, 10);
+        if (!Number.isFinite(lineIndex) || lineIndex <= 0) continue;
+        const origin = res.origins[lineIndex - 1] as { file?: string; line: number } | undefined;
+        if (!origin || typeof origin.line !== 'number') continue;
+        const originFile = origin.file || sourcePath;
+        if (!originFile) continue;
+        const base = path.basename(originFile).toLowerCase();
+        if (!tokens.dataLines[base]) tokens.dataLines[base] = {};
+        tokens.dataLines[base][origin.line] = {
+          addr: '0x' + (span.start & 0xffff).toString(16).toUpperCase().padStart(4, '0'),
+          byteLength: span.byteLength,
+          unitBytes: span.unitBytes
+        };
       }
     }
     fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 4), 'utf8');

@@ -80,6 +80,8 @@ Symbol hover hints while paused
 
 When the emulator is paused (manually or because it hit a breakpoint) you can hover any label or named constant in an `.asm` file that belongs to the loaded ROM and VS Code shows a tooltip with both the hexadecimal and decimal value. The hint data comes directly from the ROM’s `.debug.json` metadata, so it works for symbols introduced through `.include` chains as well. This is handy for confirming the current address/value of a label without opening the token file or dumping registers.
 
+Data directives (`DB`/`.byte`, `DW`/`.word`) also light up while paused: any byte or word that the CPU read since the last resume is tinted blue, and anything it wrote is tinted red. Hover a specific literal inside those directives to see the live memory bytes at that address (hex + decimal) pulled straight from the paused emulator.
+
 Memory Dump panel
 ------------------
 

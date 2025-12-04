@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { assembleAndWrite } from './assembler';
 import type { PrintMessage } from './assembler/types';
-import { openEmulatorPanel, pauseEmulatorPanel, resumeEmulatorPanel, stepFramePanel, reloadEmulatorBreakpointsFromFile, resolveEmulatorHoverSymbol, isEmulatorPanelPaused } from './emulatorUI';
+import { openEmulatorPanel, pauseEmulatorPanel, resumeEmulatorPanel, stepFramePanel, reloadEmulatorBreakpointsFromFile, resolveEmulatorHoverSymbol, isEmulatorPanelPaused, resolveDataDirectiveHover } from './emulatorUI';
 
 export function activate(context: vscode.ExtensionContext) {
   const devectorOutput = vscode.window.createOutputChannel('Devector');
@@ -986,29 +986,48 @@ export function activate(context: vscode.ExtensionContext) {
     provideHover(document, position) {
       if (!isEmulatorPanelPaused()) return undefined;
       const wordRange = document.getWordRangeAtPosition(position, /[A-Za-z_@.][A-Za-z0-9_@.]*/);
-      if (!wordRange) return undefined;
-      const identifier = document.getText(wordRange);
-      if (!identifier || identifier.startsWith('.')) return undefined;
+      const identifier = wordRange ? document.getText(wordRange) : '';
       const filePath = document.uri.scheme === 'file' ? document.uri.fsPath : undefined;
-      const symbol = resolveEmulatorHoverSymbol(identifier, filePath ? { filePath, line: position.line + 1 } : undefined);
-      if (!symbol) return undefined;
-      const numericValue = Math.trunc(symbol.value);
-      if (!Number.isFinite(numericValue)) return undefined;
-      const normalized16 = ((numericValue % 0x10000) + 0x10000) % 0x10000;
-      const paddedHex = '0x' + normalized16.toString(16).toUpperCase().padStart(4, '0');
-      const fullHex = numericValue < 0 ? `-0x${Math.abs(numericValue).toString(16).toUpperCase()}` : `0x${numericValue.toString(16).toUpperCase()}`;
-      const hexValue = symbol.kind === 'const' ? fullHex : paddedHex;
-      const decValue = numericValue.toString(10);
-      const kindLabel = symbol.kind === 'const' ? 'constant' : symbol.kind === 'label' ? 'label' : 'address';
-      const md = new vscode.MarkdownString(undefined, true);
-      md.appendMarkdown(`**${identifier}** (${kindLabel})\n\n`);
-      md.appendMarkdown(`- hex: \`${hexValue}\`\n`);
-      md.appendMarkdown(`- dec: \`${decValue}\``);
-      if (symbol.kind === 'line') {
-        md.appendMarkdown('\n- note: derived from source line address');
+      if (identifier && !identifier.startsWith('.')) {
+        const symbol = resolveEmulatorHoverSymbol(identifier, filePath ? { filePath, line: position.line + 1 } : undefined);
+        if (symbol) {
+          const numericValue = Math.trunc(symbol.value);
+          if (Number.isFinite(numericValue)) {
+            const normalized16 = ((numericValue % 0x10000) + 0x10000) % 0x10000;
+            const paddedHex = '0x' + normalized16.toString(16).toUpperCase().padStart(4, '0');
+            const fullHex = numericValue < 0 ? `-0x${Math.abs(numericValue).toString(16).toUpperCase()}` : `0x${numericValue.toString(16).toUpperCase()}`;
+            const hexValue = symbol.kind === 'const' ? fullHex : paddedHex;
+            const decValue = numericValue.toString(10);
+            const kindLabel = symbol.kind === 'const' ? 'constant' : symbol.kind === 'label' ? 'label' : 'address';
+            const md = new vscode.MarkdownString(undefined, true);
+            md.appendMarkdown(`**${identifier}** (${kindLabel})\n\n`);
+            md.appendMarkdown(`- hex: \`${hexValue}\`\n`);
+            md.appendMarkdown(`- dec: \`${decValue}\``);
+            if (symbol.kind === 'line') {
+              md.appendMarkdown('\n- note: derived from source line address');
+            }
+            md.isTrusted = false;
+            return new vscode.Hover(md, wordRange);
+          }
+        }
       }
-      md.isTrusted = false;
-      return new vscode.Hover(md, wordRange);
+
+      const dataHover = resolveDataDirectiveHover(document, position);
+      if (dataHover) {
+        const valueWidth = Math.max(2, dataHover.unitBytes * 2);
+        const hexValue = '0x' + (dataHover.value >>> 0).toString(16).toUpperCase().padStart(valueWidth, '0');
+        const decValue = (dataHover.value >>> 0).toString(10);
+        const addressHex = '0x' + dataHover.address.toString(16).toUpperCase().padStart(4, '0');
+        const label = wordRange ? document.getText(wordRange) : dataHover.directive.toUpperCase();
+        const md = new vscode.MarkdownString(undefined, true);
+        md.appendMarkdown(`**${label}** (${dataHover.directive} data)\n\n`);
+        md.appendMarkdown(`- addr: \`${addressHex}\`\n`);
+        md.appendMarkdown(`- hex: \`${hexValue}\`\n`);
+        md.appendMarkdown(`- dec: \`${decValue}\``);
+        md.isTrusted = false;
+        return new vscode.Hover(md, wordRange ?? new vscode.Range(position, position));
+      }
+      return undefined;
     }
   });
   context.subscriptions.push(asmHoverProvider);
