@@ -53,6 +53,8 @@ type CpuTestResult = {
 };
 
 // Helper to create a minimal memory mock for testing
+// Note: Empty strings are used for pathBootData and ramDiskDataPath in test mode
+// since we don't need ROM loading for CPU unit tests
 function createTestMemory(): Memory {
     // Create memory without boot path (testing mode)
     const mem = new Memory('', '', false);
@@ -1059,12 +1061,16 @@ const cpuTests: CpuTestCase[] = [
 
     // =====================
     // CALL/RET Test
+    // Note: This test requires setting up a subroutine at a specific address
+    // outside the main program area. This is necessary to test the CALL/RET
+    // mechanism which jumps to a different memory location.
     // =====================
     {
         name: 'CALL and RET - Subroutine call and return',
         setup: (cpu, mem) => {
             cpu.state.regs.sp.word = 0x1000;
             // Set up a simple subroutine at 0x0010 that just returns
+            // This must be outside the main program to properly test CALL behavior
             mem.ram[0x0010] = 0xC9; // RET
         },
         program: [0xCD, 0x10, 0x00], // CALL 0x0010
@@ -1077,16 +1083,19 @@ const cpuTests: CpuTestCase[] = [
 
     // =====================
     // RST Test
+    // Note: RST pushes the current PC to the stack and jumps to address n*8.
+    // To test RST 0, we need the instruction at a non-zero address so we can
+    // verify the jump to address 0x0000. We place RST 0 at 0x0100 via setup.
     // =====================
     {
         name: 'RST 0 - Restart to address 0x0000',
         setup: (cpu, mem) => {
             cpu.state.regs.sp.word = 0x1000;
             cpu.state.regs.pc.word = 0x0100;
-            // Put RST 0 at address 0x0100
+            // Put RST 0 at address 0x0100 (not at address 0 where RST would jump)
             mem.ram[0x0100] = 0xC7; // RST 0
         },
-        program: [], // Program loaded in setup
+        program: [], // Program loaded in setup due to non-standard PC location
         numInstructions: 1,
         expect: {
             pc: 0x0000,
