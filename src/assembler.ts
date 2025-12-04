@@ -284,14 +284,8 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       // DB value [,value]
       const rest = tokens.slice(1).join(' ').trim();
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
-      // account for multi-char quoted strings which emit multiple bytes
       for (const p of parts) {
-        if (/^'.*'$/.test(p)) {
-          // number of bytes equals number of characters inside quotes
-          addr += Math.max(0, p.length - 2);
-        } else {
           addr += 1;
-        }
       }
       continue;
     }
@@ -720,21 +714,13 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       const rest = tokens.slice(1).join(' ').trim();
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
       for (const p of parts) {
-        if (/^'.*'$/.test(p)) {
-          // multi-char string: emit each character as a byte
-          for (let k = 1; k < p.length - 1; k++) {
-            out.push(p.charCodeAt(k) & 0xff);
-            addr++;
-          }
-        } else {
-          let val = toByte(p);
-          if (val === null) {
-            errors.push(`Bad ${op} value '${p}' at ${srcLine}`);
-            val = 0;
-          }
-          out.push(val & 0xff);
-          addr++;
+        let val = toByte(p);
+        if (val === null) {
+          errors.push(`Bad ${op} value '${p}' at ${srcLine}`);
+          val = 0;
         }
+        out.push(val & 0xff);
+        addr++;
       }
       continue;
     }
@@ -768,7 +754,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (op === '.ORG' || op === 'ORG') {
       const aTok = tokens.slice(1).join(' ').trim().split(/\s+/)[0];
       const val = parseAddressToken(aTok, labels, consts);
-      if (val === null) { errors.push(`Bad ORG address '${aTok}' at ${srcLine}`); continue; }
+      if (val === null) { errors.push(`Bad ${op} address '${aTok}' at ${srcLine}`); continue; }
       addr = val;
       // label for this ORG (if present) was already registered in first pass; nothing to emit
       continue;
