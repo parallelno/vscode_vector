@@ -1283,8 +1283,11 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
     tokens.lineAddresses = {};
     if (res.map && res.origins) {
       // Track macro call sites so we map each caller line to the first instruction address
-      // Key: "file:line", Value: address of first instruction in macro expansion
+      // Key: "callerFile:callerLine" (full file path from macroInstance.callerFile), Value: address
       const macroCalls = new Map<string, number>();
+
+      // Helper to format address as hex string
+      const formatAddr = (addr: number) => '0x' + (addr & 0xffff).toString(16).toUpperCase().padStart(4, '0');
 
       for (const [lineStr, addrVal] of Object.entries(res.map)) {
         const lineIndex = parseInt(lineStr, 10);
@@ -1295,7 +1298,7 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
         if (!originFile) continue;
         const base = path.basename(originFile).toLowerCase();
         if (!tokens.lineAddresses[base]) tokens.lineAddresses[base] = {};
-        tokens.lineAddresses[base][origin.line] = '0x' + (addrVal & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+        tokens.lineAddresses[base][origin.line] = formatAddr(addrVal);
 
         // If this line came from a macro expansion, also map the macro call site
         // to the address of the first instruction in the expansion (only once per call site)
@@ -1308,7 +1311,7 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
             if (!tokens.lineAddresses[callerBase]) tokens.lineAddresses[callerBase] = {};
             // Don't overwrite if there's already a mapping (e.g., label on the same line)
             if (!tokens.lineAddresses[callerBase][origin.macroInstance.callerLine]) {
-              tokens.lineAddresses[callerBase][origin.macroInstance.callerLine] = '0x' + (addrVal & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+              tokens.lineAddresses[callerBase][origin.macroInstance.callerLine] = formatAddr(addrVal);
             }
           }
         }

@@ -114,8 +114,14 @@ function main() {
         }
     }
 
-    // Clean up
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // Clean up - wrap in try-catch to handle any cleanup errors gracefully
+    try {
+        if (fs.existsSync(tmpDir)) {
+            fs.rmSync(tmpDir, { recursive: true });
+        }
+    } catch (err) {
+        console.warn('Warning: Failed to clean up temp directory:', tmpDir);
+    }
 
     if (!allPassed) {
         console.error('\nSome tests failed!');
