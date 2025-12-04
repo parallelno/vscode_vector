@@ -22,9 +22,9 @@ start:
 	  		call set_palette
 
 loop:
-			Fill(0xFF)
+			Fill(0xFF, 0x80FF, 0x80)
 
-			Fill(0x80)
+			Fill(0x80, 0x80FF)
 
 			jmp loop
 
@@ -34,10 +34,10 @@ end:
 	  		hlt
 
 
-.macro Fill(value)
-			lxi h, 0x80ff
-			lxi b, 0x80
-			mvi a, value
+.macro Fill(byte, address, len=0xff)
+			lxi h, address
+			lxi b, len
+			mvi a, byte
 			call fill_buff
 			hlt
 			hlt

@@ -108,13 +108,5 @@
             "16": "0x017A"
         }
     },
-    "breakpoints": {
-        "prg_main.asm": [
-            {
-                "line": 41,
-                "enabled": true,
-                "addr": "0x0135"
-            }
-        ]
-    }
+    "breakpoints": {}
 }
