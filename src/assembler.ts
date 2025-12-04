@@ -11,7 +11,10 @@ import {
   regCodes,
   mviOpcodes,
   toByte,
-  describeOrigin
+  describeOrigin,
+  TextEncodingType,
+  TextCaseType,
+  parseTextLiteralToBytes
 } from './assembler/utils';
 import { evaluateConditionExpression } from './assembler/expression';
 import { prepareMacros, expandMacroInvocations } from './assembler/macro';
@@ -102,6 +105,10 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const origins = loopExpanded.origins;
 
   const ifStack: IfFrame[] = [];
+
+  // Text encoding state for .encoding and .text directives
+  let textEncoding: TextEncodingType = 'ascii';
+  let textCase: TextCaseType = 'mixed';
 
   function registerLabel(name: string, address: number, origin: SourceOrigin | undefined, fallbackLine: number, scopeKey: string) {
     if (!name) return;
@@ -321,6 +328,63 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       continue;
     }
 
+    if (op === '.ENCODING') {
+      // .encoding "type", "case"
+      const rest = line.slice(line.toUpperCase().indexOf('.ENCODING') + 9).trim();
+      const args = splitTopLevelArgs(rest);
+      if (args.length < 1) {
+        errors.push(`Missing encoding type for .encoding at ${originDesc}`);
+        continue;
+      }
+      const typeArg = parseStringLiteral(args[0]);
+      if (typeArg === null) {
+        errors.push(`Invalid encoding type '${args[0]}' for .encoding at ${originDesc} - expected string literal`);
+        continue;
+      }
+      const typeLower = typeArg.toLowerCase();
+      if (typeLower !== 'ascii' && typeLower !== 'screencodecommodore') {
+        errors.push(`Unknown encoding type '${typeArg}' for .encoding at ${originDesc} - expected 'ascii' or 'screencodecommodore'`);
+        continue;
+      }
+      textEncoding = typeLower as TextEncodingType;
+      // Parse optional case argument
+      if (args.length >= 2) {
+        const caseArg = parseStringLiteral(args[1]);
+        if (caseArg === null) {
+          errors.push(`Invalid case '${args[1]}' for .encoding at ${originDesc} - expected string literal`);
+          continue;
+        }
+        const caseLower = caseArg.toLowerCase();
+        if (caseLower !== 'mixed' && caseLower !== 'lower' && caseLower !== 'upper') {
+          errors.push(`Unknown case '${caseArg}' for .encoding at ${originDesc} - expected 'mixed', 'lower', or 'upper'`);
+          continue;
+        }
+        textCase = caseLower as TextCaseType;
+      } else {
+        textCase = 'mixed';  // Default case when not provided
+      }
+      continue;
+    }
+
+    if (op === '.TEXT') {
+      // .text "string", 'c', ...
+      const rest = line.slice(line.toUpperCase().indexOf('.TEXT') + 5).trim();
+      if (!rest.length) {
+        errors.push(`Missing value for .text at ${originDesc}`);
+        continue;
+      }
+      const parts = splitTopLevelArgs(rest);
+      for (const part of parts) {
+        const parsed = parseTextLiteralToBytes(part, textEncoding, textCase);
+        if ('error' in parsed) {
+          errors.push(`${parsed.error} at ${originDesc}`);
+        } else {
+          addr += parsed.bytes.length;
+        }
+      }
+      continue;
+    }
+
     if (op === '.ORG' || op === 'ORG') {
       // .org addr
       const rest = tokens.slice(1).join(' ');
@@ -494,6 +558,9 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
   // Second pass: generate bytes and source-line map
   addr = 0;
+  // Reset text encoding state for second pass
+  textEncoding = 'ascii';
+  textCase = 'mixed';
   const out: number[] = [];
   const map: Record<number, number> = {};
 
@@ -781,6 +848,48 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       if (isNaN(n) || n < 0) { errors.push(`Bad DS count '${rest}' at ${srcLine}`); continue; }
       // reserve: just advance addr (no bytes emitted)
       addr += n;
+      continue;
+    }
+
+    if (op === '.ENCODING') {
+      // .encoding "type", "case" - update encoding state
+      const rest = line.slice(line.toUpperCase().indexOf('.ENCODING') + 9).trim();
+      const args = splitTopLevelArgs(rest);
+      if (args.length < 1) continue;  // Error already reported in first pass
+      const typeArg = parseStringLiteral(args[0]);
+      if (typeArg === null) continue;
+      const typeLower = typeArg.toLowerCase();
+      if (typeLower === 'ascii' || typeLower === 'screencodecommodore') {
+        textEncoding = typeLower as TextEncodingType;
+      }
+      if (args.length >= 2) {
+        const caseArg = parseStringLiteral(args[1]);
+        if (caseArg !== null) {
+          const caseLower = caseArg.toLowerCase();
+          if (caseLower === 'mixed' || caseLower === 'lower' || caseLower === 'upper') {
+            textCase = caseLower as TextCaseType;
+          }
+        }
+      } else {
+        textCase = 'mixed';
+      }
+      continue;
+    }
+
+    if (op === '.TEXT') {
+      // .text "string", 'c', ... - emit bytes
+      const rest = line.slice(line.toUpperCase().indexOf('.TEXT') + 5).trim();
+      if (!rest.length) continue;  // Error already reported in first pass
+      const parts = splitTopLevelArgs(rest);
+      for (const part of parts) {
+        const parsed = parseTextLiteralToBytes(part, textEncoding, textCase);
+        if ('bytes' in parsed) {
+          for (const b of parsed.bytes) {
+            out.push(b);
+            addr++;
+          }
+        }
+      }
       continue;
     }
 
