@@ -303,10 +303,9 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         continue;
       }
       for (const part of parts) {
-        const parsed = parseWordLiteral(part);
-        if ('error' in parsed) {
-          errors.push(`${parsed.error} at ${originDesc}`);
-        }
+        // In the first pass, we only need to count bytes (2 per word).
+        // Skip validation since expressions with forward-referenced labels 
+        // cannot be fully evaluated until the second pass.
         addr += 2;
       }
       continue;
@@ -715,11 +714,17 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (op === 'DB' || op === '.BYTE') {
       const rest = tokens.slice(1).join(' ').trim();
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
       for (const p of parts) {
         let val = toByte(p);
         if (val === null) {
-          errors.push(`Bad ${op} value '${p}' at ${srcLine}`);
-          val = 0;
+          // Try evaluating as an expression (supports <, >, and other operators)
+          try {
+            val = evaluateConditionExpression(p, ctx, true) & 0xff;
+          } catch (err: any) {
+            errors.push(`Bad ${op} value '${p}' at ${srcLine}`);
+            val = 0;
+          }
         }
         out.push(val & 0xff);
         addr++;
@@ -738,11 +743,17 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         errors.push(`Missing value for ${op} at ${originDesc}`);
         continue;
       }
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
       for (const part of parts) {
         const parsed = parseWordLiteral(part);
         let value = 0;
         if ('error' in parsed) {
-          errors.push(`${parsed.error} at ${originDesc}`);
+          // Try evaluating as an expression (supports <, >, and other operators)
+          try {
+            value = evaluateConditionExpression(part, ctx, true) & 0xffff;
+          } catch (err: any) {
+            errors.push(`${parsed.error} at ${originDesc}`);
+          }
         } else {
           value = parsed.value & 0xffff;
         }

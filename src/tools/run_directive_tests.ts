@@ -193,6 +193,44 @@ const tests: DirectiveTestCase[] = [
             success: false,
             errorsContains: ['Missing .endloop']
         }
+    },
+    {
+        name: 'Low byte (<) and high byte (>) operators work correctly',
+        sourceFile: 'low_high_byte.asm',
+        expect: {
+            bytes: [
+                0x34, 0x12,  // <$1234, >$1234
+                0xEF, 0xBE,  // <0xBEEF, >0xBEEF
+                0x34, 0x12,  // <4660, >4660
+                0x34, 0x12,  // <ADDR_CONST, >ADDR_CONST
+                0xCD, 0xAB,  // <LABEL_CONST, >LABEL_CONST
+                0x34, 0x12,  // <($1000 + $0234), >($1000 + $0234)
+                0xCD, 0xFF   // <($FF00 | $00CD), >($FF00 | $00CD)
+            ],
+            labels: {
+                start: 0x0100,
+                end: 0x010E
+            }
+        }
+    },
+    {
+        name: 'Low byte (<) and high byte (>) operators work with labels',
+        sourceFile: 'low_high_byte_labels.asm',
+        expect: {
+            bytes: [
+                0x0A, 0x80,     // <target_addr (0x800A), >target_addr
+                0x00, 0x80,     // <start (0x8000), >start
+                0x3E, 0x80,     // <(target_addr + 0x0034), >(target_addr + 0x0034) (0x803E)
+                0x0A, 0x80,     // .word <target_addr | (>target_addr << 8) = 0x800A
+                // ds 2 doesn't emit bytes, just reserves space
+                0xAA            // marker byte at target_addr
+            ],
+            labels: {
+                start: 0x8000,
+                target_addr: 0x800A,
+                end: 0x800B
+            }
+        }
     }
 ];
 
