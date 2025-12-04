@@ -1282,16 +1282,36 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
     }
     tokens.lineAddresses = {};
     if (res.map && res.origins) {
+      // Track macro call sites so we map each caller line to the first instruction address
+      // Key: "file:line", Value: address of first instruction in macro expansion
+      const macroCalls = new Map<string, number>();
+
       for (const [lineStr, addrVal] of Object.entries(res.map)) {
         const lineIndex = parseInt(lineStr, 10);
         if (!Number.isFinite(lineIndex) || lineIndex <= 0) continue;
-        const origin = res.origins[lineIndex - 1] as { file?: string; line: number } | undefined;
+        const origin = res.origins[lineIndex - 1] as SourceOrigin | undefined;
         if (!origin || typeof origin.line !== 'number') continue;
         const originFile = (origin.file || sourcePath);
         if (!originFile) continue;
         const base = path.basename(originFile).toLowerCase();
         if (!tokens.lineAddresses[base]) tokens.lineAddresses[base] = {};
         tokens.lineAddresses[base][origin.line] = '0x' + (addrVal & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+
+        // If this line came from a macro expansion, also map the macro call site
+        // to the address of the first instruction in the expansion (only once per call site)
+        if (origin.macroInstance && origin.macroInstance.callerFile && typeof origin.macroInstance.callerLine === 'number') {
+          const callerKey = `${origin.macroInstance.callerFile}:${origin.macroInstance.callerLine}`;
+          // Only record the first time we see this call site (first instruction in macro body)
+          if (!macroCalls.has(callerKey)) {
+            macroCalls.set(callerKey, addrVal);
+            const callerBase = path.basename(origin.macroInstance.callerFile).toLowerCase();
+            if (!tokens.lineAddresses[callerBase]) tokens.lineAddresses[callerBase] = {};
+            // Don't overwrite if there's already a mapping (e.g., label on the same line)
+            if (!tokens.lineAddresses[callerBase][origin.macroInstance.callerLine]) {
+              tokens.lineAddresses[callerBase][origin.macroInstance.callerLine] = '0x' + (addrVal & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+            }
+          }
+        }
       }
     }
     fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 4), 'utf8');
