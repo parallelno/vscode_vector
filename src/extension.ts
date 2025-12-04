@@ -1011,31 +1011,24 @@ export function activate(context: vscode.ExtensionContext) {
   // Register DefinitionProvider for .include directive paths
   // This enables Ctrl+hover underline and Ctrl+click navigation to included files
   const includeDefinitionProvider: vscode.DefinitionProvider = {
-    provideDefinition(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): vscode.ProviderResult<vscode.Definition | vscode.DefinitionLink[]> {
+    async provideDefinition(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): Promise<vscode.Definition | vscode.DefinitionLink[] | undefined> {
       const line = document.lineAt(position.line);
       const lineText = line.text;
 
       // Match .include "filename" or .include 'filename'
       // Strip comments first for the match
       const textWithoutComment = lineText.replace(/\/\/.*$|;.*$/, '');
-      const includeMatch = textWithoutComment.match(/^\s*\.include\s+["']([^"']+)["']/i);
+      // Capture both the full match and the path to get position information
+      const includeRegex = /^(\s*\.include\s+)(["'])([^"']+)\2/i;
+      const includeMatch = textWithoutComment.match(includeRegex);
       if (!includeMatch) {
         return undefined;
       }
 
-      const includedPath = includeMatch[1];
-      // Calculate the range of the path string in the original line text
-      // Find the quote character and its position in the original line
-      const doubleQuoteIndex = lineText.indexOf('"');
-      const singleQuoteIndex = lineText.indexOf("'");
-      let pathStartIndex: number;
-      if (doubleQuoteIndex >= 0 && (singleQuoteIndex < 0 || doubleQuoteIndex < singleQuoteIndex)) {
-        pathStartIndex = doubleQuoteIndex + 1;
-      } else if (singleQuoteIndex >= 0) {
-        pathStartIndex = singleQuoteIndex + 1;
-      } else {
-        return undefined;
-      }
+      const includedPath = includeMatch[3];
+      // Calculate the range of the path string based on the match
+      // includeMatch[1] is the prefix ".include " part, includeMatch[2] is the quote char
+      const pathStartIndex = includeMatch[1].length + 1; // +1 for the opening quote
       const pathEndIndex = pathStartIndex + includedPath.length;
 
       // Check if the cursor position is within the path
@@ -1052,8 +1045,10 @@ export function activate(context: vscode.ExtensionContext) {
         resolvedPath = path.resolve(baseDir, includedPath);
       }
 
-      // Check if the file exists
-      if (!fs.existsSync(resolvedPath)) {
+      // Check if the file exists asynchronously
+      try {
+        await fs.promises.access(resolvedPath);
+      } catch {
         return undefined;
       }
 
