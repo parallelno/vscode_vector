@@ -167,7 +167,7 @@ export class Audio {
     if (underBuffering) {
       // Fill with last sample when buffer is running low
       samples.fill(this.lastSample);
-      // Adjust downsample rate to produce more samples
+      // Adjust downsample rate: lower rate = more samples produced per input cycle
       this.downsampleRate = Math.max(1, this.downsampleRate - 1);
     } else {
       // Copy samples from buffer
@@ -177,9 +177,9 @@ export class Audio {
       }
 
       if (overBuffering) {
-        // Skip some samples to catch up
+        // Skip additional samples to catch up (on top of already read samples)
         this.readBuffIdx += count;
-        // Adjust downsample rate to produce fewer samples
+        // Adjust downsample rate: higher rate = fewer samples produced per input cycle
         this.downsampleRate++;
       }
     }
