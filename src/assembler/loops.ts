@@ -45,30 +45,29 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
       if (val !== null && Number.isFinite(val)) varsState.set(name, val);
       return;
     }
+    
+    // Helper function to update variable or constant
+    function updateVarOrConst(name: string, rhs: string) {
+      const val = evaluateExpression(rhs, idx, false);
+      if (val !== null && Number.isFinite(val)) {
+        if (varsState.has(name)) {
+          varsState.set(name, val);
+        } else {
+          constState.set(name, val);
+        }
+      }
+    }
+    
     const assignMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
     if (assignMatch) {
       const [, name, rhsRaw] = assignMatch;
-      const rhs = rhsRaw.trim();
-      const val = evaluateExpression(rhs, idx, false);
-      // If it's a variable, update vars; otherwise update consts
-      if (varsState.has(name) && val !== null && Number.isFinite(val)) {
-        varsState.set(name, val);
-      } else if (val !== null && Number.isFinite(val)) {
-        constState.set(name, val);
-      }
+      updateVarOrConst(name, rhsRaw.trim());
       return;
     }
     const equMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\s+(.+)$/i);
     if (equMatch) {
       const [, name, rhsRaw] = equMatch;
-      const rhs = rhsRaw.trim();
-      const val = evaluateExpression(rhs, idx, false);
-      // If it's a variable, update vars; otherwise update consts
-      if (varsState.has(name) && val !== null && Number.isFinite(val)) {
-        varsState.set(name, val);
-      } else if (val !== null && Number.isFinite(val)) {
-        constState.set(name, val);
-      }
+      updateVarOrConst(name, rhsRaw.trim());
       return;
     }
   }

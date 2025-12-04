@@ -104,6 +104,49 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
   const ifStack: IfFrame[] = [];
 
+  // Helper function to handle assignment (= or EQU) for variables and constants
+  // Returns: 'variable' if variable was updated, 'constant' if constant was created,
+  // 'error' if error occurred, or null if name is neither variable nor constant candidate
+  function handleAssignment(name: string, rhs: string, lineIndex: number, isFirstPass: boolean): 'variable' | 'constant' | 'error' | null {
+    // If it's a variable, allow updating it
+    if (vars.has(name)) {
+      const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex };
+      try {
+        const val = evaluateConditionExpression(rhs, ctx, true);
+        vars.set(name, val);
+        return 'variable';
+      } catch (err: any) {
+        if (isFirstPass) {
+          errors.push(`Failed to evaluate expression '${rhs}' for variable ${name} at ${lineIndex}: ${err?.message || err}`);
+        }
+        return 'error';
+      }
+    }
+    // Constants cannot be reassigned (only in first pass do we report error)
+    if (consts.has(name)) {
+      if (isFirstPass) {
+        errors.push(`Cannot reassign constant '${name}' at ${lineIndex}`);
+      }
+      return 'error';
+    }
+    // In first pass, create a new constant
+    if (isFirstPass) {
+      let val: number | null = parseNumberFull(rhs);
+      if (val === null) {
+        if (consts.has(rhs)) val = consts.get(rhs)!;
+        else if (vars.has(rhs)) val = vars.get(rhs)!;
+        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
+      }
+      if (val === null) {
+        errors.push(`Bad constant value '${rhs}' for ${name} at ${lineIndex}`);
+        return 'error';
+      }
+      consts.set(name, val);
+      return 'constant';
+    }
+    return null;
+  }
+
   function registerLabel(name: string, address: number, origin: SourceOrigin | undefined, fallbackLine: number, scopeKey: string) {
     if (!name) return;
     const srcName = origin && origin.file ? path.basename(origin.file) : (sourcePath ? path.basename(sourcePath) : undefined);
@@ -254,99 +297,21 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
       const name = tokens[0];
       const rhs = tokens.slice(2).join(' ').trim();
-      // If it's a variable, allow updating it
-      if (vars.has(name)) {
-        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: i + 1 };
-        let val: number | null = null;
-        try {
-          val = evaluateConditionExpression(rhs, ctx, true);
-        } catch (err: any) {
-          errors.push(`Failed to evaluate expression '${rhs}' for variable ${name} at ${i + 1}: ${err?.message || err}`);
-          continue;
-        }
-        vars.set(name, val);
-        continue;
-      }
-      // Constants cannot be reassigned
-      if (consts.has(name)) {
-        errors.push(`Cannot reassign constant '${name}' at ${i + 1}`);
-        continue;
-      }
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (vars.has(rhs)) val = vars.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
-      }
-      if (val === null) {
-        errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
-      } else {
-        consts.set(name, val);
-      }
+      handleAssignment(name, rhs, i + 1, true);
       continue;
     }
     const assignMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
     if (assignMatch) {
       const name = assignMatch[1];
       const rhs = assignMatch[2].trim();
-      // If it's a variable, allow updating it
-      if (vars.has(name)) {
-        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: i + 1 };
-        let val: number | null = null;
-        try {
-          val = evaluateConditionExpression(rhs, ctx, true);
-        } catch (err: any) {
-          errors.push(`Failed to evaluate expression '${rhs}' for variable ${name} at ${i + 1}: ${err?.message || err}`);
-          continue;
-        }
-        vars.set(name, val);
-        continue;
-      }
-      // Constants cannot be reassigned
-      if (consts.has(name)) {
-        errors.push(`Cannot reassign constant '${name}' at ${i + 1}`);
-        continue;
-      }
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (vars.has(rhs)) val = vars.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
-      }
-      if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
-      else consts.set(name, val);
+      handleAssignment(name, rhs, i + 1, true);
       continue;
     }
     const equMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\s+(.+)$/i);
     if (equMatch) {
       const name = equMatch[1];
       const rhs = equMatch[2].trim();
-      // If it's a variable, allow updating it
-      if (vars.has(name)) {
-        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: i + 1 };
-        let val: number | null = null;
-        try {
-          val = evaluateConditionExpression(rhs, ctx, true);
-        } catch (err: any) {
-          errors.push(`Failed to evaluate expression '${rhs}' for variable ${name} at ${i + 1}: ${err?.message || err}`);
-          continue;
-        }
-        vars.set(name, val);
-        continue;
-      }
-      // Constants cannot be reassigned
-      if (consts.has(name)) {
-        errors.push(`Cannot reassign constant '${name}' at ${i + 1}`);
-        continue;
-      }
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (vars.has(rhs)) val = vars.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
-      }
-      if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
-      else consts.set(name, val);
+      handleAssignment(name, rhs, i + 1, true);
       continue;
     }
 
@@ -817,46 +782,22 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     // Handle variable assignments in second pass - update the variable value for subsequent uses
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
       const name = tokens[0];
-      if (vars.has(name)) {
-        const rhs = tokens.slice(2).join(' ').trim();
-        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: srcLine };
-        try {
-          const val = evaluateConditionExpression(rhs, ctx, true);
-          vars.set(name, val);
-        } catch (err: any) {
-          // Error already reported in first pass
-        }
-      }
+      const rhs = tokens.slice(2).join(' ').trim();
+      handleAssignment(name, rhs, srcLine, false);
       continue;
     }
     const assignMatchSecond = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
     if (assignMatchSecond) {
       const name = assignMatchSecond[1];
-      if (vars.has(name)) {
-        const rhs = assignMatchSecond[2].trim();
-        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: srcLine };
-        try {
-          const val = evaluateConditionExpression(rhs, ctx, true);
-          vars.set(name, val);
-        } catch (err: any) {
-          // Error already reported in first pass
-        }
-      }
+      const rhs = assignMatchSecond[2].trim();
+      handleAssignment(name, rhs, srcLine, false);
       continue;
     }
     const equMatchSecond = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\s+(.+)$/i);
     if (equMatchSecond) {
       const name = equMatchSecond[1];
-      if (vars.has(name)) {
-        const rhs = equMatchSecond[2].trim();
-        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: srcLine };
-        try {
-          const val = evaluateConditionExpression(rhs, ctx, true);
-          vars.set(name, val);
-        } catch (err: any) {
-          // Error already reported in first pass
-        }
-      }
+      const rhs = equMatchSecond[2].trim();
+      handleAssignment(name, rhs, srcLine, false);
       continue;
     }
 
