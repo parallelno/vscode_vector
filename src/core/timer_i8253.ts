@@ -4,9 +4,11 @@
 // https://github.com/parallelno/Devector/blob/master/src/core/timer_i8253.h
 // https://github.com/parallelno/Devector/blob/master/src/core/timer_i8253.cpp
 
-const WRITE_DELAY = 2;
+// Constants for timing delays (from original i8253 timing)
+// WRITE_DELAY and READ_DELAY are defined in the original C++ code but unused
+// const WRITE_DELAY = 2;
+// const READ_DELAY = 0;
 const LATCH_DELAY = 1;
-const READ_DELAY = 0;
 
 export class CounterUnit {
   private latchValue: number = -1;
@@ -236,7 +238,9 @@ export class CounterUnit {
       if (this.flagBcd) {
         this.loadValue = CounterUnit.fromBcd(this.loadValue);
       }
-      // I'm deeply sorry about the following part
+      // Set the delay cycles based on mode. Mode 0 always has 3-cycle delay.
+      // Modes 1-3 have 3-cycle delay only when counter is not yet enabled.
+      // Other modes have 4-cycle delay.
       switch (this.modeInt) {
         case 0:
           this.delay = 3;
@@ -267,7 +271,7 @@ export class CounterUnit {
     let value = 0;
     switch (this.latchMode) {
       case 0:
-        // impossibru
+        // Should not happen in normal operation
         break;
       case 1:
         value = this.latchValue !== -1 ? this.latchValue : this.value;
@@ -346,8 +350,9 @@ export class TimerI8253 {
     const latchSet = (w8 >> 4) & 3;
     const bcdSet = w8 & 1;
 
-    if (counterSet >= this.counters.length) {
-      // error
+    // i8253 only has 3 counters (0-2), counterSet value of 3 is invalid
+    if (counterSet > 2) {
+      // error - invalid counter selection
       return;
     }
 
