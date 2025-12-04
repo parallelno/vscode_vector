@@ -58,6 +58,7 @@ export type LocalLabelScopeIndex = Map<string, Map<string, LocalLabelRecord[]>>;
 export type ExpressionEvalContext = {
   labels: Map<string, { addr: number; line: number; src?: string }>;
   consts: Map<string, number>;
+  vars: Map<string, number>;
   localsIndex: LocalLabelScopeIndex;
   scopes: string[];
   lineIndex: number;

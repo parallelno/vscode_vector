@@ -142,6 +142,7 @@ function resolveSymbolValue(name: string, ctx: ExpressionEvalContext): number | 
   if (lowered === 'true') return 1;
   if (lowered === 'false') return 0;
   if (ctx.consts.has(name)) return ctx.consts.get(name)!;
+  if (ctx.vars.has(name)) return ctx.vars.get(name)!;
   if (ctx.labels.has(name)) return ctx.labels.get(name)!.addr;
   if (name[0] === '@') {
     if (ctx.lineIndex <= 0) return null;

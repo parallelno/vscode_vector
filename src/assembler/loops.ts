@@ -9,6 +9,7 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
   const outOrigins: SourceOrigin[] = [];
   const errors: string[] = [];
   const constState = new Map<string, number>();
+  const varsState = new Map<string, number>();
   const dummyLabels = new Map<string, { addr: number; line: number; src?: string }>();
   const dummyLocals: LocalLabelScopeIndex = new Map();
   const dummyScopes: string[] = [];
@@ -21,6 +22,7 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
     const ctx: ExpressionEvalContext = {
       labels: dummyLabels,
       consts: constState,
+      vars: varsState,
       localsIndex: dummyLocals,
       scopes: dummyScopes,
       lineIndex: origins[idx]?.line ?? (idx + 1)
@@ -34,12 +36,26 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
   }
 
   function tryRecordConstant(trimmed: string, idx: number) {
+    // Handle .var directive for loop expansion
+    const varMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+\.var\s+(.+)$/i);
+    if (varMatch) {
+      const [, name, rhsRaw] = varMatch;
+      const rhs = rhsRaw.trim();
+      const val = evaluateExpression(rhs, idx, false);
+      if (val !== null && Number.isFinite(val)) varsState.set(name, val);
+      return;
+    }
     const assignMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
     if (assignMatch) {
       const [, name, rhsRaw] = assignMatch;
       const rhs = rhsRaw.trim();
       const val = evaluateExpression(rhs, idx, false);
-      if (val !== null && Number.isFinite(val)) constState.set(name, val);
+      // If it's a variable, update vars; otherwise update consts
+      if (varsState.has(name) && val !== null && Number.isFinite(val)) {
+        varsState.set(name, val);
+      } else if (val !== null && Number.isFinite(val)) {
+        constState.set(name, val);
+      }
       return;
     }
     const equMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\s+(.+)$/i);
@@ -47,7 +63,12 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
       const [, name, rhsRaw] = equMatch;
       const rhs = rhsRaw.trim();
       const val = evaluateExpression(rhs, idx, false);
-      if (val !== null && Number.isFinite(val)) constState.set(name, val);
+      // If it's a variable, update vars; otherwise update consts
+      if (varsState.has(name) && val !== null && Number.isFinite(val)) {
+        varsState.set(name, val);
+      } else if (val !== null && Number.isFinite(val)) {
+        constState.set(name, val);
+      }
       return;
     }
   }

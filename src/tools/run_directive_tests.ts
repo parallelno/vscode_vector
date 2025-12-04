@@ -193,6 +193,44 @@ const tests: DirectiveTestCase[] = [
             success: false,
             errorsContains: ['Missing .endloop']
         }
+    },
+    {
+        name: '.var creates a variable that can be updated',
+        sourceFile: 'var_basic.asm',
+        expect: {
+            bytes: [0x0A, 0x09, 0x05, 0x08]
+        }
+    },
+    {
+        name: '.var rejects redeclaring constant as variable',
+        sourceFile: 'var_redeclare_const.asm',
+        expect: {
+            success: false,
+            errorsContains: ['already exists as a constant']
+        }
+    },
+    {
+        name: '.var rejects redeclaring existing variable',
+        sourceFile: 'var_redeclare_var.asm',
+        expect: {
+            success: false,
+            errorsContains: ['already exists as a variable']
+        }
+    },
+    {
+        name: 'Constants cannot be reassigned',
+        sourceFile: 'var_reassign_const.asm',
+        expect: {
+            success: false,
+            errorsContains: ['Cannot reassign constant']
+        }
+    },
+    {
+        name: '.var works with .if conditionals',
+        sourceFile: 'var_with_if.asm',
+        expect: {
+            bytes: [0xAA, 0xBB, 0xDD]
+        }
     }
 ];
 

@@ -79,6 +79,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const lines = loopExpanded.lines;
   const labels = new Map<string, { addr: number; line: number; src?: string }>();
   const consts = new Map<string, number>();
+  const vars = new Map<string, number>();
   // localsIndex: scopeKey -> (localName -> array of { key, line }) ordered by appearance
   const localsIndex: LocalLabelScopeIndex = new Map();
   // global numeric id counters per local name to ensure exported keys are unique
@@ -185,7 +186,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         ifStack.push({ effective: false, suppressed: !parentActive, origin: origins[i], lineIndex: i + 1 });
         continue;
       }
-      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
+      const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: i + 1 };
       let conditionResult = false;
       if (!parentActive) {
         try {
@@ -218,13 +219,63 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     let pendingDirectiveLabel: string | null = null;
     const isDirectiveToken = (value: string | undefined) => !!value && /^\.?(org|align)$/i.test(value);
 
+    // .var directive handling: "NAME .var expr" creates a variable
+    const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+\.var\s+(.+)$/i);
+    if (varMatch) {
+      const name = varMatch[1];
+      const rhs = varMatch[2].trim();
+      // Variables cannot be created if they already exist as constants, labels, or variables
+      if (consts.has(name)) {
+        errors.push(`Cannot declare variable '${name}' at ${i + 1}: already exists as a constant`);
+        continue;
+      }
+      if (labels.has(name)) {
+        errors.push(`Cannot declare variable '${name}' at ${i + 1}: already exists as a label`);
+        continue;
+      }
+      if (vars.has(name)) {
+        errors.push(`Cannot redeclare variable '${name}' at ${i + 1}: already exists as a variable`);
+        continue;
+      }
+      const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: i + 1 };
+      let val: number | null = null;
+      try {
+        val = evaluateConditionExpression(rhs, ctx, true);
+      } catch (err: any) {
+        errors.push(`Failed to evaluate .var expression '${rhs}' for ${name} at ${i + 1}: ${err?.message || err}`);
+        continue;
+      }
+      vars.set(name, val);
+      continue;
+    }
+
     // simple constant / EQU handling: "NAME = expr" or "NAME EQU expr"
+    // If the name is a variable, update it; otherwise treat as constant assignment
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
       const name = tokens[0];
       const rhs = tokens.slice(2).join(' ').trim();
+      // If it's a variable, allow updating it
+      if (vars.has(name)) {
+        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: i + 1 };
+        let val: number | null = null;
+        try {
+          val = evaluateConditionExpression(rhs, ctx, true);
+        } catch (err: any) {
+          errors.push(`Failed to evaluate expression '${rhs}' for variable ${name} at ${i + 1}: ${err?.message || err}`);
+          continue;
+        }
+        vars.set(name, val);
+        continue;
+      }
+      // Constants cannot be reassigned
+      if (consts.has(name)) {
+        errors.push(`Cannot reassign constant '${name}' at ${i + 1}`);
+        continue;
+      }
       let val: number | null = parseNumberFull(rhs);
       if (val === null) {
         if (consts.has(rhs)) val = consts.get(rhs)!;
+        else if (vars.has(rhs)) val = vars.get(rhs)!;
         else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
       }
       if (val === null) {
@@ -238,9 +289,28 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (assignMatch) {
       const name = assignMatch[1];
       const rhs = assignMatch[2].trim();
+      // If it's a variable, allow updating it
+      if (vars.has(name)) {
+        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: i + 1 };
+        let val: number | null = null;
+        try {
+          val = evaluateConditionExpression(rhs, ctx, true);
+        } catch (err: any) {
+          errors.push(`Failed to evaluate expression '${rhs}' for variable ${name} at ${i + 1}: ${err?.message || err}`);
+          continue;
+        }
+        vars.set(name, val);
+        continue;
+      }
+      // Constants cannot be reassigned
+      if (consts.has(name)) {
+        errors.push(`Cannot reassign constant '${name}' at ${i + 1}`);
+        continue;
+      }
       let val: number | null = parseNumberFull(rhs);
       if (val === null) {
         if (consts.has(rhs)) val = consts.get(rhs)!;
+        else if (vars.has(rhs)) val = vars.get(rhs)!;
         else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
       }
       if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
@@ -251,9 +321,28 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (equMatch) {
       const name = equMatch[1];
       const rhs = equMatch[2].trim();
+      // If it's a variable, allow updating it
+      if (vars.has(name)) {
+        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: i + 1 };
+        let val: number | null = null;
+        try {
+          val = evaluateConditionExpression(rhs, ctx, true);
+        } catch (err: any) {
+          errors.push(`Failed to evaluate expression '${rhs}' for variable ${name} at ${i + 1}: ${err?.message || err}`);
+          continue;
+        }
+        vars.set(name, val);
+        continue;
+      }
+      // Constants cannot be reassigned
+      if (consts.has(name)) {
+        errors.push(`Cannot reassign constant '${name}' at ${i + 1}`);
+        continue;
+      }
       let val: number | null = parseNumberFull(rhs);
       if (val === null) {
         if (consts.has(rhs)) val = consts.get(rhs)!;
+        else if (vars.has(rhs)) val = vars.get(rhs)!;
         else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
       }
       if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
@@ -364,7 +453,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         errors.push(`Missing value for .align at ${originDesc}`);
         continue;
       }
-      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
+      const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: i + 1 };
       let alignment = 0;
       try {
         alignment = evaluateConditionExpression(exprText, ctx, true);
@@ -497,6 +586,9 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const out: number[] = [];
   const map: Record<number, number> = {};
 
+  // Reset variables for second pass - they will be re-evaluated line by line
+  vars.clear();
+
   // Resolve an address token in second pass: numeric, local (@) or global label
   function resolveAddressToken(arg: string, lineIndex: number): number | null {
     if (!arg) return null;
@@ -506,6 +598,8 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (num !== null) return num & 0xffff;
       // check simple named constants (e.g. TEMP_BYTE = 0x00)
       if (consts && consts.has(s)) return consts.get(s)! & 0xffff;
+      // check simple named variables
+      if (vars && vars.has(s)) return vars.get(s)! & 0xffff;
 
     // support simple expressions like "base + 15" where base may be a
     // numeric, a global label, or a local label (@name). RHS must be numeric.
@@ -543,6 +637,8 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
             val = labels.get(tok)!.addr;
           } else if (consts && consts.has(tok)) {
             val = consts.get(tok)!;
+          } else if (vars && vars.has(tok)) {
+            val = vars.get(tok)!;
           }
         }
         if (val === null) return null;
@@ -620,7 +716,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         ifStackSecond.push({ effective: false, suppressed: !parentActive, origin: origins[i], lineIndex: srcLine });
         continue;
       }
-      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+      const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: srcLine };
       let conditionResult = false;
       if (!parentActive) {
         try {
@@ -651,7 +747,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       const argsText = (printMatch[1] || '').trim();
       const parts = argsText.length ? splitTopLevelArgs(argsText) : [];
       const fragments: string[] = [];
-      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+      const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: srcLine };
       let failed = false;
       for (const partRaw of parts) {
         const part = partRaw.trim();
@@ -703,10 +799,64 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     map[srcLine] = addr;
 
-    if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
+    // Handle .var directive in second pass - update the variable value for subsequent uses
+    const varMatchSecond = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+\.var\s+(.+)$/i);
+    if (varMatchSecond) {
+      const name = varMatchSecond[1];
+      const rhs = varMatchSecond[2].trim();
+      const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: srcLine };
+      try {
+        const val = evaluateConditionExpression(rhs, ctx, true);
+        vars.set(name, val);
+      } catch (err: any) {
+        // Error already reported in first pass
+      }
       continue;
     }
-    if (/^[A-Za-z_][A-Za-z0-9_]*\s*=/.test(line) || /^[A-Za-z_][A-Za-z0-9_]*\s+EQU\b/i.test(line)) {
+
+    // Handle variable assignments in second pass - update the variable value for subsequent uses
+    if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
+      const name = tokens[0];
+      if (vars.has(name)) {
+        const rhs = tokens.slice(2).join(' ').trim();
+        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: srcLine };
+        try {
+          const val = evaluateConditionExpression(rhs, ctx, true);
+          vars.set(name, val);
+        } catch (err: any) {
+          // Error already reported in first pass
+        }
+      }
+      continue;
+    }
+    const assignMatchSecond = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
+    if (assignMatchSecond) {
+      const name = assignMatchSecond[1];
+      if (vars.has(name)) {
+        const rhs = assignMatchSecond[2].trim();
+        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: srcLine };
+        try {
+          const val = evaluateConditionExpression(rhs, ctx, true);
+          vars.set(name, val);
+        } catch (err: any) {
+          // Error already reported in first pass
+        }
+      }
+      continue;
+    }
+    const equMatchSecond = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\s+(.+)$/i);
+    if (equMatchSecond) {
+      const name = equMatchSecond[1];
+      if (vars.has(name)) {
+        const rhs = equMatchSecond[2].trim();
+        const ctx: ExpressionEvalContext = { labels, consts, vars, localsIndex, scopes, lineIndex: srcLine };
+        try {
+          const val = evaluateConditionExpression(rhs, ctx, true);
+          vars.set(name, val);
+        } catch (err: any) {
+          // Error already reported in first pass
+        }
+      }
       continue;
     }
 
@@ -717,6 +867,17 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
       for (const p of parts) {
         let val = toByte(p);
+        if (val === null) {
+          // Try to resolve as a constant, variable, or label
+          if (consts.has(p)) val = consts.get(p)! & 0xff;
+          else if (vars.has(p)) val = vars.get(p)! & 0xff;
+          else if (labels.has(p)) val = labels.get(p)!.addr & 0xff;
+          else {
+            // Try to resolve address token (supports expressions)
+            const resolved = resolveAddressToken(p, srcLine);
+            if (resolved !== null) val = resolved & 0xff;
+          }
+        }
         if (val === null) {
           errors.push(`Bad ${op} value '${p}' at ${srcLine}`);
           val = 0;
