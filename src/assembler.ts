@@ -551,7 +551,8 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const out: number[] = [];
   const map: Record<number, number> = {};
 
-  // Reset variables for second pass - they will be re-evaluated line by line
+  // Reset variables for second pass - they are re-initialized when .var is encountered
+  // and updated when assignment statements are processed
   vars.clear();
 
   // Resolve an address token in second pass: numeric, local (@) or global label
@@ -809,15 +810,9 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       for (const p of parts) {
         let val = toByte(p);
         if (val === null) {
-          // Try to resolve as a constant, variable, or label
-          if (consts.has(p)) val = consts.get(p)! & 0xff;
-          else if (vars.has(p)) val = vars.get(p)! & 0xff;
-          else if (labels.has(p)) val = labels.get(p)!.addr & 0xff;
-          else {
-            // Try to resolve address token (supports expressions)
-            const resolved = resolveAddressToken(p, srcLine);
-            if (resolved !== null) val = resolved & 0xff;
-          }
+          // Try to resolve as constant, variable, label, or expression
+          const resolved = resolveAddressToken(p, srcLine);
+          if (resolved !== null) val = resolved & 0xff;
         }
         if (val === null) {
           errors.push(`Bad ${op} value '${p}' at ${srcLine}`);
