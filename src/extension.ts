@@ -1018,7 +1018,7 @@ export function activate(context: vscode.ExtensionContext) {
               const instrHover = resolveInstructionLineHover(filePath, position.line + 1);
               if (instrHover) {
                 const lineText = document.lineAt(position.line).text.trim();
-                const addrHex = '0x' + instrHover.address.toString(16).toUpperCase().padStart(instrHover.address > 0xFFF ? 4 : 3, '0');
+                const addrHex = '0x' + instrHover.address.toString(16).toUpperCase();
                 const sourceHex = instrHover.sourceBytes.map(b => '0x' + b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
                 const memoryHex = instrHover.memoryBytes.map(b => '0x' + b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
                 const md = new vscode.MarkdownString(undefined, true);

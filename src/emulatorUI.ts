@@ -483,6 +483,9 @@ export function resolveInstructionLineHover(filePath: string, lineNumber: number
   const opcode = hardware.memory.GetByte(address & 0xffff, AddrSpace.RAM) & 0xff;
   const instructionLength = CPU.GetInstrLen(opcode);
   
+  // Validate instruction length (i8080 instructions are 1-3 bytes)
+  if (instructionLength <= 0 || instructionLength > 3) return undefined;
+  
   // Read memory bytes (from current emulator memory state)
   const memoryBytes: number[] = [];
   for (let i = 0; i < instructionLength; i++) {
