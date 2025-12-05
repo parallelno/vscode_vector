@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { assembleAndWrite } from './assembler';
 import type { PrintMessage } from './assembler/types';
-import { openEmulatorPanel, pauseEmulatorPanel, resumeEmulatorPanel, stepFramePanel, reloadEmulatorBreakpointsFromFile, resolveEmulatorHoverSymbol, isEmulatorPanelPaused, resolveDataDirectiveHover } from './emulatorUI';
+import { openEmulatorPanel, pauseEmulatorPanel, resumeEmulatorPanel, stepFramePanel, reloadEmulatorBreakpointsFromFile, resolveEmulatorHoverSymbol, isEmulatorPanelPaused, resolveDataDirectiveHover, resolveInstructionLineHover } from './emulatorUI';
 
 export function activate(context: vscode.ExtensionContext) {
   const devectorOutput = vscode.window.createOutputChannel('Devector');
@@ -1013,6 +1013,27 @@ export function activate(context: vscode.ExtensionContext) {
         if (symbol) {
           const numericValue = Math.trunc(symbol.value);
           if (Number.isFinite(numericValue)) {
+            // For instruction lines (kind: 'line'), show the new format with source line, addr, source bytes, memory bytes
+            if (symbol.kind === 'line' && filePath) {
+              const instrHover = resolveInstructionLineHover(filePath, position.line + 1);
+              if (instrHover) {
+                const lineText = document.lineAt(position.line).text.trim();
+                const addrHex = '0x' + instrHover.address.toString(16).toUpperCase().padStart(instrHover.address > 0xFFF ? 4 : 3, '0');
+                const sourceHex = instrHover.sourceBytes.map(b => '0x' + b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+                const memoryHex = instrHover.memoryBytes.map(b => '0x' + b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+                const md = new vscode.MarkdownString(undefined, true);
+                md.appendMarkdown(`\`${lineText}\`\n\n`);
+                md.appendMarkdown(`addr: \`${addrHex}\`\n\n`);
+                if (instrHover.sourceBytes.length > 0) {
+                  md.appendMarkdown(`source: \`${sourceHex}\`\n\n`);
+                }
+                md.appendMarkdown(`memory: \`${memoryHex}\``);
+                md.isTrusted = false;
+                return new vscode.Hover(md, wordRange);
+              }
+            }
+            
+            // For labels and constants, show the original format
             const normalized16 = ((numericValue % 0x10000) + 0x10000) % 0x10000;
             const paddedHex = '0x' + normalized16.toString(16).toUpperCase().padStart(4, '0');
             const fullHex = numericValue < 0 ? `-0x${Math.abs(numericValue).toString(16).toUpperCase()}` : `0x${numericValue.toString(16).toUpperCase()}`;

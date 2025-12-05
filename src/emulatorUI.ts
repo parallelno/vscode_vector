@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import { Hardware } from './emulator/hardware';
 import { HardwareReq } from './emulator/hardware_reqs';
 import { FRAME_H, FRAME_LEN, FRAME_W } from './emulator/display';
-import Memory, { AddrSpace, MAPPING_MODE_MASK, MemoryAccessSnapshot } from './emulator/memory';
+import Memory, { AddrSpace, MAPPING_MODE_MASK, MemoryAccessSnapshot, ROM_LOAD_ADDR } from './emulator/memory';
 import CPU, { CpuState } from './emulator/cpu_i8080';
 import { getWebviewContent } from './emulatorUI/webviewContent';
 import { getDebugLine, getDebugState } from './emulatorUI/debugOutput';
@@ -453,6 +453,66 @@ export function resolveEmulatorHoverSymbol(identifier: string, location?: { file
     }
   }
   return undefined;
+}
+
+export type InstructionLineHoverInfo = {
+  address: number;
+  instructionLength: number;
+  sourceBytes: number[];
+  memoryBytes: number[];
+};
+
+export function resolveInstructionLineHover(filePath: string, lineNumber: number): InstructionLineHoverInfo | undefined {
+  if (!lastBreakpointSource?.hardware || currentToolbarIsRunning) return undefined;
+  if (!lastBreakpointSource.romPath) return undefined;
+  if (!lastSymbolCache) return undefined;
+  
+  const fileKey = normalizeFileKey(filePath);
+  if (!fileKey) return undefined;
+  
+  const perLine = lastSymbolCache.lineAddresses.get(fileKey);
+  if (!perLine) return undefined;
+  
+  const address = perLine.get(lineNumber);
+  if (address === undefined) return undefined;
+  
+  // Read the first byte from memory to get the opcode and instruction length
+  const hardware = lastBreakpointSource.hardware;
+  if (!hardware?.memory) return undefined;
+  
+  const opcode = hardware.memory.GetByte(address & 0xffff, AddrSpace.RAM) & 0xff;
+  const instructionLength = CPU.GetInstrLen(opcode);
+  
+  // Read memory bytes (from current emulator memory state)
+  const memoryBytes: number[] = [];
+  for (let i = 0; i < instructionLength; i++) {
+    const byte = hardware.memory.GetByte((address + i) & 0xffff, AddrSpace.RAM) & 0xff;
+    memoryBytes.push(byte);
+  }
+  
+  // Read source bytes from the ROM file
+  const sourceBytes: number[] = [];
+  try {
+    const romPath = lastBreakpointSource.romPath;
+    if (fs.existsSync(romPath)) {
+      const romData = fs.readFileSync(romPath);
+      const romOffset = address - ROM_LOAD_ADDR;
+      if (romOffset >= 0 && romOffset + instructionLength <= romData.length) {
+        for (let i = 0; i < instructionLength; i++) {
+          sourceBytes.push(romData[romOffset + i] & 0xff);
+        }
+      }
+    }
+  } catch (err) {
+    // If we can't read the source bytes, continue with empty array
+  }
+  
+  return {
+    address,
+    instructionLength,
+    sourceBytes,
+    memoryBytes
+  };
 }
 
 export function isEmulatorPanelPaused(): boolean {
