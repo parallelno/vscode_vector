@@ -329,6 +329,9 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   panel.onDidChangeViewState(() => {
     if (panel.visible) {
       syncToolbarState();
+      // Re-send the current frame to the webview to restore canvas content
+      // that may have been discarded while the tab was hidden
+      sendFrameToWebview();
     }
   }, null, context.subscriptions);
 
