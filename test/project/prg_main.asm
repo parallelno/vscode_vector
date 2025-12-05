@@ -5,6 +5,9 @@
 
 .org 0x100
 start:
+			jmp next
+			.text "   address:   1", '\n', '\0'
+next:
 			; Initialize registers to zero
 			lxi sp, 0x8000
 			lxi b, 0

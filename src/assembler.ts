@@ -140,6 +140,25 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
   }
 
+  function tokenizeLineWithOffsets(lineText: string): { tokens: string[]; offsets: number[] } {
+    if (!lineText.length) return { tokens: [], offsets: [] };
+    const tokens = lineText.split(/\s+/);
+    const offsets: number[] = [];
+    let cursor = 0;
+    for (const token of tokens) {
+      const idx = lineText.indexOf(token, cursor);
+      const start = idx >= 0 ? idx : cursor;
+      offsets.push(start);
+      cursor = start + token.length;
+    }
+    return { tokens, offsets };
+  }
+
+  function argsAfterToken(lineText: string, token: string | undefined, offset: number | undefined): string {
+    if (!lineText || !token || offset === undefined || offset < 0) return '';
+    return lineText.slice(offset + token.length);
+  }
+
   // First pass: labels and address calculation
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
@@ -221,7 +240,10 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       continue;
     }
 
-    const tokens = line.split(/\s+/);
+    const tokenized = tokenizeLineWithOffsets(line);
+    const tokens = tokenized.tokens;
+    const tokenOffsets = tokenized.offsets;
+    if (!tokens.length) continue;
     let pendingDirectiveLabel: string | null = null;
     const isDirectiveToken = (value: string | undefined) => !!value && /^\.?(org|align)$/i.test(value);
 
@@ -272,6 +294,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (tokens[0].endsWith(':')) {
       const candidate = tokens[0].slice(0, -1);
       tokens.shift();
+      tokenOffsets.shift();
       const nextToken = tokens.length ? tokens[0] : '';
       if (isDirectiveToken(nextToken)) {
         pendingDirectiveLabel = candidate;
@@ -284,13 +307,14 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     } else if (tokens.length >= 2 && isDirectiveToken(tokens[1])) {
       pendingDirectiveLabel = tokens[0];
       tokens.shift();
+      tokenOffsets.shift();
     }
 
     const op = tokens[0].toUpperCase();
 
     if (op === 'DB' || op === '.BYTE') {
       // DB value [,value]
-      const rest = tokens.slice(1).join(' ').trim();
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
       for (const p of parts) {
           addr += 1;
@@ -299,7 +323,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     if (op === 'DW' || op === '.WORD') {
-      const rest = tokens.slice(1).join(' ').trim();
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
       if (!rest.length) {
         errors.push(`Missing value for ${op} at ${originDesc}`);
         continue;
@@ -321,7 +345,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     if (op === 'DS') {
       // DS count  (reserve bytes)
-      const rest = tokens.slice(1).join(' ').trim();
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
       const n = parseInt(rest);
       if (isNaN(n) || n < 0) { errors.push(`Bad DS count '${rest}' at ${i + 1}`); continue; }
       addr += n;
@@ -330,7 +354,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     if (op === '.ENCODING') {
       // .encoding "type", "case"
-      const rest = tokens.slice(1).join(' ').trim();
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
       const args = splitTopLevelArgs(rest);
       if (args.length < 1) {
         errors.push(`Missing encoding type for .encoding at ${originDesc}`);
@@ -368,7 +392,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     if (op === '.TEXT') {
       // .text "string", 'c', ...
-      const rest = tokens.slice(1).join(' ').trim();
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
       if (!rest.length) {
         errors.push(`Missing value for .text at ${originDesc}`);
         continue;
@@ -387,7 +411,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     if (op === '.ORG' || op === 'ORG') {
       // .org addr
-      const rest = tokens.slice(1).join(' ');
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]);
       const aTok = rest.trim().split(/\s+/)[0];
       const org = origins[i];
       let val: number | null = null;
@@ -423,7 +447,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     if (op === '.ALIGN' || op === 'ALIGN') {
-      const exprText = tokens.slice(1).join(' ').trim();
+      const exprText = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
       if (!exprText.length) {
         errors.push(`Missing value for .align at ${originDesc}`);
         continue;
@@ -757,15 +781,20 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     if (/^[A-Za-z_][A-Za-z0-9_]*:$/.test(line)) continue; // label only
 
-    const tokens = line.split(/\s+/);
+    const tokenizedSecond = tokenizeLineWithOffsets(line);
+    const tokens = tokenizedSecond.tokens;
+    const tokenOffsets = tokenizedSecond.offsets;
+    if (!tokens.length) continue;
     let labelHere: string | null = null;
     if (tokens[0].endsWith(':')) {
       labelHere = tokens[0].slice(0, -1);
       tokens.shift();
+      tokenOffsets.shift();
       if (!tokens.length) { map[srcLine] = addr; continue; }
     } else if (tokens.length >= 2 && /^\.?org$/i.test(tokens[1])) {
       labelHere = tokens[0];
       tokens.shift();
+      tokenOffsets.shift();
     }
 
     map[srcLine] = addr;
@@ -780,7 +809,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     const op = tokens[0].toUpperCase();
 
     if (op === 'DB' || op === '.BYTE') {
-      const rest = tokens.slice(1).join(' ').trim();
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
       for (const p of parts) {
         let val = toByte(p);
@@ -795,7 +824,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     if (op === 'DW' || op === '.WORD') {
-      const rest = tokens.slice(1).join(' ').trim();
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
       if (!rest.length) {
         errors.push(`Missing value for ${op} at ${originDesc}`);
         continue;
@@ -821,7 +850,8 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     if (op === '.ORG' || op === 'ORG') {
-      const aTok = tokens.slice(1).join(' ').trim().split(/\s+/)[0];
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]);
+      const aTok = rest.trim().split(/\s+/)[0];
       const val = parseAddressToken(aTok, labels, consts);
       if (val === null) { errors.push(`Bad ${op} address '${aTok}' at ${srcLine}`); continue; }
       addr = val;
@@ -843,7 +873,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     if (op === 'DS') {
-      const rest = tokens.slice(1).join(' ').trim();
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
       const n = parseInt(rest);
       if (isNaN(n) || n < 0) { errors.push(`Bad DS count '${rest}' at ${srcLine}`); continue; }
       // reserve: just advance addr (no bytes emitted)
@@ -853,7 +883,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     if (op === '.ENCODING') {
       // .encoding "type", "case" - update encoding state
-      const rest = tokens.slice(1).join(' ').trim();
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
       const args = splitTopLevelArgs(rest);
       if (args.length < 1) continue;  // Error already reported in first pass
       const typeArg = parseStringLiteral(args[0]);
@@ -878,7 +908,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     if (op === '.TEXT') {
       // .text "string", 'c', ... - emit bytes
-      const rest = tokens.slice(1).join(' ').trim();
+      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
       if (!rest.length) continue;  // Error already reported in first pass
       const parts = splitTopLevelArgs(rest);
       for (const part of parts) {

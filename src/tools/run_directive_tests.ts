@@ -293,6 +293,13 @@ const tests: DirectiveTestCase[] = [
         expect: {
             bytes: [0x41, 0x0A, 0x42]  // 'A', newline, 'B'
         }
+    },
+    {
+        name: '.text preserves repeated spaces',
+        sourceFile: 'text_spaces.asm',
+        expect: {
+            bytes: [0x20, 0x20, 0x20, 0x61, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73, 0x3A, 0x20, 0x20, 0x20, 0x31, 0x0A, 0x00]
+        }
     }
 ];
 
