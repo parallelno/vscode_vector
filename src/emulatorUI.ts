@@ -860,14 +860,14 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
 function ensureDataHighlightDecorations(context: vscode.ExtensionContext) {
   if (!dataReadDecoration) {
     dataReadDecoration = vscode.window.createTextEditorDecorationType({
-      isWholeLine: true,
+      isWholeLine: false,
       backgroundColor: 'rgba(64, 127, 255, 0.25)'
     });
     context.subscriptions.push(dataReadDecoration);
   }
   if (!dataWriteDecoration) {
     dataWriteDecoration = vscode.window.createTextEditorDecorationType({
-      isWholeLine: true,
+      isWholeLine: false,
       backgroundColor: 'rgba(255, 92, 92, 0.25)'
     });
     context.subscriptions.push(dataWriteDecoration);
@@ -882,12 +882,19 @@ function normalizeFsPathSafe(value: string): string {
   }
 }
 
-function buildLineRanges(lineSet: Set<number>, doc: vscode.TextDocument): vscode.Range[] {
+function buildElementRanges(elements: Map<number, Set<number>>, doc: vscode.TextDocument): vscode.Range[] {
   const ranges: vscode.Range[] = [];
-  for (const line of lineSet) {
-    const idx = line - 1;
-    if (!Number.isFinite(idx) || idx < 0 || idx >= doc.lineCount) continue;
-    ranges.push(doc.lineAt(idx).range);
+  for (const [line, elementIndices] of elements) {
+    const lineIdx = line - 1;
+    if (!Number.isFinite(lineIdx) || lineIdx < 0 || lineIdx >= doc.lineCount) continue;
+    const lineText = doc.lineAt(lineIdx).text;
+    const directiveInfo = extractDataDirectiveInfo(lineText);
+    if (!directiveInfo || !directiveInfo.ranges.length) continue;
+    for (const elemIdx of elementIndices) {
+      if (elemIdx < 0 || elemIdx >= directiveInfo.ranges.length) continue;
+      const tokenRange = directiveInfo.ranges[elemIdx];
+      ranges.push(new vscode.Range(lineIdx, tokenRange.start, lineIdx, tokenRange.end));
+    }
   }
   return ranges;
 }
@@ -901,29 +908,40 @@ function applyDataLineHighlightsFromSnapshot(snapshot?: MemoryAccessSnapshot) {
     return;
   }
   lastDataAccessSnapshot = snapshot;
-  const accumulate = (addr: number, bucket: Map<string, Set<number>>) => {
+  // Accumulate which element indices were accessed for each line
+  // bucket maps: fileKey -> Map<line, Set<elementIndex>>
+  const accumulate = (addr: number, bucket: Map<string, Map<number, Set<number>>>) => {
     const entry = dataAddressLookup?.get(addr & 0xffff);
     if (!entry) return;
     const resolvedPath = lastSymbolCache?.filePaths.get(entry.fileKey);
     if (!resolvedPath) return;
     const key = normalizeFsPathSafe(resolvedPath);
-    let lineSet = bucket.get(key);
-    if (!lineSet) {
-      lineSet = new Set();
-      bucket.set(key, lineSet);
+    // Calculate which element this address corresponds to
+    const byteOffset = (addr & 0xffff) - entry.span.start;
+    if (byteOffset < 0 || byteOffset >= entry.span.byteLength) return;
+    const elementIndex = Math.floor(byteOffset / entry.span.unitBytes);
+    let lineMap = bucket.get(key);
+    if (!lineMap) {
+      lineMap = new Map();
+      bucket.set(key, lineMap);
     }
-    lineSet.add(entry.line);
+    let elemSet = lineMap.get(entry.line);
+    if (!elemSet) {
+      elemSet = new Set();
+      lineMap.set(entry.line, elemSet);
+    }
+    elemSet.add(elementIndex);
   };
-  const readLines = new Map<string, Set<number>>();
-  const writeLines = new Map<string, Set<number>>();
-  snapshot.reads.forEach(addr => accumulate(addr, readLines));
-  snapshot.writes.forEach(addr => accumulate(addr, writeLines));
+  const readElements = new Map<string, Map<number, Set<number>>>();
+  const writeElements = new Map<string, Map<number, Set<number>>>();
+  snapshot.reads.forEach(addr => accumulate(addr, readElements));
+  snapshot.writes.forEach(addr => accumulate(addr, writeElements));
   for (const editor of vscode.window.visibleTextEditors) {
     const key = normalizeFsPathSafe(editor.document.uri.fsPath);
-    const readSet = readLines.get(key);
-    const writeSet = writeLines.get(key);
-    if (dataReadDecoration) editor.setDecorations(dataReadDecoration, readSet ? buildLineRanges(readSet, editor.document) : []);
-    if (dataWriteDecoration) editor.setDecorations(dataWriteDecoration, writeSet ? buildLineRanges(writeSet, editor.document) : []);
+    const readMap = readElements.get(key);
+    const writeMap = writeElements.get(key);
+    if (dataReadDecoration) editor.setDecorations(dataReadDecoration, readMap ? buildElementRanges(readMap, editor.document) : []);
+    if (dataWriteDecoration) editor.setDecorations(dataWriteDecoration, writeMap ? buildElementRanges(writeMap, editor.document) : []);
   }
 }
 
