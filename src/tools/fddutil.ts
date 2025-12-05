@@ -2,18 +2,27 @@
 /**
  * fddutil.ts
  *
- * TypeScript implementation of FDD (Floppy Disk Drive) utility tool.
+ * TypeScript implementation of CLI Floppy Disk Drive tool.
  * Ported from the Python implementation at:
  * https://github.com/parallelno/fddutil_python/blob/main/src/fddutil.py
+ * Originally written in JavaScript by Svofski.
+ * https://github.com/svofski/v06c-fddutil
  *
  * This tool reads and writes FDD images, processes command-line arguments,
  * and manages files to be added to the FDD image.
  *
- * Usage: node fddutil.js -i file1 -i file2... -o output.fdd [-r ryba.fdd]
+ * Usage:
+ *
+ * Show help
+ * node ./out/tools/fddutil.js -h
+ *
+ * Add files to an FDD image
+ * node ./out/tools/fddutil.js -r template.fdd -i file1.com -i file2.dat -o output.fdd
+
  *
  * Options:
  *   -h          Show help
- *   -r <file>   Template FDD image (ryba file) to use as base
+ *   -t <file>   Optional template disk image (Commonly FDD image with a boot sector and the OS of your choice).
  *   -i <file>   File to add to the FDD image (can be specified multiple times)
  *   -o <file>   Output FDD image file
  */
@@ -23,20 +32,20 @@ import * as path from 'path';
 import { Filesystem } from './fddimage';
 
 function printUsage(): void {
-    console.log('Usage: fddutil -i file1 -i file2... -o output.fdd [-r ryba.fdd]');
+    console.log('Usage: node ./out/tools/fddutil.js -r [template.fdd] -i file1.com [-i file2.dat] -o output.fdd');
     console.log('');
     console.log('Options:');
-    console.log('  -h          Show this help message');
-    console.log('  -r <file>   Template FDD image (ryba file) to use as base');
-    console.log('              (default: os-t34.fdd in the script directory)');
+    console.log('  -h          Show help');
+    console.log('  -t <file>   Optional template disk image (Commonly FDD image with a boot sector and the OS of your choice).');
+    console.log('              (for example: -t ./res/fdd/rds308.fdd)');
     console.log('  -i <file>   File to add to the FDD image (can be specified multiple times)');
     console.log('  -o <file>   Output FDD image file');
 }
 
 function main(): void {
     const launchPath = __dirname;
-    // Default template file - can be overridden with -r option
-    let rybaFile = path.join(launchPath, 'os-t34.fdd');
+    // Default template file - can be overridden with -t option
+    let templateFile = '';
     const filesToPut: string[] = [];
     let outputFile: string | null = null;
 
@@ -59,10 +68,10 @@ function main(): void {
                         printUsage();
                         process.exit(0);
                         break;
-                    case '-r':
-                        // User-specified ryba file
+                    case '-t':
+                        // User-specified template file
                         borrowHandler = (v: string) => {
-                            rybaFile = v;
+                            templateFile = v;
                         };
                         break;
                     case '-i':
@@ -95,18 +104,21 @@ function main(): void {
         process.exit(1);
     }
 
-    // Read the ryba (template) file
-    let rybaData: Buffer;
-    try {
-        rybaData = fs.readFileSync(rybaFile);
-    } catch {
-        console.error(`Error reading ryba file: ${rybaFile}`);
-        process.exit(1);
+    const fdd = new Filesystem()
+
+    // Read the template file
+    if (templateFile) {
+        try {
+            // Create filesystem from template data
+            const templateData: Buffer = fs.readFileSync(templateFile);
+            fdd.fromArray(new Uint8Array(templateData));
+        } catch {
+            console.error(`Error reading template file: ${templateFile}`);
+            process.exit(1);
+        }
     }
 
-    // Create filesystem from ryba data
-    const fdd = new Filesystem().fromArray(new Uint8Array(rybaData));
-    console.log('Contents of ryba stomach:');
+    console.log('Contents of template disk:');
     fdd.listDir();
 
     // Add files to the FDD image

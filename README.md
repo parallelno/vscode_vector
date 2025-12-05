@@ -214,6 +214,26 @@ SetColors(, MyColor+1, $0000) ; Background uses the default $06
 
 Nested macros are supported (up to 32 levels deep), but you cannot open another `.macro` inside a macro body. All macro lines keep their original file/line metadata, so assembler errors still point back to the macro definition.
 
+FDD utility CLI
+---------------
+
+Makes a Vector 06c floppy image out of files and an optional template FDD image (OS).
+
+Typical flow:
+
+```pwsh
+npm run compile # make sure out/tools/fddutil.js exists
+node .\out\tools\fddutil.js -h
+node .\out\tools\fddutil.js -r .\res\fdd\rds308.fdd -i file1.com -i file2.dat -o mydisk.fdd
+```
+
+Key switches:
+
+- `-t <file>` optional template disk image (Commonly FDD image with a boot sector and the OS of your choice).
+- `-i <file>` adds a host file into the image; repeat the flag for each additional file.
+- `-o <file>` writes the resulting `.fdd` image.
+- `-h` prints the usage summary.
+
 Extending the workflow
 ----------------------
 
