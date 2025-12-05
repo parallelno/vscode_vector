@@ -33,6 +33,10 @@ export const MAX_ENTRIES = (DIRECTORY_END_OFFSET - DIRECTORY_START_OFFSET) / ENT
 // File system constants
 export const CLUSTER_LEN = 2048;
 
+// Empty file markers (8 and 3 chars of 0xE5 interpreted as characters)
+const EMPTY_FILENAME_MARKER = String.fromCharCode(EMPTY_MARKER).repeat(8);
+const EMPTY_FILETYPE_MARKER = String.fromCharCode(EMPTY_MARKER).repeat(3);
+
 /**
  * MicroDOS header structure for directory entries
  */
@@ -338,7 +342,7 @@ export class Filesystem {
             if (existingHeader.status >= STATUS_FILE_DOESNT_EXISTS) {
                 // Take this header slot
                 let oldFile = '';
-                if (existingHeader.filename !== 'åååååååå' || existingHeader.filetype !== 'ååå') {
+                if (existingHeader.filename !== EMPTY_FILENAME_MARKER || existingHeader.filetype !== EMPTY_FILETYPE_MARKER) {
                     oldFile = existingHeader.filename + '.' + existingHeader.filetype;
                 }
 
@@ -351,11 +355,15 @@ export class Filesystem {
                 header.records = Math.min(header.records, RECORD_SIZE);
 
                 for (let i = 0; i < 8; i++) {
+                if (clusterIndex < availableClusters.length) {
                     header.fat[i] = remainingBytes > 0 ? availableClusters[clusterIndex] : 0;
-                    if (remainingBytes > 0) {
-                        remainingBytes -= 2048;
-                        clusterIndex++;
-                    }
+                } else {
+                    header.fat[i] = 0;
+                }
+                if (remainingBytes > 0 && clusterIndex < availableClusters.length) {
+                    remainingBytes -= 2048;
+                    clusterIndex++;
+                }
                 }
 
                 if (existingHeader.mapped) {

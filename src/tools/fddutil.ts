@@ -28,12 +28,14 @@ function printUsage(): void {
     console.log('Options:');
     console.log('  -h          Show this help message');
     console.log('  -r <file>   Template FDD image (ryba file) to use as base');
+    console.log('              (default: os-t34.fdd in the script directory)');
     console.log('  -i <file>   File to add to the FDD image (can be specified multiple times)');
     console.log('  -o <file>   Output FDD image file');
 }
 
 function main(): void {
     const launchPath = __dirname;
+    // Default template file - can be overridden with -r option
     let rybaFile = path.join(launchPath, 'os-t34.fdd');
     const filesToPut: string[] = [];
     let outputFile: string | null = null;
@@ -90,7 +92,7 @@ function main(): void {
         }
     } catch {
         printUsage();
-        process.exit(0);
+        process.exit(1);
     }
 
     // Read the ryba (template) file
@@ -113,7 +115,7 @@ function main(): void {
         try {
             data = fs.readFileSync(name);
         } catch {
-            console.error(`Could not read file ${name}, it's numberwang`);
+            console.error(`Could not read file ${name}. Please check if the file exists and is readable.`);
             process.exit(1);
         }
 
