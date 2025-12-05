@@ -891,6 +891,8 @@ function buildElementRanges(elements: Map<number, Set<number>>, doc: vscode.Text
     const directiveInfo = extractDataDirectiveInfo(lineText);
     if (!directiveInfo || !directiveInfo.ranges.length) continue;
     for (const elemIdx of elementIndices) {
+      // Skip if the element index doesn't match a parsed token
+      // (can happen if source was edited or byte spans differ from token count)
       if (elemIdx < 0 || elemIdx >= directiveInfo.ranges.length) continue;
       const tokenRange = directiveInfo.ranges[elemIdx];
       ranges.push(new vscode.Range(lineIdx, tokenRange.start, lineIdx, tokenRange.end));
@@ -918,8 +920,10 @@ function applyDataLineHighlightsFromSnapshot(snapshot?: MemoryAccessSnapshot) {
     const key = normalizeFsPathSafe(resolvedPath);
     // Calculate which element this address corresponds to
     const byteOffset = (addr & 0xffff) - entry.span.start;
+    // Guard against invalid span data
+    const unitBytes = entry.span.unitBytes > 0 ? entry.span.unitBytes : 1;
     if (byteOffset < 0 || byteOffset >= entry.span.byteLength) return;
-    const elementIndex = Math.floor(byteOffset / entry.span.unitBytes);
+    const elementIndex = Math.floor(byteOffset / unitBytes);
     let lineMap = bucket.get(key);
     if (!lineMap) {
       lineMap = new Map();
