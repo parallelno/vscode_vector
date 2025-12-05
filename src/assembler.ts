@@ -84,8 +84,6 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const consts = new Map<string, number>();
   // Track which consts were declared as variables (can be reassigned via = or EQU)
   const variables = new Set<string>();
-  // Track initial values of variables for resetting before second pass
-  const variableInitialValues = new Map<string, number>();
   // localsIndex: scopeKey -> (localName -> array of { key, line }) ordered by appearance
   const localsIndex: LocalLabelScopeIndex = new Map();
   // global numeric id counters per local name to ensure exported keys are unique
@@ -277,7 +275,6 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       }
       consts.set(name, val);
       variables.add(name);
-      variableInitialValues.set(name, val);  // Save initial value for second pass reset
       continue;
     }
 
@@ -656,10 +653,6 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   // Reset text encoding state for second pass
   textEncoding = 'ascii';
   textCase = 'mixed';
-  // Reset all variable values to their initial values for second pass
-  for (const [name, initialValue] of variableInitialValues) {
-    consts.set(name, initialValue);
-  }
   const out: number[] = [];
   const map: Record<number, number> = {};
   const dataLineSpans: Array<{ start: number; byteLength: number; unitBytes: number } | undefined> = new Array(lines.length);
@@ -876,13 +869,15 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     map[srcLine] = addr;
     const lineStartAddr = addr;
 
-    // Handle EQU/= for variables in second pass (update values as we go)
-    const assignMatchSecond = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
-    if (assignMatchSecond) {
-      const name = assignMatchSecond[1];
-      const rhs = assignMatchSecond[2].trim();
-      // Only process updates for variables (already defined via .var)
+    // Handle variable updates (=, EQU) and .var directives in second pass
+    // For variables: update values as we go to maintain proper value progression
+    // For constants: skip (already processed in first pass, values don't change)
+    const assignOrEquMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|EQU)\s+(.+)$/i);
+    if (assignOrEquMatch) {
+      const name = assignOrEquMatch[1];
+      // Only process updates for variables (declared via .var)
       if (variables.has(name)) {
+        const rhs = assignOrEquMatch[2].trim();
         const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
         try {
           const val = evaluateConditionExpression(rhs, ctx, true);
@@ -893,32 +888,18 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       }
       continue;
     }
-    const equMatchSecond = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\s+(.+)$/i);
-    if (equMatchSecond) {
-      const name = equMatchSecond[1];
-      const rhs = equMatchSecond[2].trim();
-      // Only process updates for variables (already defined via .var)
-      if (variables.has(name)) {
-        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-        try {
-          const val = evaluateConditionExpression(rhs, ctx, true);
-          consts.set(name, val);
-        } catch (err: any) {
-          // Error already reported in first pass
-        }
-      }
-      continue;
-    }
-    if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
-      continue;
-    }
-    // Handle .var directives in second pass - set to initial value (already validated in first pass)
+    // Handle .var directives in second pass - re-evaluate expression for initial value
     const varMatchSecond = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:?\s*\.var\s+(.+)$/i);
     if (varMatchSecond) {
       const name = varMatchSecond[1];
-      // Reset to initial value (already stored during first pass)
-      if (variableInitialValues.has(name)) {
-        consts.set(name, variableInitialValues.get(name)!);
+      const rhs = varMatchSecond[2].trim();
+      // Re-evaluate initial value expression (using current state of labels/consts)
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+      try {
+        const val = evaluateConditionExpression(rhs, ctx, true);
+        consts.set(name, val);
+      } catch (err: any) {
+        // Error already reported in first pass
       }
       continue;
     }
