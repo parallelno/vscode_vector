@@ -82,6 +82,10 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const lines = loopExpanded.lines;
   const labels = new Map<string, { addr: number; line: number; src?: string }>();
   const consts = new Map<string, number>();
+  // Track which consts were declared as variables (can be reassigned via = or EQU)
+  const variables = new Set<string>();
+  // Track initial values of variables for resetting before second pass
+  const variableInitialValues = new Map<string, number>();
   // localsIndex: scopeKey -> (localName -> array of { key, line }) ordered by appearance
   const localsIndex: LocalLabelScopeIndex = new Map();
   // global numeric id counters per local name to ensure exported keys are unique
@@ -247,46 +251,113 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     let pendingDirectiveLabel: string | null = null;
     const isDirectiveToken = (value: string | undefined) => !!value && /^\.?(org|align)$/i.test(value);
 
+    // .var directive: "Label .var Constant" or "Label: .var Constant"
+    // Creates a variable that can be updated later with = or EQU
+    const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:?\s*\.var\s+(.+)$/i);
+    if (varMatch) {
+      const name = varMatch[1];
+      const rhs = varMatch[2].trim();
+      // Check if name already exists as a label or constant
+      if (labels.has(name)) {
+        errors.push(`Cannot declare variable '${name}' - already exists as a label at ${originDesc}`);
+        continue;
+      }
+      if (consts.has(name)) {
+        errors.push(`Cannot declare variable '${name}' - already exists as a constant at ${originDesc}`);
+        continue;
+      }
+      // Evaluate the expression for the initial value
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
+      let val: number;
+      try {
+        val = evaluateConditionExpression(rhs, ctx, true);
+      } catch (err: any) {
+        errors.push(`Failed to evaluate .var expression '${rhs}' at ${originDesc}: ${err?.message || err}`);
+        continue;
+      }
+      consts.set(name, val);
+      variables.add(name);
+      variableInitialValues.set(name, val);  // Save initial value for second pass reset
+      continue;
+    }
+
     // simple constant / EQU handling: "NAME = expr" or "NAME EQU expr"
+    // If the name is a variable, update its value; otherwise define a new constant
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
       const name = tokens[0];
       const rhs = tokens.slice(2).join(' ').trim();
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
+      // Check if this is an update to an existing constant (not a variable)
+      if (consts.has(name) && !variables.has(name)) {
+        errors.push(`Cannot redefine constant '${name}' at ${originDesc} - use .var to declare reassignable values`);
+        continue;
       }
-      if (val === null) {
-        errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
-      } else {
-        consts.set(name, val);
+      // Check if name is a label
+      if (labels.has(name)) {
+        errors.push(`Cannot assign to label '${name}' at ${originDesc}`);
+        continue;
       }
+      // Evaluate the expression
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
+      let val: number;
+      try {
+        val = evaluateConditionExpression(rhs, ctx, true);
+      } catch (err: any) {
+        errors.push(`Failed to evaluate expression '${rhs}' for ${name} at ${originDesc}: ${err?.message || err}`);
+        continue;
+      }
+      consts.set(name, val);
       continue;
     }
     const assignMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
     if (assignMatch) {
       const name = assignMatch[1];
       const rhs = assignMatch[2].trim();
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
+      // Check if this is an update to an existing constant (not a variable)
+      if (consts.has(name) && !variables.has(name)) {
+        errors.push(`Cannot redefine constant '${name}' at ${originDesc} - use .var to declare reassignable values`);
+        continue;
       }
-      if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
-      else consts.set(name, val);
+      // Check if name is a label
+      if (labels.has(name)) {
+        errors.push(`Cannot assign to label '${name}' at ${originDesc}`);
+        continue;
+      }
+      // Evaluate the expression
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
+      let val: number;
+      try {
+        val = evaluateConditionExpression(rhs, ctx, true);
+      } catch (err: any) {
+        errors.push(`Failed to evaluate expression '${rhs}' for ${name} at ${originDesc}: ${err?.message || err}`);
+        continue;
+      }
+      consts.set(name, val);
       continue;
     }
     const equMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\s+(.+)$/i);
     if (equMatch) {
       const name = equMatch[1];
       const rhs = equMatch[2].trim();
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
+      // Check if this is an update to an existing constant (not a variable)
+      if (consts.has(name) && !variables.has(name)) {
+        errors.push(`Cannot redefine constant '${name}' at ${originDesc} - use .var to declare reassignable values`);
+        continue;
       }
-      if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
-      else consts.set(name, val);
+      // Check if name is a label
+      if (labels.has(name)) {
+        errors.push(`Cannot assign to label '${name}' at ${originDesc}`);
+        continue;
+      }
+      // Evaluate the expression
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
+      let val: number;
+      try {
+        val = evaluateConditionExpression(rhs, ctx, true);
+      } catch (err: any) {
+        errors.push(`Failed to evaluate expression '${rhs}' for ${name} at ${originDesc}: ${err?.message || err}`);
+        continue;
+      }
+      consts.set(name, val);
       continue;
     }
 
@@ -585,6 +656,10 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   // Reset text encoding state for second pass
   textEncoding = 'ascii';
   textCase = 'mixed';
+  // Reset all variable values to their initial values for second pass
+  for (const [name, initialValue] of variableInitialValues) {
+    consts.set(name, initialValue);
+  }
   const out: number[] = [];
   const map: Record<number, number> = {};
   const dataLineSpans: Array<{ start: number; byteLength: number; unitBytes: number } | undefined> = new Array(lines.length);
@@ -801,10 +876,50 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     map[srcLine] = addr;
     const lineStartAddr = addr;
 
+    // Handle EQU/= for variables in second pass (update values as we go)
+    const assignMatchSecond = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
+    if (assignMatchSecond) {
+      const name = assignMatchSecond[1];
+      const rhs = assignMatchSecond[2].trim();
+      // Only process updates for variables (already defined via .var)
+      if (variables.has(name)) {
+        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+        try {
+          const val = evaluateConditionExpression(rhs, ctx, true);
+          consts.set(name, val);
+        } catch (err: any) {
+          // Error already reported in first pass
+        }
+      }
+      continue;
+    }
+    const equMatchSecond = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\s+(.+)$/i);
+    if (equMatchSecond) {
+      const name = equMatchSecond[1];
+      const rhs = equMatchSecond[2].trim();
+      // Only process updates for variables (already defined via .var)
+      if (variables.has(name)) {
+        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+        try {
+          const val = evaluateConditionExpression(rhs, ctx, true);
+          consts.set(name, val);
+        } catch (err: any) {
+          // Error already reported in first pass
+        }
+      }
+      continue;
+    }
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
       continue;
     }
-    if (/^[A-Za-z_][A-Za-z0-9_]*\s*=/.test(line) || /^[A-Za-z_][A-Za-z0-9_]*\s+EQU\b/i.test(line)) {
+    // Handle .var directives in second pass - set to initial value (already validated in first pass)
+    const varMatchSecond = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:?\s*\.var\s+(.+)$/i);
+    if (varMatchSecond) {
+      const name = varMatchSecond[1];
+      // Reset to initial value (already stored during first pass)
+      if (variableInitialValues.has(name)) {
+        consts.set(name, variableInitialValues.get(name)!);
+      }
       continue;
     }
 
@@ -815,10 +930,22 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
       let emitted = 0;
       for (const p of parts) {
-        let val = toByte(p);
+        // Try numeric literal first, then resolve symbolic constants/expressions
+        let val: number | null = toByte(p);
         if (val === null) {
-          errors.push(`Bad ${op} value '${p}' at ${srcLine}`);
-          val = 0;
+          // Try to resolve as constant or expression
+          const resolved = resolveAddressToken(p, srcLine);
+          if (resolved !== null) {
+            val = resolved & 0xff;
+          } else {
+            const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+            try {
+              val = evaluateConditionExpression(p, ctx, true) & 0xff;
+            } catch (err) {
+              errors.push(`Bad ${op} value '${p}' at ${srcLine}`);
+              val = 0;
+            }
+          }
         }
         out.push(val & 0xff);
         addr++;

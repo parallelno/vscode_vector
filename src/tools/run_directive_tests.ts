@@ -300,6 +300,51 @@ const tests: DirectiveTestCase[] = [
         expect: {
             bytes: [0x20, 0x20, 0x20, 0x61, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73, 0x3A, 0x20, 0x20, 0x20, 0x31, 0x0A, 0x00]
         }
+    },
+    {
+        name: '.var creates a variable that can be updated',
+        sourceFile: 'var_basic.asm',
+        expect: {
+            bytes: [0x0A, 0x09, 0x08]  // 10, 9, 8
+        }
+    },
+    {
+        name: '.var works with colon syntax for label',
+        sourceFile: 'var_with_colon.asm',
+        expect: {
+            bytes: [0xFF, 0xFE]  // 255, 254
+        }
+    },
+    {
+        name: '.var initial value can be an expression',
+        sourceFile: 'var_expression.asm',
+        expect: {
+            bytes: [0x69, 0xD2]  // 105, 210
+        }
+    },
+    {
+        name: '.var fails when label already exists',
+        sourceFile: 'var_duplicate_label.asm',
+        expect: {
+            success: false,
+            errorsContains: ["Cannot declare variable 'MyLabel' - already exists as a label"]
+        }
+    },
+    {
+        name: '.var fails when constant already exists',
+        sourceFile: 'var_duplicate_const.asm',
+        expect: {
+            success: false,
+            errorsContains: ["Cannot declare variable 'MyConst' - already exists as a constant"]
+        }
+    },
+    {
+        name: 'Constants cannot be redefined without .var',
+        sourceFile: 'const_redefine.asm',
+        expect: {
+            success: false,
+            errorsContains: ["Cannot redefine constant 'VALUE'"]
+        }
     }
 ];
 
