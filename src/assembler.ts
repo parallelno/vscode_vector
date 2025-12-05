@@ -256,6 +256,15 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         if (consts.has(rhs)) val = consts.get(rhs)!;
         else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
       }
+      // If still null and expression contains < or >, try evaluating as expression
+      if (val === null && (rhs.includes('<') || rhs.includes('>'))) {
+        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
+        try {
+          val = evaluateConditionExpression(rhs, ctx, true);
+        } catch (err: any) {
+          // Fall through to error below
+        }
+      }
       if (val === null) {
         errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
       } else {
@@ -272,6 +281,15 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         if (consts.has(rhs)) val = consts.get(rhs)!;
         else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
       }
+      // If still null and expression contains < or >, try evaluating as expression
+      if (val === null && (rhs.includes('<') || rhs.includes('>'))) {
+        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
+        try {
+          val = evaluateConditionExpression(rhs, ctx, true);
+        } catch (err: any) {
+          // Fall through to error below
+        }
+      }
       if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
       else consts.set(name, val);
       continue;
@@ -284,6 +302,15 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       if (val === null) {
         if (consts.has(rhs)) val = consts.get(rhs)!;
         else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
+      }
+      // If still null and expression contains < or >, try evaluating as expression
+      if (val === null && (rhs.includes('<') || rhs.includes('>'))) {
+        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
+        try {
+          val = evaluateConditionExpression(rhs, ctx, true);
+        } catch (err: any) {
+          // Fall through to error below
+        }
       }
       if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
       else consts.set(name, val);
@@ -816,9 +843,15 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       let emitted = 0;
       for (const p of parts) {
         let val = toByte(p);
+        // If toByte fails, try evaluating as an expression (supports < and > operators)
         if (val === null) {
-          errors.push(`Bad ${op} value '${p}' at ${srcLine}`);
-          val = 0;
+          const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+          try {
+            val = evaluateConditionExpression(p, ctx, true);
+          } catch (err: any) {
+            errors.push(`Bad ${op} value '${p}' at ${srcLine}: ${err?.message || err}`);
+            val = 0;
+          }
         }
         out.push(val & 0xff);
         addr++;
@@ -1008,6 +1041,15 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
           if (p !== null) full = p;
         }
       }
+      // If still null, try evaluating as expression (supports < and > operators)
+      if (full === null) {
+        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+        try {
+          full = evaluateConditionExpression(rawVal, ctx, true);
+        } catch (err: any) {
+          // Fall through to error below
+        }
+      }
       if (!(r in mviOpcodes) || (full === null)) { errors.push(`Bad MVI operands at ${srcLine}`); continue; }
       if (full > 0xff) warnings.push(`Immediate ${rawVal} (0x${full.toString(16).toUpperCase()}) too large for MVI at ${srcLine}; truncating to 0x${(full & 0xff).toString(16).toUpperCase()}`);
       out.push(mviOpcodes[r]);
@@ -1149,8 +1191,18 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     // ADI/ACI/SUI/SBI immediate
     if (op === 'ADI' || op === 'ACI' || op === 'SUI' || op === 'SBI') {
-      const valTok = tokens[1];
-      const full = parseNumberFull(valTok);
+      const valTok = tokens.slice(1).join(' ').trim();
+      let full: number | null = parseNumberFull(valTok);
+      // If parseNumberFull fails, try evaluating as expression (supports < and > operators)
+      if (full === null) {
+        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+        try {
+          full = evaluateConditionExpression(valTok, ctx, true);
+        } catch (err: any) {
+          errors.push(`Bad immediate '${valTok}' at ${srcLine}: ${err?.message || err}`);
+          continue;
+        }
+      }
       if (full === null) { errors.push(`Bad immediate '${valTok}' at ${srcLine}`); continue; }
       if (full > 0xff) warnings.push(`Immediate ${valTok} (0x${full.toString(16).toUpperCase()}) too large for ${op} at ${srcLine}; truncating to 8-bit`);
       let opcode = 0;
@@ -1165,8 +1217,18 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     // ANI/XRI/ORI/CPI immediate
     if (op === 'ANI' || op === 'XRI' || op === 'ORI' || op === 'CPI') {
-      const valTok = tokens[1];
-      const full = parseNumberFull(valTok);
+      const valTok = tokens.slice(1).join(' ').trim();
+      let full: number | null = parseNumberFull(valTok);
+      // If parseNumberFull fails, try evaluating as expression (supports < and > operators)
+      if (full === null) {
+        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+        try {
+          full = evaluateConditionExpression(valTok, ctx, true);
+        } catch (err: any) {
+          errors.push(`Bad immediate '${valTok}' at ${srcLine}: ${err?.message || err}`);
+          continue;
+        }
+      }
       if (full === null) { errors.push(`Bad immediate '${valTok}' at ${srcLine}`); continue; }
       if (full > 0xff) warnings.push(`Immediate ${valTok} (0x${full.toString(16).toUpperCase()}) too large for ${op} at ${srcLine}; truncating to 8-bit`);
       let opcode = 0;
@@ -1228,15 +1290,35 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     // IN/OUT
     if (op === 'IN') {
-      const tok = tokens[1];
-      const full = parseNumberFull(tok);
+      const tok = tokens.slice(1).join(' ').trim();
+      let full: number | null = parseNumberFull(tok);
+      // If parseNumberFull fails, try evaluating as expression (supports < and > operators)
+      if (full === null) {
+        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+        try {
+          full = evaluateConditionExpression(tok, ctx, true);
+        } catch (err: any) {
+          errors.push(`Bad IN port '${tok}' at ${srcLine}: ${err?.message || err}`);
+          continue;
+        }
+      }
       if (full === null) { errors.push(`Bad IN port '${tok}' at ${srcLine}`); continue; }
       if (full > 0xff) warnings.push(`IN port ${tok} (0x${full.toString(16).toUpperCase()}) too large at ${srcLine}; truncating to 8-bit`);
       out.push(0xDB); out.push(full & 0xff); addr += 2; continue;
     }
     if (op === 'OUT') {
-      const tok = tokens[1];
-      const full = parseNumberFull(tok);
+      const tok = tokens.slice(1).join(' ').trim();
+      let full: number | null = parseNumberFull(tok);
+      // If parseNumberFull fails, try evaluating as expression (supports < and > operators)
+      if (full === null) {
+        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+        try {
+          full = evaluateConditionExpression(tok, ctx, true);
+        } catch (err: any) {
+          errors.push(`Bad OUT port '${tok}' at ${srcLine}: ${err?.message || err}`);
+          continue;
+        }
+      }
       if (full === null) { errors.push(`Bad OUT port '${tok}' at ${srcLine}`); continue; }
       if (full > 0xff) warnings.push(`OUT port ${tok} (0x${full.toString(16).toUpperCase()}) too large at ${srcLine}; truncating to 8-bit`);
       out.push(0xD3); out.push(full & 0xff); addr += 2; continue;

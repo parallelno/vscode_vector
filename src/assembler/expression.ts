@@ -346,6 +346,16 @@ class ConditionExpressionParser {
       const val = this.parseUnary(allowEval);
       return allowEval ? (~val) | 0 : 0;
     }
+    // Low byte operator: <N extracts bits 0-7 of the value
+    if (this.matchOperator('<')) {
+      const val = this.parseUnary(allowEval);
+      return allowEval ? (val & 0xff) : 0;
+    }
+    // High byte operator: >N extracts bits 8-15 of the value
+    if (this.matchOperator('>')) {
+      const val = this.parseUnary(allowEval);
+      return allowEval ? ((val >> 8) & 0xff) : 0;
+    }
     return this.parsePrimary(allowEval);
   }
 

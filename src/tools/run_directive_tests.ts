@@ -24,6 +24,7 @@ type DirectiveTestExpectations = {
     success?: boolean;
     bytes?: number[];
     labels?: Record<string, number>;
+    consts?: Record<string, number>;
     map?: Record<number, number>;
     warningsContains?: string[];
     errorsContains?: string[];
@@ -300,6 +301,56 @@ const tests: DirectiveTestCase[] = [
         expect: {
             bytes: [0x20, 0x20, 0x20, 0x61, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73, 0x3A, 0x20, 0x20, 0x20, 0x31, 0x0A, 0x00]
         }
+    },
+    {
+        name: 'Unary < (low byte) and > (high byte) operators work in directives and instructions',
+        sourceFile: 'unary_lobyte_hibyte.asm',
+        expect: {
+            // Address 515 = 0x203
+            // start: DB >CONST1  -> high byte of 0xF00 = 0x0F
+            // mvi a, >start     -> opcode 0x3E (MVI A), high byte of 515 = 0x02
+            // db <0x1234        -> low byte of 0x1234 = 0x34
+            // db >0x1234        -> high byte of 0x1234 = 0x12
+            bytes: [0x0F, 0x3E, 0x02, 0x34, 0x12],
+            labels: {
+                start: 515
+            },
+            consts: {
+                CONST1: 0xF00,
+                CONST2: 3  // low byte of 515 = 3
+            },
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Unary and binary < > operators work together in expressions',
+        sourceFile: 'unary_and_binary_operators.asm',
+        expect: {
+            // db <VALUE = 0x34, db >VALUE = 0x12
+            // .if 5 > 3 -> true, emit 0xAA
+            // .if 3 < 5 -> true, emit 0xBB
+            // .if 3 > 5 -> false, skip 0xCC
+            // .if 5 < 3 -> false, skip 0xDD
+            // .if >VALUE == 0x12 -> true, emit 0xEE
+            // .if <VALUE == 0x34 -> true, emit 0xFF
+            bytes: [0x34, 0x12, 0xAA, 0xBB, 0xEE, 0xFF],
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Unary < and > operators work with various immediate instructions',
+        sourceFile: 'unary_immediate_instructions.asm',
+        expect: {
+            // ADI >ADDR (0x12) = 0xC6, 0x12
+            // SUI <ADDR (0x34) = 0xD6, 0x34
+            // ANI <0xABCD (0xCD) = 0xE6, 0xCD
+            // ORI >0xABCD (0xAB) = 0xF6, 0xAB
+            // CPI <ADDR + 1 = <0x1234 + 1 = 0x34 + 1 = 0x35 = 0xFE, 0x35
+            // IN <0x1200 (0x00) = 0xDB, 0x00
+            // OUT >0x1200 (0x12) = 0xD3, 0x12
+            bytes: [0xC6, 0x12, 0xD6, 0x34, 0xE6, 0xCD, 0xF6, 0xAB, 0xFE, 0x35, 0xDB, 0x00, 0xD3, 0x12],
+            noWarnings: true
+        }
     }
 ];
 
@@ -358,6 +409,24 @@ function compareLabels(actual: AssembleResult['labels'], expected: Record<string
     }
 }
 
+function compareConsts(actual: AssembleResult['consts'], expected: Record<string, number> | undefined, recorder: string[]) {
+    if (!expected) return;
+    if (!actual) {
+        recorder.push('Assembler did not return any constant metadata');
+        return;
+    }
+    for (const [name, value] of Object.entries(expected)) {
+        if (!(name in actual)) {
+            recorder.push(`Missing expected constant '${name}'`);
+            continue;
+        }
+        const actualValue = actual[name];
+        if (actualValue !== value) {
+            recorder.push(`Constant '${name}' expected ${value} (0x${value.toString(16).toUpperCase()}) but was ${actualValue} (0x${actualValue.toString(16).toUpperCase()})`);
+        }
+    }
+}
+
 function compareMap(actual: Record<number, number> | undefined, expected: Record<number, number> | undefined, recorder: string[]) {
     if (!expected) return;
     if (!actual) {
@@ -412,6 +481,7 @@ function runTestCase(test: DirectiveTestCase): DirectiveTestResult {
         }
         compareBytes(result.output, test.expect.bytes, details);
         compareLabels(result.labels, test.expect.labels, details);
+        compareConsts(result.consts, test.expect.consts, details);
         compareMap(result.map, test.expect.map, details);
         comparePrintMessages(result.printMessages, test.expect.printMessages, details);
         if (test.expect.noWarnings && result.warnings && result.warnings.length) {
