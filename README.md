@@ -1,11 +1,8 @@
 # Intel 8080 Assembler + Debugger (Minimal)
 
-This repository contains a small two-pass Intel 8080 assembler, a tiny emulator for testing, and a debug adapter intended for experimentation.
+This repository contains an VS Code extention with key feadures: a two-pass Intel 8080 assembler, a tiny Vector 06c emulator, and a debugger, quality of life VS Code functionality to emprover Vector 06c development process.
 
-What’s included
-
-- A two-pass TypeScript assembler that emits a ROM (`.rom`) and a tokens file (`.json`) containing labels and origins.
-- A small emulator/debugger used for development and testing.
+// TODO: Add the Table of contents here
 
 Quick start
 
@@ -21,12 +18,16 @@ npm install
 npm run compile
 ```
 
-3. Assemble and run the included test ROM (see below).
+3. Build and test:
 
-Assembler directive tests
+```pwsh
+npm run test
+```
+
+Test Suits
 --------------------------
 
-Run the focused directive regression suite at any time:
+1. Assembler directive tests
 
 ```pwsh
 npm run test-directives
@@ -35,8 +36,7 @@ npm run test-directives
 The command recompiles the TypeScript sources and executes every test case under `test/assembler/directives`, reporting a PASS/FAIL line for each directive scenario plus a summary total. The process exits with a non-zero status when a failure is detected, so it can plug directly into CI.
 Current coverage includes `.org`, `.align` (success + failure paths), `.if`/`.endif`, `.loop`/`.endloop` (standalone and inside macros), `.include` (flat + nested + missing-file errors), `.print`, `DS`, literal/binary/hex formats with expression evaluation, and both macro-bodied plus standalone local-label resolution. Add more fixture `.asm` files under `test/assembler/directives` and register them in `src/tools/run_directive_tests.ts` to grow the matrix.
 
-Emulator tests
---------------
+2. Emulator tests
 
 Run the i8080 CPU emulator test suite at any time:
 
@@ -118,7 +118,7 @@ Memory Dump panel
 
 The emulator view now embeds a **Memory Dump** panel under the frame preview. It streams a 16x16 hexdump that automatically tracks the current PC (both the hex bytes and ASCII column highlight the byte that will execute next). Uncheck **Follow PC** to freeze the window on a specific address, type any hex/decimal start value, or use the +/-0x10 and +/-0x100 buttons plus **Refresh** to nudge through RAM manually.
 
-Features and notes
+Assembler
 ------------------
 
 - `.org` directive: supported (decimal, `0x..`, or `$..`). Example: `.org 0x100`.
@@ -198,10 +198,7 @@ The snippet above emits `FF 10 FF F0 F0`.
 
 Alternative: `DB`
 
-Macros
-------
-
-Use `.macro Name(param, otherParam, optionalParam=$10)` to define reusable code blocks. A macro's body is copied inline wherever you invoke `Name(...)`, and all parameters are substituted as plain text before the normal two-pass assembly runs. Each parameter ultimately resolves to the same numeric/boolean values accepted by others durectives such as `.if`, `.loop`, etc. inside a macro. Parameters that are omitted during a call fall back to their default value.
+- `.macro Name(param, otherParam, optionalParam=$10)`: defines reusable code blocks. A macro's body is copied inline wherever you invoke `Name(...)`, and all parameters are substituted as plain text before the normal two-pass assembly runs. Each parameter ultimately resolves to the same numeric/boolean values accepted by others durectives such as `.if`, `.loop`, etc. inside a macro. Parameters that are omitted during a call fall back to their default value.
 
 Each macro call receives its own namespace for "normal" (`Label:`) and local (`@loop`) labels, so you can safely reuse throwaway labels inside macros or even call a macro recursively. Normal labels defined inside the macro are exported as `MacroName_<call-index>.Label`, letting you jump back into generated code for debugging tricks:
 
@@ -221,12 +218,29 @@ SetColors(, MyColor+1, $0000) ; Background uses the default $06
 
 Nested macros are supported (up to 32 levels deep), but you cannot open another `.macro` inside a macro body. All macro lines keep their original file/line metadata, so assembler errors still point back to the macro definition.
 
+- `.encoding "Type", "Case"`: selects how upcoming `.text` literals convert characters to bytes. Supported types are `"ascii"` (default) and `"screencodecommodore"`. The optional case argument accepts `"mixed"` (default), `"lower"`, or `"upper"`. Example:
+
+```
+.encoding "ascii", "upper"
+.text "hello", 'w'           ; emits: 0x48, 0x45, 0x4C, 0x4C, 0x4F, 0x57
+
+.encoding "screencodecommodore"
+.text "@AB"                  ; emits: 0x00, 0x01, 0x02
+```
+
+- `.text value[, values...]`: emits bytes from comma-separated string or character literals using the current `.encoding` settings. Strings honor standard escapes like `\n`, `\t`, `\"`, etc. Example:
+
+```
+.encoding "ascii"
+.text "   address:   1", '\n', '\0'
+; emits: 20 20 20 61 64 64 72 65 73 73 3A 20 20 20 31 0A 00
+```
+
+
+Tools
+----------------------
+
 FDD utility CLI
----------------
-
-Makes a Vector 06c floppy image out of files and an optional template FDD image (OS).
-
-Typical flow:
 
 ```pwsh
 npm run compile # make sure out/tools/fddutil.js exists
@@ -241,8 +255,6 @@ Key switches:
 - `-o <file>` writes the resulting `.fdd` image.
 - `-h` prints the usage summary.
 
-Extending the workflow
-----------------------
 
 - If you want a single npm script that compiles, assembles, updates labels, and runs the emulator, you can add an npm script to `package.json`. Example:
 
@@ -253,6 +265,13 @@ Extending the workflow
 ```
 
 Adjust the emulator path to the location of `devector.exe` on your machine.
+
+Implementation notes
+--------------------
+
+- `src/assembler/utils.ts`: houses `encodeTextToBytes`, `parseTextLiteralToBytes`, and text case helpers used by `.encoding` / `.text`.
+- `src/assembler.ts`: runs `.encoding`/`.text` handling in both passes so address calculation and byte emission stay in sync.
+- `test/assembler/directives/`: now includes fixtures for every `.encoding` type/case option plus `.text` edge cases (escapes, labels, errors) that are wired into `run_directive_tests.ts`.
 
 Want help?
 
