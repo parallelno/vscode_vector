@@ -3,7 +3,7 @@ import { HardwareReq } from './hardware_reqs';
 import { CpuState } from './cpu_i8080';
 import { MemState } from './memory';
 import { ReqData } from './hardware_types';
-import DebugData from './debugData';
+import DebugData from '../debugData';
 import { BpStatus, Breakpoint } from './breakpoint';
 
 

@@ -72,7 +72,7 @@ type EmulatorTestResult = {
 };
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const emulatorTestDir = path.join(repoRoot, '.test', 'emulator');
+const emulatorTestDir = path.join(repoRoot, 'unit_tests', 'emulator');
 
 // Test case definitions
 const tests: EmulatorTestCase[] = [

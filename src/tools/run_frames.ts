@@ -23,7 +23,7 @@ import { assemble } from '../assembler';
 const { Hardware } = require('../hardware');
 const { HardwareReq } = require('../hardware_reqs');
 const { ROM_LOAD_ADDR } = require('../memory');
-import { FRAME_W, FRAME_H } from '../display';
+import { FRAME_W, FRAME_H } from '../emulator/display';
 
 function usage() {
   console.log('Usage: npm run run-frames -- <asm|rom> <numFrames> [outDir]');

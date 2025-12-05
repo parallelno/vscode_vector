@@ -1,3 +1,20 @@
+#!/usr/bin/env node
+/**
+ * run_directive_tests.ts
+ *
+ * Regression harness for assembler directive coverage.
+ * Each test assembles a fixture from unit_tests/assembler/directives
+ * and validates the produced bytes, labels, maps, warnings, and prints
+ * against declarative expectations.
+ *
+ * Test definitions specify:
+ * - Source .asm file to assemble
+ * - Expected bytes, labels, line-address map entries, and print output
+ * - Required substrings in warnings/errors or the absence of warnings
+ *
+ * Usage: npm run test-directives
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
 import { assemble } from '../assembler';
@@ -29,7 +46,7 @@ type DirectiveTestResult = {
 };
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const directivesDir = path.join(repoRoot, 'test', 'assembler', 'directives');
+const directivesDir = path.join(repoRoot, 'unit_tests', 'assembler', 'directives');
 
 const tests: DirectiveTestCase[] = [
     {

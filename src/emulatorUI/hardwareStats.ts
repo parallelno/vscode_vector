@@ -1,7 +1,7 @@
-import { Hardware } from '../hardware';
-import { FRAME_W } from '../display';
-import Memory, { AddrSpace, MAPPING_MODE_MASK } from '../memory';
-import { CpuState } from '../cpu_i8080';
+import { Hardware } from '../emulator/hardware';
+import { FRAME_W } from '../emulator/display';
+import Memory, { AddrSpace, MAPPING_MODE_MASK } from '../emulator/memory';
+import { CpuState } from '../emulator/cpu_i8080';
 
 const MEMORY_ADDRESS_MASK = 0xffff;
 const STACK_SAMPLE_OFFSETS = [-10, -8, -6, -4, -2, 0, 2, 4, 6, 8, 10];

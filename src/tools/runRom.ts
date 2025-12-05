@@ -3,9 +3,9 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Emulator } from '../emulator';
-import { HardwareReq } from '../hardware_reqs';
+import { HardwareReq } from '../emulator/hardware_reqs';
 import { assemble } from '../assembler';
-import { CpuState } from '../cpu_i8080';
+import { CpuState } from '../emulator/cpu_i8080';
 
 // Simple script to run a ROM file in the emulator until it halts or a maximum
 // number of instructions is reached. It steps through each instruction and

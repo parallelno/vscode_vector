@@ -1,5 +1,5 @@
-import Breakpoints from './breakpoints';
-import { Hardware } from './hardware';
+import Breakpoints from './emulator/breakpoints';
+import { Hardware } from './emulator/hardware';
 
 
 export default class DebugData {

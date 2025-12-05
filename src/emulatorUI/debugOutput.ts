@@ -1,7 +1,7 @@
-import CPU, { CpuState } from "../cpu_i8080";
-import { FRAME_W } from "../display";
-import { Hardware } from "../hardware";
-import { AddrSpace } from "../memory";
+import CPU, { CpuState } from "../emulator/cpu_i8080";
+import { FRAME_W } from "../emulator/display";
+import { Hardware } from "../emulator/hardware";
+import { AddrSpace } from "../emulator/memory";
 
 // helper: read cpu/memory state and return a compact debug object
 export function getDebugState(hardware: Hardware)

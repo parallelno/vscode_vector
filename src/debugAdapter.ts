@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Emulator } from './emulator';
 import { assemble } from './assembler';
-import { HardwareReq } from './hardware_reqs';
+import { HardwareReq } from './emulator/hardware_reqs';
 
 class I8080DebugSession extends DebugSession {
   private emulator: Emulator | null = null;

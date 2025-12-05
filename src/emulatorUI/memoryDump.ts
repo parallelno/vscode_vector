@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { Hardware } from '../hardware';
-import Memory from '../memory';
+import { Hardware } from '../emulator/hardware';
+import Memory from '../emulator/memory';
 import { parseAddressLike } from './utils';
 
 const MEMORY_ADDRESS_MASK = 0xffff;

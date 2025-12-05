@@ -1,10 +1,10 @@
-import { Hardware } from './hardware';
-import { HardwareReq } from './hardware_reqs';
+import { Hardware } from './emulator/hardware';
+import { HardwareReq } from './emulator/hardware_reqs';
 import * as pathModule from 'path';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
-import { ROM_LOAD_ADDR } from './memory';
-import Debugger from './debugger';
+import { ROM_LOAD_ADDR } from './emulator/memory';
+import Debugger from './emulator/debugger';
 
 export type SettingsType = { [key: string]: any };
 
