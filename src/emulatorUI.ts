@@ -1075,7 +1075,11 @@ function buildAddressToSourceMap(tokens: any, tokenPath: string): Map<number, So
       const lineNum = Number(lineKey);
       if (!Number.isFinite(lineNum)) continue;
       const normalizedAddr = addr & 0xffff;
-      if (!map.has(normalizedAddr)) {
+      const existing = map.get(normalizedAddr);
+      // Prefer lines with higher line numbers for the same address within the same file,
+      // since actual code lines come after labels that share the same address.
+      // Across different files, keep the first occurrence.
+      if (!existing || (existing.file === resolvedPath && lineNum > existing.line)) {
         map.set(normalizedAddr, { file: resolvedPath, line: lineNum });
       }
     }

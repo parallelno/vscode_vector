@@ -78,8 +78,12 @@ class I8080DebugSession extends DebugSession {
     const frames: StackFrame[] = [];
     if (this.emulator) {
       const pc = this.emulator.hardware?.cpu?.state.regs.pc.word ?? 0;
-      const srcLine = Object.keys(this.sourceMap).find(k => this.sourceMap[parseInt(k)] === pc);
-      const lineNum = srcLine ? parseInt(srcLine) : 1;
+      // Find all lines that map to this PC address, then pick the highest line number.
+      // This ensures we highlight the actual code line, not the label preceding it.
+      const matchingLines = Object.keys(this.sourceMap)
+        .map(k => parseInt(k))
+        .filter(lineNum => this.sourceMap[lineNum] === pc);
+      const lineNum = matchingLines.length > 0 ? Math.max(...matchingLines) : 1;
       frames.push(new StackFrame(1, 'main', new Source('program', args && args.source ? args.source.path : undefined), lineNum, 0));
     }
     response.body = { stackFrames: frames, totalFrames: frames.length };
