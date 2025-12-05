@@ -1489,7 +1489,7 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
       for (const [lineStr, span] of Object.entries(res.dataLineSpans)) {
         const lineIndex = parseInt(lineStr, 10);
         if (!Number.isFinite(lineIndex) || lineIndex <= 0) continue;
-        const origin = res.origins[lineIndex - 1] as { file?: string; line: number } | undefined;
+        const origin = res.origins[lineIndex - 1] as SourceOrigin | undefined;
         if (!origin || typeof origin.line !== 'number') continue;
         const originFile = origin.file || sourcePath;
         if (!originFile) continue;
