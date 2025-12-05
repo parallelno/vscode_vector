@@ -15,6 +15,12 @@ export const MEMORY_GLOBAL_LEN = MEMORY_MAIN_LEN + MEMORY_RAMDISK_LEN * RAM_DISK
 
 export const MAPPING_MODE_MASK = 0b11110000;
 
+export type MemoryAccessSnapshot = {
+  reads: number[];
+  writes: number[];
+  values: Record<number, number>;
+};
+
 export class MemMapping {
   pageRam: number = 0;     // 0-1 bits, The index of the RAM Disk 64k page accessed in the Memory-Mapped Mode
   pageStack: number = 0;   // 2-3 bits, The index of the RAM Disk 64k page accessed in the Stack Mode
@@ -82,6 +88,12 @@ export class Memory {
 
   _state = new MemState(this.GetGlobalAddr.bind(this), this.ram);
 
+  private accessLog = {
+    reads: new Set<number>(),
+    writes: new Set<number>(),
+    values: new Map<number, number>()
+  };
+
   // number of RAM Disks with mapping enabled
   // used to detect exceptions
   mappingsEnabled = 0;
@@ -105,6 +117,40 @@ export class Memory {
       }
     }
     this.ramDiskClearAfterRestart = ramDiskClearAfterRestart;
+  }
+
+  private normalizeAddr(addr: number): number {
+    return addr & 0xffff;
+  }
+
+  private recordRead(addr: number, value: number) {
+    const normalized = this.normalizeAddr(addr);
+    this.accessLog.reads.add(normalized);
+    this.accessLog.values.set(normalized, value & 0xff);
+  }
+
+  private recordWrite(addr: number, value: number) {
+    const normalized = this.normalizeAddr(addr);
+    this.accessLog.writes.add(normalized);
+    this.accessLog.values.set(normalized, value & 0xff);
+  }
+
+  snapshotAccessLog(): MemoryAccessSnapshot {
+    const values: Record<number, number> = {};
+    this.accessLog.values.forEach((value, key) => {
+      values[key] = value;
+    });
+    return {
+      reads: Array.from(this.accessLog.reads),
+      writes: Array.from(this.accessLog.writes),
+      values
+    };
+  }
+
+  clearAccessLog(): void {
+    this.accessLog.reads.clear();
+    this.accessLog.writes.clear();
+    this.accessLog.values.clear();
   }
 
   get state(): MemState {
@@ -197,8 +243,10 @@ export class Memory {
     // this.mState.debug.readLen = byteNum + 1;
 
     // return byte
-    return this.memType === MemType.ROM && globalAddr < this.rom.length ?
+    const value = this.memType === MemType.ROM && globalAddr < this.rom.length ?
       this.rom[globalAddr] : this.ram[globalAddr];
+    this.recordRead(addr, value);
+    return value;
   }
 
   // accessed by the CPU
@@ -217,6 +265,7 @@ export class Memory {
 
     // store byte
     this.ram[globalAddr] = value;
+    this.recordWrite(addr, value);
   }
 
   // Read 4 bytes from every screen buffer.

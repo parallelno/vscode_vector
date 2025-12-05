@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import { Hardware } from './emulator/hardware';
 import { HardwareReq } from './emulator/hardware_reqs';
 import { FRAME_H, FRAME_LEN, FRAME_W } from './emulator/display';
-import Memory, { AddrSpace, MAPPING_MODE_MASK } from './emulator/memory';
+import Memory, { AddrSpace, MAPPING_MODE_MASK, MemoryAccessSnapshot } from './emulator/memory';
 import CPU, { CpuState } from './emulator/cpu_i8080';
 import { getWebviewContent } from './emulatorUI/webviewContent';
 import { getDebugLine, getDebugState } from './emulatorUI/debugOutput';
@@ -20,10 +20,27 @@ type SourceLineRef = { file: string; line: number };
 
 let lastBreakpointSource: { romPath: string; hardware?: Hardware | null; log?: vscode.OutputChannel } | null = null;
 let lastAddressSourceMap: Map<number, SourceLineRef> | null = null;
+type SymbolMeta = { value: number; kind: 'label' | 'const' };
+type SymbolCache = {
+  byName: Map<string, SymbolMeta>;
+  byLowerCase: Map<string, SymbolMeta>;
+  lineAddresses: Map<string, Map<number, number>>;
+  filePaths: Map<string, string>;
+};
+type DataLineSpan = { start: number; byteLength: number; unitBytes: number };
+type DataLineCache = Map<string, Map<number, DataLineSpan>>;
+type DataAddressEntry = { fileKey: string; line: number; span: DataLineSpan };
+
+let lastSymbolCache: SymbolCache | null = null;
+let dataLineSpanCache: DataLineCache | null = null;
+let dataAddressLookup: Map<number, DataAddressEntry> | null = null;
 let highlightContext: vscode.ExtensionContext | null = null;
 let pausedLineDecoration: vscode.TextEditorDecorationType | null = null;
 let lastHighlightedEditor: vscode.TextEditor | null = null;
 let currentToolbarIsRunning = true;
+let dataReadDecoration: vscode.TextEditorDecorationType | null = null;
+let dataWriteDecoration: vscode.TextEditorDecorationType | null = null;
+let lastDataAccessSnapshot: MemoryAccessSnapshot | null = null;
 
 let currentPanelController: { pause: () => void; resume: () => void; stepFrame: () => void; } | null = null;
 
@@ -180,6 +197,15 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     postToolbarState(isRunning);
     if (isRunning) {
       clearHighlightedSourceLine();
+      clearDataLineHighlights();
+      lastDataAccessSnapshot = null;
+      try {
+        emu.hardware?.memory?.clearAccessLog();
+      } catch (err) {
+        /* ignore */
+      }
+    } else {
+      refreshDataLineHighlights(emu.hardware);
     }
   };
 
@@ -306,6 +332,13 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     }
   }, null, context.subscriptions);
 
+  const editorVisibilityDisposable = vscode.window.onDidChangeVisibleTextEditors(() => {
+    if (!currentToolbarIsRunning && lastDataAccessSnapshot) {
+      applyDataLineHighlightsFromSnapshot(lastDataAccessSnapshot);
+    }
+  });
+  context.subscriptions.push(editorVisibilityDisposable);
+
   async function tick(log_every_frame: boolean = false)
   {
     let running = true;
@@ -348,6 +381,9 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     lastBreakpointSource = null;
     clearHighlightedSourceLine();
     lastAddressSourceMap = null;
+    clearDataLineHighlights();
+    lastDataAccessSnapshot = null;
+    clearSymbolMetadataCache();
     highlightContext = null;
     resetMemoryDumpState();
     disposeHardwareStatsTracking();
@@ -373,6 +409,9 @@ function printDebugState(
   if (highlightSource) {
     highlightSourceFromHardware(hardware);
     updateMemoryDumpFromHardware(panel, hardware, 'pc');
+    if (!currentToolbarIsRunning) {
+      refreshDataLineHighlights(hardware);
+    }
   }
 }
 
@@ -396,9 +435,81 @@ export function stepFramePanel() {
   }
 }
 
+export type HoverSymbolInfo = { value: number; kind: 'label' | 'const' | 'line' };
+
+export function resolveEmulatorHoverSymbol(identifier: string, location?: { filePath?: string; line?: number }): HoverSymbolInfo | undefined {
+  if (!lastSymbolCache) return undefined;
+  const token = (identifier || '').trim();
+  if (token) {
+    const exact = lastSymbolCache.byName.get(token) || lastSymbolCache.byLowerCase.get(token.toLowerCase());
+    if (exact) return exact;
+  }
+  if (location?.filePath && location.line !== undefined) {
+    const fileKey = normalizeFileKey(location.filePath);
+    const perLine = fileKey ? lastSymbolCache.lineAddresses.get(fileKey) : undefined;
+    const addr = perLine?.get(location.line);
+    if (addr !== undefined) {
+      return { value: addr, kind: 'line' };
+    }
+  }
+  return undefined;
+}
+
+export function isEmulatorPanelPaused(): boolean {
+  return !!currentPanelController && !currentToolbarIsRunning;
+}
+
+export type DataDirectiveHoverInfo = {
+  value: number;
+  address: number;
+  unitBytes: number;
+  directive: 'byte' | 'word';
+  range: vscode.Range;
+  sourceValue?: number;
+};
+
+export function resolveDataDirectiveHover(document: vscode.TextDocument, position: vscode.Position): DataDirectiveHoverInfo | undefined {
+  if (!lastBreakpointSource?.hardware || currentToolbarIsRunning) return undefined;
+  if (!dataLineSpanCache || dataLineSpanCache.size === 0) return undefined;
+  const fileKey = normalizeFileKey(document.uri.fsPath);
+  if (!fileKey) return undefined;
+  const lineSpans = dataLineSpanCache.get(fileKey);
+  if (!lineSpans) return undefined;
+  const lineNumber = position.line + 1;
+  const span = lineSpans.get(lineNumber);
+  if (!span) return undefined;
+  const lineText = document.lineAt(position.line).text;
+  const directiveInfo = extractDataDirectiveInfo(lineText);
+  if (!directiveInfo) return undefined;
+  const { directive, ranges } = directiveInfo;
+  if ((directive === 'byte' && span.unitBytes !== 1) || (directive === 'word' && span.unitBytes !== 2)) {
+    // directive mismatch; fallback to unitBytes to infer
+  }
+  const matchIndex = ranges.findIndex(range => position.character >= range.start && position.character < range.end);
+  if (matchIndex < 0) return undefined;
+  const byteOffset = matchIndex * span.unitBytes;
+  if (byteOffset >= span.byteLength) return undefined;
+  const addr = (span.start + byteOffset) & 0xffff;
+  const value = readMemoryValueForSpan(lastBreakpointSource.hardware, addr, span.unitBytes);
+  if (value === undefined) return undefined;
+  const tokenRange = ranges[matchIndex];
+  const literalRange = new vscode.Range(position.line, tokenRange.start, position.line, tokenRange.end);
+  const literalText = document.getText(literalRange);
+  const sourceValue = parseDataLiteralValue(literalText, span.unitBytes);
+  return {
+    value,
+    address: addr,
+    unitBytes: span.unitBytes,
+    directive,
+    range: literalRange,
+    sourceValue
+  };
+}
+
 
 function loadBreakpointsFromToken(romPath: string, hardware: Hardware | undefined | null, log?: vscode.OutputChannel): number {
   lastAddressSourceMap = null;
+  clearSymbolMetadataCache();
   if (!hardware || !romPath) return 0;
   const tokenPath = deriveTokenPath(romPath);
   if (!tokenPath || !fs.existsSync(tokenPath)) return 0;
@@ -406,6 +517,7 @@ function loadBreakpointsFromToken(romPath: string, hardware: Hardware | undefine
   let tokens: any;
   try {
     tokens = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
+    cacheSymbolMetadata(tokens, tokenPath);
   } catch (err) {
     try { log?.appendLine(`Failed to parse token file ${tokenPath}: ${err}`); } catch (e) {}
     return 0;
@@ -543,6 +655,128 @@ function formatFileLineKey(fileKey: string, line: number): string {
   return `${fileKey}#${line}`;
 }
 
+function resolveTokenFileReference(tokenPath: string | undefined, fileKey: string): string {
+  if (!fileKey) return fileKey;
+  if (path.isAbsolute(fileKey)) return path.normalize(fileKey);
+  const baseDir = tokenPath ? path.dirname(tokenPath) : process.cwd();
+  return path.normalize(path.resolve(baseDir, fileKey));
+}
+
+function clearSymbolMetadataCache() {
+  lastSymbolCache = null;
+  dataLineSpanCache = null;
+  dataAddressLookup = null;
+}
+
+function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
+  if (!tokens || typeof tokens !== 'object') {
+    clearSymbolMetadataCache();
+    return;
+  }
+  const byName = new Map<string, SymbolMeta>();
+  const byLowerCase = new Map<string, SymbolMeta>();
+  const filePaths = new Map<string, string>();
+  const registerFilePath = (fileKey: string, resolvedPath: string) => {
+    if (!fileKey || !resolvedPath) return;
+    if (!filePaths.has(fileKey)) filePaths.set(fileKey, resolvedPath);
+  };
+  const registerSymbol = (name: string | undefined, meta: SymbolMeta) => {
+    if (!name) return;
+    byName.set(name, meta);
+    const lower = name.toLowerCase();
+    if (lower) {
+      byLowerCase.set(lower, meta);
+    }
+  };
+  if (tokens.labels && typeof tokens.labels === 'object') {
+    for (const [labelName, rawInfo] of Object.entries(tokens.labels as Record<string, any>)) {
+      const info: any = rawInfo;
+      const addr = parseAddressLike(info?.addr ?? info?.address);
+      if (addr === undefined) continue;
+      registerSymbol(labelName, { value: addr, kind: 'label' });
+    }
+  }
+  if (tokens.consts && typeof tokens.consts === 'object') {
+    for (const [constName, rawValue] of Object.entries(tokens.consts as Record<string, any>)) {
+      let resolved: number | undefined;
+      if (rawValue && typeof rawValue === 'object') {
+        if (typeof rawValue.value === 'number' && Number.isFinite(rawValue.value)) {
+          resolved = rawValue.value;
+        } else if (rawValue.hex !== undefined) {
+          resolved = parseAddressLike(rawValue.hex);
+        } else {
+          resolved = parseAddressLike(rawValue.value);
+        }
+      } else {
+        resolved = parseAddressLike(rawValue);
+      }
+      if (resolved === undefined) continue;
+      registerSymbol(constName, { value: resolved, kind: 'const' });
+    }
+  }
+
+  const lineAddresses = new Map<string, Map<number, number>>();
+  const dataLines: DataLineCache = new Map();
+  const addressLookup = new Map<number, DataAddressEntry>();
+  if (tokens.lineAddresses && typeof tokens.lineAddresses === 'object') {
+    for (const [fileKeyRaw, entries] of Object.entries(tokens.lineAddresses as Record<string, any>)) {
+      if (!entries || typeof entries !== 'object') continue;
+      const normalizedKey = normalizeFileKey(fileKeyRaw);
+      if (!normalizedKey) continue;
+      const resolvedPath = resolveTokenFileReference(tokenPath, fileKeyRaw);
+      if (resolvedPath) registerFilePath(normalizedKey, resolvedPath);
+      const perLine = new Map<number, number>();
+      for (const [lineKey, addrRaw] of Object.entries(entries as Record<string, any>)) {
+        const addr = parseAddressLike(addrRaw);
+        if (addr === undefined) continue;
+        const lineNum = Number(lineKey);
+        if (!Number.isFinite(lineNum)) continue;
+        perLine.set(lineNum, addr & 0xffff);
+      }
+      if (perLine.size) {
+        lineAddresses.set(normalizedKey, perLine);
+      }
+    }
+  }
+  if (tokens.dataLines && typeof tokens.dataLines === 'object') {
+    for (const [fileKeyRaw, entries] of Object.entries(tokens.dataLines as Record<string, any>)) {
+      if (!entries || typeof entries !== 'object') continue;
+      const normalizedKey = normalizeFileKey(fileKeyRaw);
+      if (!normalizedKey) continue;
+      const resolvedPath = resolveTokenFileReference(tokenPath, fileKeyRaw);
+      if (resolvedPath) registerFilePath(normalizedKey, resolvedPath);
+      let perLine = dataLines.get(normalizedKey);
+      if (!perLine) {
+        perLine = new Map();
+        dataLines.set(normalizedKey, perLine);
+      }
+      for (const [lineKey, rawSpan] of Object.entries(entries as Record<string, any>)) {
+        const start = parseAddressLike((rawSpan as any)?.addr ?? (rawSpan as any)?.start ?? rawSpan);
+        const byteLength = Number((rawSpan as any)?.byteLength ?? (rawSpan as any)?.length ?? 0);
+        const unitBytes = Number((rawSpan as any)?.unitBytes ?? (rawSpan as any)?.unit ?? 1);
+        const lineNum = Number(lineKey);
+        if (start === undefined || !Number.isFinite(lineNum) || byteLength <= 0) continue;
+        const span: DataLineSpan = {
+          start: start & 0xffff,
+          byteLength,
+          unitBytes: unitBytes > 0 ? unitBytes : 1
+        };
+        perLine.set(lineNum, span);
+        for (let offset = 0; offset < span.byteLength; offset++) {
+          const addr = (span.start + offset) & 0xffff;
+          if (!addressLookup.has(addr)) {
+            addressLookup.set(addr, { fileKey: normalizedKey, line: lineNum, span });
+          }
+        }
+      }
+    }
+  }
+
+  lastSymbolCache = { byName, byLowerCase, lineAddresses, filePaths };
+  dataLineSpanCache = dataLines.size ? dataLines : null;
+  dataAddressLookup = addressLookup.size ? addressLookup : null;
+}
+
 function ensureHighlightDecoration(context: vscode.ExtensionContext) {
   if (pausedLineDecoration) return;
   pausedLineDecoration = vscode.window.createTextEditorDecorationType({
@@ -623,6 +857,200 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
   void run();
 }
 
+function ensureDataHighlightDecorations(context: vscode.ExtensionContext) {
+  if (!dataReadDecoration) {
+    dataReadDecoration = vscode.window.createTextEditorDecorationType({
+      isWholeLine: true,
+      backgroundColor: 'rgba(64, 127, 255, 0.25)'
+    });
+    context.subscriptions.push(dataReadDecoration);
+  }
+  if (!dataWriteDecoration) {
+    dataWriteDecoration = vscode.window.createTextEditorDecorationType({
+      isWholeLine: true,
+      backgroundColor: 'rgba(255, 92, 92, 0.25)'
+    });
+    context.subscriptions.push(dataWriteDecoration);
+  }
+}
+
+function normalizeFsPathSafe(value: string): string {
+  try {
+    return path.resolve(value).replace(/\\/g, '/').toLowerCase();
+  } catch {
+    return value.toLowerCase();
+  }
+}
+
+function buildLineRanges(lineSet: Set<number>, doc: vscode.TextDocument): vscode.Range[] {
+  const ranges: vscode.Range[] = [];
+  for (const line of lineSet) {
+    const idx = line - 1;
+    if (!Number.isFinite(idx) || idx < 0 || idx >= doc.lineCount) continue;
+    ranges.push(doc.lineAt(idx).range);
+  }
+  return ranges;
+}
+
+function applyDataLineHighlightsFromSnapshot(snapshot?: MemoryAccessSnapshot) {
+  if (!highlightContext) return;
+  ensureDataHighlightDecorations(highlightContext);
+  if (!snapshot || !dataAddressLookup || !lastSymbolCache || !lastSymbolCache.filePaths.size) {
+    clearDataLineHighlights();
+    lastDataAccessSnapshot = null;
+    return;
+  }
+  lastDataAccessSnapshot = snapshot;
+  const accumulate = (addr: number, bucket: Map<string, Set<number>>) => {
+    const entry = dataAddressLookup?.get(addr & 0xffff);
+    if (!entry) return;
+    const resolvedPath = lastSymbolCache?.filePaths.get(entry.fileKey);
+    if (!resolvedPath) return;
+    const key = normalizeFsPathSafe(resolvedPath);
+    let lineSet = bucket.get(key);
+    if (!lineSet) {
+      lineSet = new Set();
+      bucket.set(key, lineSet);
+    }
+    lineSet.add(entry.line);
+  };
+  const readLines = new Map<string, Set<number>>();
+  const writeLines = new Map<string, Set<number>>();
+  snapshot.reads.forEach(addr => accumulate(addr, readLines));
+  snapshot.writes.forEach(addr => accumulate(addr, writeLines));
+  for (const editor of vscode.window.visibleTextEditors) {
+    const key = normalizeFsPathSafe(editor.document.uri.fsPath);
+    const readSet = readLines.get(key);
+    const writeSet = writeLines.get(key);
+    if (dataReadDecoration) editor.setDecorations(dataReadDecoration, readSet ? buildLineRanges(readSet, editor.document) : []);
+    if (dataWriteDecoration) editor.setDecorations(dataWriteDecoration, writeSet ? buildLineRanges(writeSet, editor.document) : []);
+  }
+}
+
+function clearDataLineHighlights() {
+  if (!highlightContext) return;
+  for (const editor of vscode.window.visibleTextEditors) {
+    if (dataReadDecoration) editor.setDecorations(dataReadDecoration, []);
+    if (dataWriteDecoration) editor.setDecorations(dataWriteDecoration, []);
+  }
+}
+
+function refreshDataLineHighlights(hardware?: Hardware | null) {
+  if (!hardware?.memory) {
+    clearDataLineHighlights();
+    lastDataAccessSnapshot = null;
+    return;
+  }
+  applyDataLineHighlightsFromSnapshot(hardware.memory.snapshotAccessLog());
+}
+
+type DirectiveValueRange = { start: number; end: number };
+
+function extractDataDirectiveInfo(lineText: string): { directive: 'byte' | 'word'; ranges: DirectiveValueRange[] } | undefined {
+  if (!lineText.trim()) return undefined;
+  const commentMatch = lineText.search(/(;|\/\/)/);
+  const workingText = commentMatch >= 0 ? lineText.slice(0, commentMatch) : lineText;
+  const directiveRegex = /(?:^|[\s\t])((?:\.?(?:db|byte))|(?:\.?(?:dw|word)))\b/i;
+  const match = directiveRegex.exec(workingText);
+  if (!match || match.index === undefined) return undefined;
+  const token = match[1] || '';
+  const directive: 'byte' | 'word' = token.toLowerCase().includes('w') ? 'word' : 'byte';
+  const matchText = match[0];
+  const tokenStart = (match.index ?? 0) + matchText.lastIndexOf(token);
+  const valuesOffset = tokenStart + token.length;
+  const valuesSegment = workingText.slice(valuesOffset);
+  const ranges = splitArgsWithRanges(valuesSegment, valuesOffset);
+  if (!ranges.length) return undefined;
+  return { directive, ranges };
+}
+
+function splitArgsWithRanges(text: string, offset: number): DirectiveValueRange[] {
+  const ranges: DirectiveValueRange[] = [];
+  let depth = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let tokenStart = -1;
+  const pushToken = (endIndex: number) => {
+    if (tokenStart === -1) return;
+    let startIdx = tokenStart;
+    let endIdx = endIndex;
+    while (startIdx < endIdx && /\s/.test(text[startIdx]!)) startIdx++;
+    while (endIdx > startIdx && /\s/.test(text[endIdx - 1]!)) endIdx--;
+    if (startIdx < endIdx) {
+      ranges.push({ start: offset + startIdx, end: offset + endIdx });
+    }
+    tokenStart = -1;
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    const prev = i > 0 ? text[i - 1]! : '';
+    if (!inDouble && ch === '\'' && prev !== '\\') {
+      if (tokenStart === -1) tokenStart = i;
+      inSingle = !inSingle;
+      continue;
+    }
+    if (!inSingle && ch === '"' && prev !== '\\') {
+      if (tokenStart === -1) tokenStart = i;
+      inDouble = !inDouble;
+      continue;
+    }
+    if (inSingle || inDouble) continue;
+    if (ch === '(') {
+      if (tokenStart === -1) tokenStart = i;
+      depth++;
+      continue;
+    }
+    if (ch === ')' && depth > 0) {
+      depth--;
+      continue;
+    }
+    if (ch === ',' && depth === 0) {
+      pushToken(i);
+      continue;
+    }
+    if (tokenStart === -1 && !/\s/.test(ch)) {
+      tokenStart = i;
+    }
+  }
+  pushToken(text.length);
+  return ranges;
+}
+
+function readMemoryValueForSpan(hardware: Hardware | undefined | null, addr: number, unitBytes: number): number | undefined {
+  if (!hardware?.memory) return undefined;
+  const normalizedAddr = addr & 0xffff;
+  if (unitBytes <= 1) {
+    return hardware.memory.GetByte(normalizedAddr, AddrSpace.RAM) & 0xff;
+  }
+  let value = 0;
+  for (let i = 0; i < unitBytes; i++) {
+    const byte = hardware.memory.GetByte((normalizedAddr + i) & 0xffff, AddrSpace.RAM) & 0xff;
+    value |= byte << (8 * i);
+  }
+  return value >>> 0;
+}
+
+function parseDataLiteralValue(text: string, unitBytes: number): number | undefined {
+  if (!text) return undefined;
+  const trimmed = text.trim();
+  if (!trimmed.length) return undefined;
+  let value: number | undefined;
+  const normalizeUnderscore = (s: string) => s.replace(/_/g, '');
+  if (/^0x[0-9a-fA-F_]+$/.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(2)), 16);
+  else if (/^\$[0-9a-fA-F_]+$/.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(1)), 16);
+  else if (/^0b[01_]+$/i.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(2)), 2);
+  else if (/^b[01_]+$/i.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(1)), 2);
+  else if (/^%[01_]+$/.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(1)), 2);
+  else if (/^[-+]?[0-9]+$/.test(trimmed)) value = parseInt(trimmed, 10);
+  else if (/^'(.|\\.)'$/.test(trimmed)) {
+    const inner = trimmed.slice(1, trimmed.length - 1);
+    value = inner.length === 1 ? inner.charCodeAt(0) : inner.charCodeAt(inner.length - 1);
+  }
+  if (value === undefined || Number.isNaN(value)) return undefined;
+  const mask = unitBytes >= 4 ? 0xffffffff : ((1 << (unitBytes * 8)) >>> 0) - 1;
+  return value & mask;
+}
+
 
 function buildAddressToSourceMap(tokens: any, tokenPath: string): Map<number, SourceLineRef> | null {
   if (!tokens || typeof tokens !== 'object') return null;
@@ -649,6 +1077,25 @@ function buildAddressToSourceMap(tokens: any, tokenPath: string): Map<number, So
       const normalizedAddr = addr & 0xffff;
       if (!map.has(normalizedAddr)) {
         map.set(normalizedAddr, { file: resolvedPath, line: lineNum });
+      }
+    }
+  }
+  const dataLines = tokens?.dataLines;
+  if (dataLines && typeof dataLines === 'object') {
+    for (const [fileKeyRaw, entries] of Object.entries(dataLines as Record<string, any>)) {
+      if (!entries || typeof entries !== 'object') continue;
+      const resolvedPath = path.isAbsolute(fileKeyRaw) ? path.normalize(fileKeyRaw) : path.resolve(baseDir, fileKeyRaw);
+      for (const [lineKey, rawSpan] of Object.entries(entries as Record<string, any>)) {
+        const start = parseAddressLike((rawSpan as any)?.addr ?? (rawSpan as any)?.start ?? rawSpan);
+        const byteLength = Number((rawSpan as any)?.byteLength ?? (rawSpan as any)?.length ?? 0);
+        const lineNum = Number(lineKey);
+        if (start === undefined || byteLength <= 0 || !Number.isFinite(lineNum)) continue;
+        for (let offset = 0; offset < byteLength; offset++) {
+          const addr = (start + offset) & 0xffff;
+          if (!map.has(addr)) {
+            map.set(addr, { file: resolvedPath, line: lineNum });
+          }
+        }
       }
     }
   }

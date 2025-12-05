@@ -9,6 +9,11 @@ start:
 			.text "   address:   1", '\n', '\0'
 next:
 			; Initialize registers to zero
+			mvi a, OPCODE_EI
+			sta temp_data
+			mvi a, OPCODE_RET
+			sta temp_data
+
 			lxi sp, 0x8000
 			lxi b, 0
 			lxi d, 0
@@ -82,3 +87,6 @@ palette:
 			DW $3040, 0xFFFF, b1111_1111_0000_1111,
 
 .include "fill_buff.asm"
+
+temp_data:
+			.byte 0xFF
