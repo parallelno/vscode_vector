@@ -215,3 +215,69 @@ export function resolveLocalLabelKey(name: string, originFile?: string, sourcePa
   const base = baseFile ? path.basename(baseFile, path.extname(baseFile)) : 'memory';
   return '@' + name.slice(1) + '_' + base;
 }
+
+export type TextEncodingType = 'ascii' | 'screencodecommodore';
+export type TextCaseType = 'mixed' | 'lower' | 'upper';
+
+export function applyTextCase(str: string, caseType: TextCaseType): string {
+  switch (caseType) {
+    case 'lower': return str.toLowerCase();
+    case 'upper': return str.toUpperCase();
+    default: return str;
+  }
+}
+
+export function encodeTextToBytes(str: string, encoding: TextEncodingType, caseType: TextCaseType): number[] {
+  const text = applyTextCase(str, caseType);
+  const bytes: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (encoding === 'ascii') {
+      // ASCII encoding: only bytes 0x00-0x7F are kept, others are ignored
+      if (code >= 0x00 && code <= 0x7f) {
+        bytes.push(code);
+      }
+    } else if (encoding === 'screencodecommodore') {
+      // Commodore screencode conversion:
+      // ASCII 0x40-0x5F (@, A-Z, [\]^_) -> 0x00-0x1F (subtract 0x40)
+      // ASCII 0x60-0x7F (`, a-z, {|}~, DEL) -> 0x00-0x1F (subtract 0x60)
+      // ASCII 0x20-0x3F (space, digits, punctuation) -> unchanged
+      // ASCII 0x00-0x1F (control characters) -> unchanged
+      // Characters outside 0x00-0x7F range are ignored
+      let screencode = code;
+      if (code >= 0x40 && code <= 0x5f) {
+        // @ and uppercase A-Z and symbols [\]^_: subtract 0x40
+        screencode = code - 0x40;
+      } else if (code >= 0x60 && code <= 0x7f) {
+        // lowercase a-z and symbols {|}~ and backtick: subtract 0x60
+        screencode = code - 0x60;
+      } else if (code >= 0x20 && code <= 0x3f) {
+        // space and digits/punctuation stay the same
+        screencode = code;
+      } else if (code < 0x20) {
+        // control characters stay as-is
+        screencode = code;
+      } else {
+        // ignore characters outside basic ASCII range
+        continue;
+      }
+      bytes.push(screencode & 0xff);
+    }
+  }
+  return bytes;
+}
+
+export function parseTextLiteralToBytes(part: string, encoding: TextEncodingType, caseType: TextCaseType): { bytes: number[] } | { error: string } {
+  const trimmed = part.trim();
+  if (!trimmed.length) return { error: 'Empty .text value' };
+  
+  // Check if it's a string literal
+  const strLiteral = parseStringLiteral(trimmed);
+  if (strLiteral !== null) {
+    return { bytes: encodeTextToBytes(strLiteral, encoding, caseType) };
+  }
+  
+  // Check if it's a single character in quotes (parseStringLiteral handles this)
+  // If parseStringLiteral returned null, it's not a valid string/char literal
+  return { error: `Invalid .text value '${trimmed}' - expected string or character literal` };
+}

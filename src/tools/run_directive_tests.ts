@@ -210,6 +210,89 @@ const tests: DirectiveTestCase[] = [
             success: false,
             errorsContains: ['Missing .endloop']
         }
+    },
+    {
+        name: '.text emits ASCII bytes from string',
+        sourceFile: 'text_basic.asm',
+        expect: {
+            bytes: [0x41, 0x42, 0x43]  // 'A', 'B', 'C'
+        }
+    },
+    {
+        name: '.text handles multiple character literals',
+        sourceFile: 'text_char.asm',
+        expect: {
+            bytes: [0x58, 0x59, 0x5A]  // 'X', 'Y', 'Z'
+        }
+    },
+    {
+        name: '.text handles mixed strings and characters',
+        sourceFile: 'text_mixed.asm',
+        expect: {
+            bytes: [0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x57]  // 'H', 'e', 'l', 'l', 'o', 'W'
+        }
+    },
+    {
+        name: '.encoding "ascii", "upper" converts to uppercase',
+        sourceFile: 'encoding_upper.asm',
+        expect: {
+            bytes: [0x41, 0x42, 0x43]  // 'A', 'B', 'C' (uppercase)
+        }
+    },
+    {
+        name: '.encoding "ascii", "lower" converts to lowercase',
+        sourceFile: 'encoding_lower.asm',
+        expect: {
+            bytes: [0x61, 0x62, 0x63]  // 'a', 'b', 'c' (lowercase)
+        }
+    },
+    {
+        name: '.encoding "ascii" defaults to mixed case',
+        sourceFile: 'encoding_ascii_default.asm',
+        expect: {
+            bytes: [0x41, 0x62, 0x43]  // 'A', 'b', 'C' (mixed case)
+        }
+    },
+    {
+        name: '.encoding "screencodecommodore" converts to screencode',
+        sourceFile: 'encoding_screencode.asm',
+        expect: {
+            bytes: [0x00, 0x01, 0x02]  // '@'->0x00, 'A'->0x01, 'B'->0x02
+        }
+    },
+    {
+        name: '.encoding rejects unknown encoding types',
+        sourceFile: 'encoding_invalid.asm',
+        expect: {
+            success: false,
+            errorsContains: ["Unknown encoding type 'invalid'"]
+        }
+    },
+    {
+        name: '.text requires at least one value',
+        sourceFile: 'text_empty.asm',
+        expect: {
+            success: false,
+            errorsContains: ['Missing value for .text']
+        }
+    },
+    {
+        name: '.text can have a label and affects subsequent addresses',
+        sourceFile: 'text_label.asm',
+        expect: {
+            bytes: [0x48, 0x69, 0xFF],  // 'H', 'i', 0xFF
+            labels: {
+                message: 0x0100,
+                after_text: 0x0102
+            }
+        }
+    },
+    {
+        name: '.text handles escape sequences',
+        sourceFile: 'text_escape.asm',
+        expect: {
+            bytes: [0x41, 0x0A, 0x42]  // 'A', newline, 'B'
+        }
     }
 ];
 
