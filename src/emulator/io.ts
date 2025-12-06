@@ -4,6 +4,9 @@
 
 import { Keyboard } from './keyboard';
 import { Memory } from './memory';
+import { TimerI8253 } from './timer_i8253';
+import { SoundAY8910 } from './sound_ay8910';
+import { Fdc1793, Port as FdcPort } from './fdc_wd1793';
 
 const PALETTE_LEN = 16;
 export type Palette = Uint8Array;
@@ -87,6 +90,9 @@ export class IO {
 
   keyboard?: Keyboard;
 	memory?: Memory;
+  timer: TimerI8253 = new TimerI8253();
+  ay: SoundAY8910 = new SoundAY8910();
+  fdc: Fdc1793 = new Fdc1793();
 
   // commit timers (in pixels)
   outCommitTime = IO.OUT_COMMIT_TIME;
@@ -177,7 +183,7 @@ export class IO {
     case 0x09:
     case 0x0a:
     case 0x0b:
-      return 0xFF; // TODO: add the time support //this.timer.Read(~(port & 3));
+      return this.timer.read(~port & 3);
 
       // Joystick "C"
     case 0x0e:
@@ -188,24 +194,24 @@ export class IO {
       // AY
     case 0x14:
     case 0x15:
-      result = 0xFF; // TODO: add AY support //this.ay.Read(_port & 1);
+      result = this.ay.Read(port & 1);
       break;
 
-      // FFD
+      // FDD
     case 0x18:
-      result = 0xFF; // TODO: add FDD support //this.fdc.Read(Fdc1793::Port::DATA);
+      result = this.fdc.read(FdcPort.DATA);
       break;
     case 0x19:
-      result = 0xFF; // TODO: add FDD support //this.fdc.Read(Fdc1793::Port::SECTOR);
+      result = this.fdc.read(FdcPort.SECTOR);
       break;
     case 0x1a:
-      result = 0xFF; // TODO: add FDD support //this.fdc.Read(Fdc1793::Port::TRACK);
+      result = this.fdc.read(FdcPort.TRACK);
       break;
     case 0x1b:
-      result = 0xFF; // TODO: add FDD support //this.fdc.Read(Fdc1793::Port::STATUS);
+      result = this.fdc.read(FdcPort.STATUS);
       break;
     case 0x1c:
-      result = 0xFF; // TODO: add FDD support //this.fdc.Read(Fdc1793::Port::READY);
+      result = this.fdc.read(FdcPort.READY);
       break;
     default:
       break;
@@ -274,8 +280,7 @@ export class IO {
     case 0x09:
     case 0x0a:
     case 0x0b:
-      // TODO: add the time support
-      //m_timer.Write(~_port & 3, _value);
+      this.timer.write(~port & 3, value);
       break;
 
       // Color pallete
@@ -297,30 +302,24 @@ export class IO {
       // AY
     case 0x14:
     case 0x15:
-      // TODO: add AY support
-      //this.ay?.Write(port & 1, value);
+      this.ay.Write(port & 1, value);
       break;
 
       // FDD
     case 0x18:
-      // TODO: add FDD support
-      // this.fdc?.Write(Fdc1793::Port::DATA, value);
+      this.fdc.write(FdcPort.DATA, value);
       break;
     case 0x19:
-      // TODO: add FDD support
-      // this.fdc?.Write(Fdc1793::Port::SECTOR, value);
+      this.fdc.write(FdcPort.SECTOR, value);
       break;
     case 0x1a:
-      // TODO: add FDD support
-      // this.fdc?.Write(Fdc1793::Port::TRACK, value);
+      this.fdc.write(FdcPort.TRACK, value);
       break;
     case 0x1b:
-      // TODO: add FDD support
-      // this.fdc?.Write(Fdc1793::Port::COMMAND, value);
+      this.fdc.write(FdcPort.COMMAND, value);
       break;
     case 0x1c:
-      // TODO: add FDD support
-      // this.fdc?.Write(Fdc1793::Port::SYSTEM, value);
+      this.fdc.write(FdcPort.SYSTEM, value);
       break;
 
       // Ram Disk 2
