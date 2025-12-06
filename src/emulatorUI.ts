@@ -36,7 +36,9 @@ let dataLineSpanCache: DataLineCache | null = null;
 let dataAddressLookup: Map<number, DataAddressEntry> | null = null;
 let highlightContext: vscode.ExtensionContext | null = null;
 let pausedLineDecoration: vscode.TextEditorDecorationType | null = null;
+let noSourceDecoration: vscode.TextEditorDecorationType | null = null;
 let lastHighlightedEditor: vscode.TextEditor | null = null;
+let lastHighlightedRange: vscode.Range | null = null;
 let currentToolbarIsRunning = true;
 let dataReadDecoration: vscode.TextEditorDecorationType | null = null;
 let dataWriteDecoration: vscode.TextEditorDecorationType | null = null;
@@ -910,23 +912,39 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
 }
 
 function ensureHighlightDecoration(context: vscode.ExtensionContext) {
-  if (pausedLineDecoration) return;
-  pausedLineDecoration = vscode.window.createTextEditorDecorationType({
-    isWholeLine: true,
-    backgroundColor: 'rgba(129, 127, 38, 0.45)',
-    overviewRulerColor: 'rgba(200, 200, 175, 0.8)',
-    overviewRulerLane: vscode.OverviewRulerLane.Full
-  });
-  context.subscriptions.push(pausedLineDecoration);
+  if (!pausedLineDecoration) {
+    pausedLineDecoration = vscode.window.createTextEditorDecorationType({
+      isWholeLine: true,
+      backgroundColor: 'rgba(129, 127, 38, 0.45)',
+      overviewRulerColor: 'rgba(200, 200, 175, 0.8)',
+      overviewRulerLane: vscode.OverviewRulerLane.Full
+    });
+    context.subscriptions.push(pausedLineDecoration);
+  }
+  if (!noSourceDecoration) {
+    noSourceDecoration = vscode.window.createTextEditorDecorationType({
+      isWholeLine: true,
+      backgroundColor: 'rgba(255, 200, 0, 0.45)',
+      overviewRulerColor: 'rgba(255, 200, 0, 0.8)',
+      overviewRulerLane: vscode.OverviewRulerLane.Full
+    });
+    context.subscriptions.push(noSourceDecoration);
+  }
 }
 
 function clearHighlightedSourceLine() {
-  if (pausedLineDecoration && lastHighlightedEditor) {
+  if (lastHighlightedEditor) {
     try {
-      lastHighlightedEditor.setDecorations(pausedLineDecoration, []);
+      if (pausedLineDecoration) {
+        lastHighlightedEditor.setDecorations(pausedLineDecoration, []);
+      }
+      if (noSourceDecoration) {
+        lastHighlightedEditor.setDecorations(noSourceDecoration, []);
+      }
     } catch (e) { /* ignore decoration clearing errors */ }
   }
   lastHighlightedEditor = null;
+  lastHighlightedRange = null;
 }
 
 function highlightSourceFromHardware(hardware: Hardware | undefined | null) {
@@ -943,9 +961,30 @@ function highlightSourceFromHardware(hardware: Hardware | undefined | null) {
 function highlightSourceAddress(addr?: number, debugLine?: string) {
   if (!highlightContext || addr === undefined || addr === null) return;
   ensureHighlightDecoration(highlightContext);
-  if (!pausedLineDecoration || !lastAddressSourceMap || lastAddressSourceMap.size === 0) return;
+  if (!pausedLineDecoration || !noSourceDecoration || !lastAddressSourceMap || lastAddressSourceMap.size === 0) return;
   const info = lastAddressSourceMap.get(addr & 0xffff);
-  if (!info) return;
+  if (!info) {
+    // No source found for this address - show yellow highlight on the last highlighted line
+    if (lastHighlightedEditor && lastHighlightedRange) {
+      try {
+        // Clear the normal highlight and apply the yellow "no source" highlight
+        lastHighlightedEditor.setDecorations(pausedLineDecoration, []);
+        const decoration: vscode.DecorationOptions = {
+          range: lastHighlightedRange,
+          renderOptions: debugLine ? {
+            after: {
+              contentText: '  ' + debugLine,
+              color: '#ffcc00',
+              fontStyle: 'normal',
+              fontWeight: 'normal'
+            }
+          } : undefined
+        };
+        lastHighlightedEditor.setDecorations(noSourceDecoration, [decoration]);
+      } catch (e) { /* ignore decoration errors */ }
+    }
+    return;
+  }
   const targetPath = path.resolve(info.file);
   const run = async () => {
     try {
@@ -982,6 +1021,7 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
       editor.setDecorations(pausedLineDecoration!, [decoration]);
       editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
       lastHighlightedEditor = editor;
+      lastHighlightedRange = range;
     } catch (err) {
       /* ignore highlight errors */
     }
