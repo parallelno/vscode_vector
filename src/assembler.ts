@@ -241,11 +241,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     const blockActive = ifStack.length === 0 ? true : ifStack[ifStack.length - 1].effective;
     if (!blockActive) continue;
 
-    if (/^\.print\b/i.test(line)) {
-      continue;
-    }
-
-    if (/^\.error\b/i.test(line)) {
+    if (/^\.(print|error)\b/i.test(line)) {
       continue;
     }
 
