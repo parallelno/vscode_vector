@@ -37,6 +37,7 @@ let dataAddressLookup: Map<number, DataAddressEntry> | null = null;
 let highlightContext: vscode.ExtensionContext | null = null;
 let pausedLineDecoration: vscode.TextEditorDecorationType | null = null;
 let lastHighlightedEditor: vscode.TextEditor | null = null;
+let lastHighlightedState: { filePath: string; line: number; debugLine?: string } | null = null;
 let currentToolbarIsRunning = true;
 let dataReadDecoration: vscode.TextEditorDecorationType | null = null;
 let dataWriteDecoration: vscode.TextEditorDecorationType | null = null;
@@ -197,6 +198,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     postToolbarState(isRunning);
     if (isRunning) {
       clearHighlightedSourceLine();
+      lastHighlightedState = null;
       clearDataLineHighlights();
       lastDataAccessSnapshot = null;
       try {
@@ -333,8 +335,11 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   }, null, context.subscriptions);
 
   const editorVisibilityDisposable = vscode.window.onDidChangeVisibleTextEditors(() => {
-    if (!currentToolbarIsRunning && lastDataAccessSnapshot) {
-      applyDataLineHighlightsFromSnapshot(lastDataAccessSnapshot);
+    if (!currentToolbarIsRunning) {
+      restoreHighlightedSourceLine();
+      if (lastDataAccessSnapshot) {
+        applyDataLineHighlightsFromSnapshot(lastDataAccessSnapshot);
+      }
     }
   });
   context.subscriptions.push(editorVisibilityDisposable);
@@ -380,6 +385,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     currentPanelController = null;
     lastBreakpointSource = null;
     clearHighlightedSourceLine();
+    lastHighlightedState = null;
     lastAddressSourceMap = null;
     clearDataLineHighlights();
     lastDataAccessSnapshot = null;
@@ -929,6 +935,42 @@ function clearHighlightedSourceLine() {
   lastHighlightedEditor = null;
 }
 
+function restoreHighlightedSourceLine() {
+  if (!highlightContext || !lastHighlightedState || currentToolbarIsRunning) return;
+  ensureHighlightDecoration(highlightContext);
+  if (!pausedLineDecoration) return;
+  const { filePath, line, debugLine } = lastHighlightedState;
+  const uri = vscode.Uri.file(filePath);
+  const editor = vscode.window.visibleTextEditors.find((ed) => ed.document.uri.fsPath === uri.fsPath);
+  if (!editor) return;
+  // If already highlighted on this editor, skip
+  if (lastHighlightedEditor === editor) return;
+  try {
+    const doc = editor.document;
+    const totalLines = doc.lineCount;
+    if (totalLines === 0) return;
+    const idx = Math.min(Math.max(line - 1, 0), totalLines - 1);
+    const lineText = doc.lineAt(idx).text;
+    const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
+    const decoration: vscode.DecorationOptions = {
+      range,
+      renderOptions: debugLine ? {
+        after: {
+          contentText: '  ' + debugLine,
+          color: '#b4ffb0',
+          fontStyle: 'normal',
+          fontWeight: 'normal'
+        }
+      } : undefined
+    };
+    clearHighlightedSourceLine();
+    editor.setDecorations(pausedLineDecoration!, [decoration]);
+    lastHighlightedEditor = editor;
+  } catch (err) {
+    /* ignore highlight restoration errors */
+  }
+}
+
 function highlightSourceFromHardware(hardware: Hardware | undefined | null) {
   if (!hardware || !highlightContext) return;
   try {
@@ -947,6 +989,8 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
   const info = lastAddressSourceMap.get(addr & 0xffff);
   if (!info) return;
   const targetPath = path.resolve(info.file);
+  // Store the highlight state for restoration when the editor becomes visible again
+  lastHighlightedState = { filePath: targetPath, line: info.line, debugLine };
   const run = async () => {
     try {
       const uri = vscode.Uri.file(targetPath);
