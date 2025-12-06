@@ -1584,11 +1584,33 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
     }
     tokens.lineAddresses = {};
     if (res.map && res.origins) {
+      // Track which macro call lines we've already recorded addresses for
+      // so we only record the first instruction's address for each macro invocation.
+      // Key format: "filename:line"
+      const seenMacroCallerLines = new Set<string>();
+
       for (const [lineStr, addrVal] of Object.entries(res.map)) {
         const lineIndex = parseInt(lineStr, 10);
         if (!Number.isFinite(lineIndex) || lineIndex <= 0) continue;
-        const origin = res.origins[lineIndex - 1] as { file?: string; line: number } | undefined;
+        const origin = res.origins[lineIndex - 1] as SourceOrigin | undefined;
         if (!origin || typeof origin.line !== 'number') continue;
+
+        // Handle macro invocation lines: map the caller line to the first instruction's address
+        if (origin.macroInstance && typeof origin.macroInstance.callerLine === 'number') {
+          const callerFile = origin.macroInstance.callerFile || sourcePath;
+          if (callerFile) {
+            const callerBase = path.basename(callerFile).toLowerCase();
+            const callerKey = `${callerBase}:${origin.macroInstance.callerLine}`;
+            // Only record the first instruction's address for each macro call
+            if (!seenMacroCallerLines.has(callerKey)) {
+              seenMacroCallerLines.add(callerKey);
+              if (!tokens.lineAddresses[callerBase]) tokens.lineAddresses[callerBase] = {};
+              tokens.lineAddresses[callerBase][origin.macroInstance.callerLine] = '0x' + (addrVal & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+            }
+          }
+        }
+
+        // Also record the regular line mapping (for non-macro lines and macro body lines)
         const originFile = (origin.file || sourcePath);
         if (!originFile) continue;
         const base = path.basename(originFile).toLowerCase();
@@ -1601,7 +1623,7 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
       for (const [lineStr, span] of Object.entries(res.dataLineSpans)) {
         const lineIndex = parseInt(lineStr, 10);
         if (!Number.isFinite(lineIndex) || lineIndex <= 0) continue;
-        const origin = res.origins[lineIndex - 1] as { file?: string; line: number } | undefined;
+        const origin = res.origins[lineIndex - 1] as SourceOrigin | undefined;
         if (!origin || typeof origin.line !== 'number') continue;
         const originFile = origin.file || sourcePath;
         if (!originFile) continue;

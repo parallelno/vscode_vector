@@ -18,7 +18,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { assemble } from '../assembler';
-import { AssembleResult } from '../assembler/types';
+import { AssembleResult, SourceOrigin } from '../assembler/types';
 
 type DirectiveTestExpectations = {
     success?: boolean;
@@ -30,6 +30,9 @@ type DirectiveTestExpectations = {
     errorsContains?: string[];
     noWarnings?: boolean;
     printMessages?: string[];
+    // Map of source line number (1-based) to expected address for macro call lines
+    // Tests that setting a breakpoint on a macro invocation line maps to the first instruction
+    macroCallLineAddresses?: Record<number, number>;
 };
 
 type DirectiveTestCase = {
@@ -210,6 +213,32 @@ const tests: DirectiveTestCase[] = [
         expect: {
             success: false,
             errorsContains: ['Missing .endloop']
+        }
+    },
+    {
+        name: 'Macro call lines map to first instruction address for breakpoints',
+        sourceFile: 'macro_breakpoint.asm',
+        description: 'When a breakpoint is set on a macro invocation line, it should map to the first instruction of the expanded macro',
+        expect: {
+            // Line 10: Fill(0xFF, 0x80FF, 0x80) -> first instruction is lxi h, 0x80FF at 0x0100
+            // Line 11: Fill(0x80, 0x80FF, 0x80) -> first instruction is lxi h, 0x80FF at 0x0109
+            macroCallLineAddresses: {
+                10: 0x0100,
+                11: 0x0109
+            }
+        }
+    },
+    {
+        name: 'Macro call lines with conditionals and loops map correctly',
+        sourceFile: 'macro_breakpoint_advanced.asm',
+        description: 'Macro with optional parameters, conditionals and loops should still map caller lines to first instruction',
+        expect: {
+            // Line 15: Fill(0xFF, 0x80FF, 0x80, true, 3) -> first instruction at 0x0100
+            // Line 16: Fill(0x80, 0x80FF, 0x80) -> first instruction at 0x010C
+            macroCallLineAddresses: {
+                15: 0x0100,
+                16: 0x010C
+            }
         }
     },
     {
@@ -548,6 +577,44 @@ function comparePrintMessages(actual: AssembleResult['printMessages'], expected:
     }
 }
 
+/**
+ * Compares macro call line addresses.
+ * For each expected source line number, finds the first expanded line whose origin
+ * has a macroInstance.callerLine matching that source line, and verifies its address.
+ */
+function compareMacroCallLineAddresses(
+    map: Record<number, number> | undefined,
+    origins: SourceOrigin[] | undefined,
+    expected: Record<number, number> | undefined,
+    recorder: string[]
+) {
+    if (!expected) return;
+    if (!map || !origins) {
+        recorder.push('Assembler did not return map or origins for macro call line check');
+        return;
+    }
+    for (const [srcLineStr, expectedAddr] of Object.entries(expected)) {
+        const srcLine = Number(srcLineStr);
+        // Find the first expanded line whose macroInstance.callerLine matches srcLine
+        let foundAddr: number | undefined;
+        for (const [expandedLineStr, addr] of Object.entries(map)) {
+            const expandedLine = Number(expandedLineStr);
+            const origin = origins[expandedLine - 1];
+            if (origin?.macroInstance?.callerLine === srcLine) {
+                foundAddr = addr;
+                break;  // Take the first match (first instruction of macro expansion)
+            }
+        }
+        if (foundAddr === undefined) {
+            recorder.push(`Source line ${srcLine} (macro call) not found in expanded origins`);
+            continue;
+        }
+        if ((foundAddr & 0xffff) !== (expectedAddr & 0xffff)) {
+            recorder.push(`Macro call line ${srcLine} expected address 0x${expectedAddr.toString(16).toUpperCase()} but was 0x${foundAddr.toString(16).toUpperCase()}`);
+        }
+    }
+}
+
 function runTestCase(test: DirectiveTestCase): DirectiveTestResult {
     const filePath = path.join(directivesDir, test.sourceFile);
     if (!fs.existsSync(filePath)) {
@@ -571,6 +638,7 @@ function runTestCase(test: DirectiveTestCase): DirectiveTestResult {
         compareConsts(result.consts, test.expect.consts, details);
         compareMap(result.map, test.expect.map, details);
         comparePrintMessages(result.printMessages, test.expect.printMessages, details);
+        compareMacroCallLineAddresses(result.map, result.origins, test.expect.macroCallLineAddresses, details);
         if (test.expect.noWarnings && result.warnings && result.warnings.length) {
             details.push(`Expected no warnings but received: ${result.warnings.join(' | ')}`);
         }
