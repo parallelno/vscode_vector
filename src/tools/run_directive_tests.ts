@@ -350,6 +350,49 @@ const tests: DirectiveTestCase[] = [
             // OUT >0x1200 (0x12) = 0xD3, 0x12
             bytes: [0xC6, 0x12, 0xD6, 0x34, 0xE6, 0xCD, 0xF6, 0xAB, 0xFE, 0x35, 0xDB, 0x00, 0xD3, 0x12],
             noWarnings: true
+        },
+    },
+    {
+        name: 'Immediate operands enforce width',
+        sourceFile: 'immediate_range_error.asm',
+        expect: {
+            success: false,
+            errorsContains: [
+                'does not fit in 8-bit operand for MVI',
+                'does not fit in 16-bit operand for LXI',
+                'does not fit in 16-bit operand for STA',
+                'does not fit in 16-bit operand for LDA',
+                'does not fit in 16-bit operand for JMP',
+                'does not fit in 16-bit operand for JZ',
+                'does not fit in 16-bit operand for JNZ',
+                'does not fit in 16-bit operand for JNC',
+                'does not fit in 16-bit operand for JC',
+                'does not fit in 16-bit operand for JPO',
+                'does not fit in 16-bit operand for JPE',
+                'does not fit in 16-bit operand for JP',
+                'does not fit in 16-bit operand for JM',
+                'does not fit in 16-bit operand for CALL',
+                'does not fit in 16-bit operand for CNZ',
+                'does not fit in 16-bit operand for CZ',
+                'does not fit in 16-bit operand for CNC',
+                'does not fit in 16-bit operand for CC',
+                'does not fit in 16-bit operand for CPO',
+                'does not fit in 16-bit operand for CPE',
+                'does not fit in 16-bit operand for CP',
+                'does not fit in 16-bit operand for CM',
+                'does not fit in 16-bit operand for SHLD',
+                'does not fit in 16-bit operand for LHLD',
+                'does not fit in 8-bit operand for OUT',
+                'does not fit in 8-bit operand for IN',
+                'does not fit in 8-bit operand for ADI',
+                'does not fit in 8-bit operand for SUI',
+                'does not fit in 8-bit operand for ANI',
+                'does not fit in 8-bit operand for ORI',
+                'does not fit in 8-bit operand for ACI',
+                'does not fit in 8-bit operand for SBI',
+                'does not fit in 8-bit operand for XRI',
+                'does not fit in 8-bit operand for CPI'
+            ]
         }
     }
 ];

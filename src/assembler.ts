@@ -170,8 +170,8 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   // Helper to evaluate an expression with full expression parser support
   // Used for constants and immediate values that may use < or > operators
   function evaluateExpressionValue(
-    expr: string, 
-    lineIndex: number, 
+    expr: string,
+    lineIndex: number,
     errorLabel: string
   ): { value: number | null; error?: string } {
     const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex };
@@ -181,6 +181,22 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     } catch (err: any) {
       return { value: null, error: `${errorLabel}: ${err?.message || err}` };
     }
+  }
+
+  function formatSignedHex(value: number): string {
+    const normalized = Math.trunc(value);
+    const prefix = normalized < 0 ? '-0x' : '0x';
+    const hex = Math.abs(normalized).toString(16).toUpperCase();
+    return prefix + hex;
+  }
+
+  function ensureImmediateRange(value: number, bits: 8 | 16, operandLabel: string, opLabel: string, line: number): boolean {
+    const max = bits === 8 ? 0xff : 0xffff;
+    if (value < 0 || value > max) {
+      errors.push(`${operandLabel} (${formatSignedHex(value)}) does not fit in ${bits}-bit operand for ${opLabel} at ${line}`);
+      return false;
+    }
+    return true;
   }
 
   // First pass: labels and address calculation
@@ -634,9 +650,9 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     const s = arg.trim();
     // simple numeric
     const num = parseNumberFull(s);
-    if (num !== null) return num & 0xffff;
-      // check simple named constants (e.g. TEMP_BYTE = 0x00)
-      if (consts && consts.has(s)) return consts.get(s)! & 0xffff;
+    if (num !== null) return num;
+    // check simple named constants (e.g. TEMP_BYTE = 0x00)
+    if (consts && consts.has(s)) return consts.get(s)!;
 
     // support simple expressions like "base + 15" where base may be a
     // numeric, a global label, or a local label (@name). RHS must be numeric.
@@ -683,7 +699,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
           acc = op === '+' ? (acc + val) : (acc - val);
         }
       }
-      return (acc! & 0xffff);
+      return acc!;
     }
 
     // local label resolution based on the scope recorded during first pass
@@ -699,11 +715,11 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         else break;
       }
       const key = chosen.key;
-      if (labels.has(key)) return labels.get(key)!.addr & 0xffff;
+      if (labels.has(key)) return labels.get(key)!.addr;
       return null;
     }
 
-    if (labels.has(s)) return labels.get(s)!.addr & 0xffff;
+    if (labels.has(s)) return labels.get(s)!.addr;
     return null;
   }
 
@@ -1016,12 +1032,12 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       const num = parseNumberFull(arg);
       if (num !== null) {
         target = num;
-        if (target > 0xffff) warnings.push(`Address ${arg} (0x${target.toString(16).toUpperCase()}) too large for ${op} at ${srcLine}; truncating to 16-bit`);
       } else {
         const resolvedVal = resolveAddressToken(arg, srcLine);
         if (resolvedVal !== null) target = resolvedVal;
         else { errors.push(`Unknown label or address '${arg}' at ${srcLine}`); target = 0; }
       }
+      if (!ensureImmediateRange(target, 16, `Address ${arg}`, op, srcLine)) continue;
       const opcode = op === 'LHLD' ? 0x2A : 0x22;
       out.push(opcode & 0xff);
       out.push(target & 0xff);
@@ -1063,7 +1079,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         }
       }
       if (!(r in mviOpcodes) || (full === null)) { errors.push(`Bad MVI operands at ${srcLine}`); continue; }
-      if (full > 0xff) warnings.push(`Immediate ${rawVal} (0x${full.toString(16).toUpperCase()}) too large for MVI at ${srcLine}; truncating to 0x${(full & 0xff).toString(16).toUpperCase()}`);
+      if (!ensureImmediateRange(full, 8, `Immediate ${rawVal}`, 'MVI', srcLine)) continue;
       out.push(mviOpcodes[r]);
       out.push((full & 0xff));
       addr += 2;
@@ -1094,12 +1110,12 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       const num = parseNumberFull(arg);
       if (num !== null) {
         target = num;
-        if (target > 0xffff) warnings.push(`Address ${arg} (0x${target.toString(16).toUpperCase()}) too large for ${op} at ${srcLine}; truncating to 16-bit`);
       } else {
         const resolvedVal = resolveAddressToken(arg, srcLine);
         if (resolvedVal !== null) target = resolvedVal;
         else { errors.push(`Unknown label or address '${arg}' at ${srcLine}`); target = 0; }
       }
+      if (!ensureImmediateRange(target, 16, `Address ${arg}`, op, srcLine)) continue;
       let opcode = 0;
       if (op === 'LDA') opcode = 0x3A;
       if (op === 'STA') opcode = 0x32;
@@ -1132,12 +1148,12 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       const num = parseNumberFull(val);
       if (num !== null) {
         target = num;
-        if (target > 0xffff) warnings.push(`Immediate ${val} (0x${target.toString(16).toUpperCase()}) too large for LXI at ${srcLine}; truncating to 16-bit`);
       } else {
         const resolvedVal = resolveAddressToken(val, srcLine);
         if (resolvedVal !== null) target = resolvedVal;
         else { errors.push(`Bad LXI value '${val}' at ${srcLine}`); target = 0; }
       }
+      if (!ensureImmediateRange(target, 16, `Immediate ${val}`, 'LXI', srcLine)) continue;
       out.push(opcode & 0xff);
       out.push(target & 0xff);
       out.push((target >> 8) & 0xff);
@@ -1216,7 +1232,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         }
       }
       if (full === null) { errors.push(`Bad immediate '${valTok}' at ${srcLine}`); continue; }
-      if (full > 0xff) warnings.push(`Immediate ${valTok} (0x${full.toString(16).toUpperCase()}) too large for ${op} at ${srcLine}; truncating to 8-bit`);
+      if (!ensureImmediateRange(full, 8, `Immediate ${valTok}`, op, srcLine)) continue;
       let opcode = 0;
       if (op === 'ADI') opcode = 0xC6;
       if (op === 'ACI') opcode = 0xCE;
@@ -1242,7 +1258,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         }
       }
       if (full === null) { errors.push(`Bad immediate '${valTok}' at ${srcLine}`); continue; }
-      if (full > 0xff) warnings.push(`Immediate ${valTok} (0x${full.toString(16).toUpperCase()}) too large for ${op} at ${srcLine}; truncating to 8-bit`);
+      if (!ensureImmediateRange(full, 8, `Immediate ${valTok}`, op, srcLine)) continue;
       let opcode = 0;
       if (op === 'ANI') opcode = 0xE6;
       if (op === 'XRI') opcode = 0xEE;
@@ -1315,7 +1331,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         }
       }
       if (full === null) { errors.push(`Bad IN port '${tok}' at ${srcLine}`); continue; }
-      if (full > 0xff) warnings.push(`IN port ${tok} (0x${full.toString(16).toUpperCase()}) too large at ${srcLine}; truncating to 8-bit`);
+      if (!ensureImmediateRange(full, 8, `IN port ${tok}`, 'IN', srcLine)) continue;
       out.push(0xDB); out.push(full & 0xff); addr += 2; continue;
     }
     if (op === 'OUT') {
@@ -1332,7 +1348,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         }
       }
       if (full === null) { errors.push(`Bad OUT port '${tok}' at ${srcLine}`); continue; }
-      if (full > 0xff) warnings.push(`OUT port ${tok} (0x${full.toString(16).toUpperCase()}) too large at ${srcLine}; truncating to 8-bit`);
+      if (!ensureImmediateRange(full, 8, `OUT port ${tok}`, 'OUT', srcLine)) continue;
       out.push(0xD3); out.push(full & 0xff); addr += 2; continue;
     }
 
@@ -1354,12 +1370,12 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       const num = parseNumberFull(arg);
       if (num !== null) {
         target = num;
-        if (target > 0xffff) warnings.push(`Address ${arg} (0x${target.toString(16).toUpperCase()}) too large for ${op} at ${srcLine}; truncating to 16-bit`);
       } else {
         const resolvedVal = resolveAddressToken(arg, srcLine);
         if (resolvedVal !== null) target = resolvedVal;
         else { errors.push(`Unknown label or address '${arg}' at ${srcLine}`); target = 0; }
       }
+      if (!ensureImmediateRange(target, 16, `Address ${arg}`, op, srcLine)) continue;
       out.push(jmpMap[op]); out.push(target & 0xff); out.push((target >> 8) & 0xff); addr += 3; continue;
     }
 
@@ -1369,12 +1385,12 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       const num = parseNumberFull(arg);
       if (num !== null) {
         target = num;
-        if (target > 0xffff) warnings.push(`Address ${arg} (0x${target.toString(16).toUpperCase()}) too large for ${op} at ${srcLine}; truncating to 16-bit`);
       } else {
         const resolvedVal = resolveAddressToken(arg, srcLine);
         if (resolvedVal !== null) target = resolvedVal;
         else { errors.push(`Unknown label or address '${arg}' at ${srcLine}`); target = 0; }
       }
+      if (!ensureImmediateRange(target, 16, `Address ${arg}`, op, srcLine)) continue;
       out.push(callMap[op]); out.push(target & 0xff); out.push((target >> 8) & 0xff); addr += 3; continue;
     }
 
