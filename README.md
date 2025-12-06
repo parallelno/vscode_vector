@@ -128,6 +128,106 @@ The emulator view now embeds a **Memory Dump** panel under the frame preview. It
 Assembler
 ------------------
 
+### Expressions and Operators
+
+The assembler supports a rich expression system used throughout directives (`.if`, `.loop`, `.align`, `.print`, etc.), immediate values, and address calculations. Expressions can combine numeric literals, symbols, and operators.
+
+**Numeric Literals**
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| Decimal | `42`, `-5` | Standard decimal numbers |
+| Hex `$` | `$FF`, `$1234` | Hexadecimal with `$` prefix |
+| Hex `0x` | `0xFF`, `0x1234` | Hexadecimal with `0x` prefix |
+| Binary `%` | `%1010`, `%11_00` | Binary with `%` prefix (underscores allowed) |
+| Binary `0b` | `0b1010`, `0b11_00` | Binary with `0b` prefix (underscores allowed) |
+| Binary `b` | `b1010`, `b11_00` | Binary with `b` prefix (underscores allowed) |
+| Character | `'A'`, `'\n'` | ASCII character (supports escapes) |
+
+**Arithmetic Operators**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `+` | Addition | `Value + 10` |
+| `-` | Subtraction | `EndAddr - StartAddr` |
+| `*` | Multiplication | `Count * 2` |
+| `/` | Division | `Total / 4` |
+| `%` | Modulo (remainder) | `Offset % 256` |
+
+**Comparison Operators**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `==` | Equal | `Value == 0` |
+| `!=` | Not equal | `Flag != FALSE` |
+| `<` | Less than | `Count < 10` |
+| `<=` | Less than or equal | `Index <= Max` |
+| `>` | Greater than | `Size > 0` |
+| `>=` | Greater than or equal | `Addr >= $100` |
+
+**Bitwise Operators**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `&` | Bitwise AND | `Value & $0F` |
+| `\|` | Bitwise OR | `Flags \| $80` |
+| `^` | Bitwise XOR | `Data ^ $FF` |
+| `~` | Bitwise NOT | `~Mask` |
+| `<<` | Left shift | `1 << 4` |
+| `>>` | Right shift | `Value >> 8` |
+
+**Logical Operators**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `!` | Logical NOT | `!Enabled` |
+| `&&` | Logical AND | `(A > 0) && (B < 10)` |
+| `\|\|` | Logical OR | `(X == 0) \|\| (Y == 0)` |
+
+**Unary Prefix Operators**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `+` | Unary plus (identity) | `+Value` |
+| `-` | Unary minus (negation) | `-Offset` |
+| `<` | Low byte (bits 0-7) | `<$1234` → `$34` |
+| `>` | High byte (bits 8-15) | `>$1234` → `$12` |
+
+The `<` (low byte) and `>` (high byte) unary operators extract 8-bit portions from 16-bit values. This is useful for splitting addresses or constants when working with 8-bit instructions:
+
+```
+ADDR = $1234
+
+mvi l, <ADDR    ; Load low byte ($34) into L
+mvi h, >ADDR    ; Load high byte ($12) into H
+
+db <$ABCD       ; Emits $CD
+db >$ABCD       ; Emits $AB
+```
+
+**Symbols**
+
+Expressions can reference:
+- Labels (e.g., `StartAddr`, `Loop`)
+- Constants defined with `=` or `EQU` (e.g., `MAX_VALUE`)
+- Local labels prefixed with `@` (e.g., `@loop`)
+- Boolean literals `TRUE` (1) and `FALSE` (0)
+
+**Operator Precedence** (highest to lowest)
+
+1. Parentheses `()`
+2. Unary operators: `+`, `-`, `!`, `~`, `<`, `>`
+3. Multiplicative: `*`, `/`, `%`
+4. Additive: `+`, `-`
+5. Shift: `<<`, `>>`
+6. Relational: `<`, `<=`, `>`, `>=`
+7. Equality: `==`, `!=`
+8. Bitwise AND: `&`
+9. Bitwise XOR: `^`
+10. Bitwise OR: `|`
+11. Logical AND: `&&`
+12. Logical OR: `||`
+
 - `.org` directive: supported (decimal, `0x..`, or `$..`). Example: `.org 0x100`.
 
 - `.include` directive: include another file inline using `.include "file.asm"` or `.include 'file.asm'`. Includes are resolved relative to the including file and support recursive expansion up to 16 levels.
