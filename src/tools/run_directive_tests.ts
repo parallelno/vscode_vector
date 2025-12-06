@@ -300,6 +300,33 @@ const tests: DirectiveTestCase[] = [
         expect: {
             bytes: [0x20, 0x20, 0x20, 0x61, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73, 0x3A, 0x20, 0x20, 0x20, 0x31, 0x0A, 0x00]
         }
+    },
+    {
+        name: '.error stops assembly with user message',
+        sourceFile: 'error_basic.asm',
+        expect: {
+            success: false,
+            errorsContains: ['This is an error message']
+        }
+    },
+    {
+        name: '.error is not triggered inside false .if block',
+        sourceFile: 'error_conditional.asm',
+        expect: {
+            success: true,
+            bytes: [0x55],
+            labels: {
+                start: 0x1000
+            }
+        }
+    },
+    {
+        name: '.error evaluates expressions and labels',
+        sourceFile: 'error_expressions.asm',
+        expect: {
+            success: false,
+            errorsContains: ['Value is 4660', 'address is 8192']
+        }
     }
 ];
 
