@@ -9,7 +9,7 @@ import { AYWrapper } from './sound_ay8910';
 /**
  * Audio class for emulating sound generation.
  * Combines output from the i8253 timer, AY-3-8910 PSG, and beeper.
- * 
+ *
  * Note: This TypeScript version handles audio sample generation and buffering.
  * Unlike the C++ version which uses SDL3 for playback, actual audio playback
  * must be handled externally (e.g., via Web Audio API in a webview).
@@ -18,18 +18,18 @@ export class Audio {
   // Timing constants
   private static readonly INPUT_RATE = 1500000;  // 1.5 MHz timer input rate
   private static readonly OUTPUT_RATE = 50000;   // 50 KHz output rate
-  private static readonly DOWNSAMPLE_RATE = Audio.INPUT_RATE / Audio.OUTPUT_RATE; // 30
+  private static readonly DOWNSAMPLE_RATE = Audio.INPUT_RATE / Audio.OUTPUT_RATE;
 
   // Buffer configuration
-  private static readonly CALLBACKS_PER_SEC = 100;
-  private static readonly SDL_BUFFER = Audio.OUTPUT_RATE / Audio.CALLBACKS_PER_SEC; // 500 samples
-  private static readonly SDL_BUFFERS = 8;
+  private static readonly CALLBACKS_PER_SEC = 100; // arbitrary number found while examining the SDL3 callback calls
+  private static readonly SDL_BUFFER = Audio.OUTPUT_RATE / Audio.CALLBACKS_PER_SEC; // the estimated Audio stream buffer length
+  private static readonly SDL_BUFFERS = 8; // to make sure there is enough available data for audio streaming
   private static readonly BUFFER_SIZE = Audio.SDL_BUFFER * Audio.SDL_BUFFERS; // 4000 samples
 
   // Buffering thresholds
-  private static readonly TARGET_BUFFERING = Audio.SDL_BUFFER * 4; // 2000 samples
-  private static readonly LOW_BUFFERING = Audio.TARGET_BUFFERING - Audio.SDL_BUFFER * 2; // 1000 samples
-  private static readonly HIGH_BUFFERING = Audio.TARGET_BUFFERING + Audio.SDL_BUFFER * 2; // 3000 samples
+  private static readonly TARGET_BUFFERING = Audio.SDL_BUFFER * 4;
+  private static readonly LOW_BUFFERING = Audio.TARGET_BUFFERING - Audio.SDL_BUFFER * 2;
+  private static readonly HIGH_BUFFERING = Audio.TARGET_BUFFERING + Audio.SDL_BUFFER * 2;
 
   // References to sound generators
   private timer: TimerI8253;
@@ -39,7 +39,7 @@ export class Audio {
   private muteMul: number = 1.0;
 
   // Audio sample ring buffer
-  private buffer: Float32Array;
+  private buffer: Float32Array; // This module writes to it, Audio playback system reads from it
   private readBuffIdx: number = 0;  // Index of last sample read for playback
   private writeBuffIdx: number = 0; // Index of last sample written by audio generation
   private lastSample: number = 0.0;
@@ -63,13 +63,13 @@ export class Audio {
     this.timer = timer;
     this.aywrapper = aywrapper;
     this.buffer = new Float32Array(Audio.BUFFER_SIZE);
-    this.init();
+    this.Init();
   }
 
   /**
    * Initialize the audio system
    */
-  init(): void {
+  Init(): void {
     this.buffer.fill(0);
     this.readBuffIdx = 0;
     this.writeBuffIdx = 0;
@@ -84,9 +84,9 @@ export class Audio {
   /**
    * Reset the audio system
    */
-  reset(): void {
+  Reset(): void {
     this.aywrapper.Reset();
-    this.timer.reset();
+    this.timer.Reset();
     this.buffer.fill(0);
     this.lastSample = 0;
     this.readBuffIdx = 0;
@@ -96,18 +96,31 @@ export class Audio {
     this.muteMul = 1.0;
   }
 
+  Pause(pause: boolean)
+  {
+    if (pause)
+    {
+      // TODO: add support for audio
+      //SDL_PauseAudioDevice(m_audioDevice);
+    }
+    else {
+      // TODO: add support for audio
+      //SDL_ResumeAudioDevice(m_audioDevice);
+    }
+  }
+
   /**
    * Mute or unmute audio output
    * @param mute - true to mute, false to unmute
    */
-  mute(mute: boolean): void {
+  Mute(mute: boolean): void {
     this.muteMul = mute ? 0.0 : 1.0;
   }
 
   /**
    * Check if audio is muted
    */
-  isMuted(): boolean {
+  IsMuted(): boolean {
     return this.muteMul === 0.0;
   }
 
@@ -116,16 +129,16 @@ export class Audio {
    * @param cycles - Number of 1.5 MHz timer ticks to process
    * @param beeper - Beeper output value (0 or 1)
    */
-  clock(cycles: number, beeper: number): void {
+  Clock(cycles: number, beeper: number): void {
     if (!this.inited) return;
 
     for (let tick = 0; tick < cycles; ++tick) {
       // Mix timer, AY, and beeper outputs
       // Timer clocked at 1 cycle, AY at 2 cycles (as per original C++ code)
-      const sample = (this.timer.clock(1) + this.aywrapper.Clock(2) + beeper) * this.muteMul;
+      const sample = (this.timer.Clock(1) + this.aywrapper.Clock(2) + beeper) * this.muteMul;
 
       // Downsample and store if ready
-      const downsampledSample = this.downsample(sample);
+      const downsampledSample = this.Downsample(sample);
       if (downsampledSample !== null) {
         this.buffer[this.writeBuffIdx % Audio.BUFFER_SIZE] = downsampledSample;
         this.writeBuffIdx++;
@@ -139,7 +152,7 @@ export class Audio {
    * @param sample - Input sample at 1.5 MHz rate
    * @returns Downsampled value if ready, null otherwise
    */
-  private downsample(sample: number): number | null {
+  private Downsample(sample: number): number | null {
     this.accumulator += sample;
 
     if (++this.sampleCounter >= this.downsampleRate) {
@@ -158,7 +171,7 @@ export class Audio {
    * @param count - Number of samples to read
    * @returns Array of audio samples
    */
-  readSamples(count: number): Float32Array {
+  ReadSamples(count: number): Float32Array {
     const samples = new Float32Array(count);
     const buffering = this.writeBuffIdx - this.readBuffIdx;
     const underBuffering = buffering < Audio.LOW_BUFFERING;
@@ -190,42 +203,42 @@ export class Audio {
   /**
    * Get the number of samples available in the buffer
    */
-  getAvailableSamples(): number {
+  GetAvailableSamples(): number {
     return Math.max(0, this.writeBuffIdx - this.readBuffIdx);
   }
 
   /**
    * Get the current buffer fill level as a ratio (0.0 to 1.0+)
    */
-  getBufferLevel(): number {
-    return this.getAvailableSamples() / Audio.TARGET_BUFFERING;
+  GetBufferLevel(): number {
+    return this.GetAvailableSamples() / Audio.TARGET_BUFFERING;
   }
 
   /**
    * Get the last generated sample value
    */
-  getLastSample(): number {
+  GetLastSample(): number {
     return this.lastSample;
   }
 
   /**
    * Check if audio system is initialized
    */
-  isInitialized(): boolean {
+  IsInitialized(): boolean {
     return this.inited;
   }
 
   /**
    * Get the output sample rate
    */
-  static getOutputRate(): number {
+  static GetOutputRate(): number {
     return Audio.OUTPUT_RATE;
   }
 
   /**
    * Get the recommended buffer size for playback callbacks
    */
-  static getRecommendedBufferSize(): number {
+  static GetRecommendedBufferSize(): number {
     return Audio.SDL_BUFFER;
   }
 }

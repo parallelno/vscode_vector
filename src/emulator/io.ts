@@ -2,11 +2,11 @@
 // https://github.com/parallelno/v06x/blob/master/src/board.cpp
 // https://github.com/parallelno/v06x/blob/master/src/vio.h
 
+import { Fdc1793, FdcPort } from './fdc_wd1793';
 import { Keyboard } from './keyboard';
 import { Memory } from './memory';
-import { TimerI8253 } from './timer_i8253';
-import { SoundAY8910 } from './sound_ay8910';
-import { Fdc1793, Port as FdcPort } from './fdc_wd1793';
+import SoundAY8910 from './sound_ay8910';
+import TimerI8253 from './timer_i8253';
 
 const PALETTE_LEN = 16;
 export type Palette = Uint8Array;
@@ -90,9 +90,9 @@ export class IO {
 
   keyboard?: Keyboard;
 	memory?: Memory;
-  timer: TimerI8253 = new TimerI8253();
-  ay: SoundAY8910 = new SoundAY8910();
-  fdc: Fdc1793 = new Fdc1793();
+  timer?: TimerI8253;
+  ay?: SoundAY8910;
+  fdc?: Fdc1793;
 
   // commit timers (in pixels)
   outCommitTime = IO.OUT_COMMIT_TIME;
@@ -103,7 +103,10 @@ export class IO {
   portsInData = new Uint8Array(256);
   portsOutData = new Uint8Array(256);
 
-  constructor(keyboard?: Keyboard, memory?: Memory) {
+  constructor(keyboard?: Keyboard, memory?: Memory, timer?: TimerI8253, ay?: SoundAY8910, fdc?: Fdc1793) {
+    this.timer = timer;
+    this.ay = ay;
+    this.fdc = fdc;
     this.keyboard = keyboard;
     this.memory = memory;
     this.Init();
@@ -183,7 +186,7 @@ export class IO {
     case 0x09:
     case 0x0a:
     case 0x0b:
-      return this.timer.read(~port & 3);
+      return this.timer?.Read(~port & 3) ?? result;
 
       // Joystick "C"
     case 0x0e:
@@ -194,24 +197,24 @@ export class IO {
       // AY
     case 0x14:
     case 0x15:
-      result = this.ay.Read(port & 1);
+      result = this.ay?.Read(port & 1) ?? result;
       break;
 
       // FDD
     case 0x18:
-      result = this.fdc.read(FdcPort.DATA);
+      result = this.fdc?.Read(FdcPort.DATA) ?? result;
       break;
     case 0x19:
-      result = this.fdc.read(FdcPort.SECTOR);
+      result = this.fdc?.Read(FdcPort.SECTOR) ?? result;
       break;
     case 0x1a:
-      result = this.fdc.read(FdcPort.TRACK);
+      result = this.fdc?.Read(FdcPort.TRACK) ?? result;
       break;
     case 0x1b:
-      result = this.fdc.read(FdcPort.STATUS);
+      result = this.fdc?.Read(FdcPort.STATUS) ?? result;
       break;
     case 0x1c:
-      result = this.fdc.read(FdcPort.READY);
+      result = this.fdc?.Read(FdcPort.READY) ?? result;
       break;
     default:
       break;
@@ -280,7 +283,7 @@ export class IO {
     case 0x09:
     case 0x0a:
     case 0x0b:
-      this.timer.write(~port & 3, value);
+      this.timer?.Write(~port & 3, value);
       break;
 
       // Color pallete
@@ -302,24 +305,24 @@ export class IO {
       // AY
     case 0x14:
     case 0x15:
-      this.ay.Write(port & 1, value);
+      this.ay?.Write(port & 1, value);
       break;
 
       // FDD
     case 0x18:
-      this.fdc.write(FdcPort.DATA, value);
+      this.fdc?.Write(FdcPort.DATA, value);
       break;
     case 0x19:
-      this.fdc.write(FdcPort.SECTOR, value);
+      this.fdc?.Write(FdcPort.SECTOR, value);
       break;
     case 0x1a:
-      this.fdc.write(FdcPort.TRACK, value);
+      this.fdc?.Write(FdcPort.TRACK, value);
       break;
     case 0x1b:
-      this.fdc.write(FdcPort.COMMAND, value);
+      this.fdc?.Write(FdcPort.COMMAND, value);
       break;
     case 0x1c:
-      this.fdc.write(FdcPort.SYSTEM, value);
+      this.fdc?.Write(FdcPort.SYSTEM, value);
       break;
 
       // Ram Disk 2

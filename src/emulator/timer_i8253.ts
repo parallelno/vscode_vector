@@ -31,10 +31,10 @@ export class CounterUnit {
   private flagBcd: boolean = false;
 
   constructor() {
-    this.reset();
+    this.Reset();
   }
 
-  reset(): void {
+  Reset(): void {
     this.latchValue = -1;
     this.writeState = 0;
     this.value = 0;
@@ -51,8 +51,8 @@ export class CounterUnit {
     this.latchMode = 0;
   }
 
-  setMode(mode: number, latchMode: number, flagBcd: boolean): void {
-    this.clock(LATCH_DELAY);
+  SetMode(mode: number, latchMode: number, flagBcd: boolean): void {
+    this.Clock(LATCH_DELAY);
     this.delay = LATCH_DELAY;
 
     this.flagBcd = flagBcd;
@@ -91,13 +91,13 @@ export class CounterUnit {
     this.writeState = 0;
   }
 
-  latch(): void {
-    this.clock(LATCH_DELAY);
+  Latch(): void {
+    this.Clock(LATCH_DELAY);
     this.delay = LATCH_DELAY;
     this.latchValue = this.value;
   }
 
-  clock(cycles: number): number {
+  Clock(cycles: number): number {
     if (this.delay) {
       --this.delay;
       cycles = 0;
@@ -206,7 +206,7 @@ export class CounterUnit {
     return result;
   }
 
-  write(w8: number): void {
+  Write(w8: number): void {
     if (this.latchMode === 3) {
       // lsb, msb
       switch (this.writeState) {
@@ -236,7 +236,7 @@ export class CounterUnit {
     }
     if (this.flagLoad) {
       if (this.flagBcd) {
-        this.loadValue = CounterUnit.fromBcd(this.loadValue);
+        this.loadValue = CounterUnit.FromBcd(this.loadValue);
       }
       // Set the delay cycles based on mode. Mode 0 always has 3-cycle delay.
       // Modes 1-3 have 3-cycle delay only when counter is not yet enabled.
@@ -267,7 +267,7 @@ export class CounterUnit {
     }
   }
 
-  read(): number {
+  Read(): number {
     let value = 0;
     switch (this.latchMode) {
       case 0:
@@ -276,18 +276,18 @@ export class CounterUnit {
       case 1:
         value = this.latchValue !== -1 ? this.latchValue : this.value;
         this.latchValue = -1;
-        value = this.flagBcd ? CounterUnit.toBcd(value) : value;
+        value = this.flagBcd ? CounterUnit.ToBcd(value) : value;
         value &= 0xff;
         break;
       case 2:
         value = this.latchValue !== -1 ? this.latchValue : this.value;
         this.latchValue = -1;
-        value = this.flagBcd ? CounterUnit.toBcd(value) : value;
+        value = this.flagBcd ? CounterUnit.ToBcd(value) : value;
         value = (value >> 8) & 0xff;
         break;
       case 3:
         value = this.latchValue !== -1 ? this.latchValue : this.value;
-        value = this.flagBcd ? CounterUnit.toBcd(value) : value;
+        value = this.flagBcd ? CounterUnit.ToBcd(value) : value;
         switch (this.writeState) {
           case 0:
             this.writeState = 1;
@@ -308,7 +308,7 @@ export class CounterUnit {
     return value;
   }
 
-  static toBcd(x: number): number {
+  static ToBcd(x: number): number {
     let result = 0;
     for (let i = 0; i < 4; ++i) {
       result |= (x % 10) << (i * 4);
@@ -317,7 +317,7 @@ export class CounterUnit {
     return result;
   }
 
-  static fromBcd(x: number): number {
+  static FromBcd(x: number): number {
     let result = 0;
     for (let i = 0; i < 4; ++i) {
       let digit = (x & 0xf000) >> 12;
@@ -338,13 +338,13 @@ export class TimerI8253 {
   ];
   private controlWord: number = 0;
 
-  reset(): void {
-    this.counters[0].reset();
-    this.counters[1].reset();
-    this.counters[2].reset();
+  Reset(): void {
+    this.counters[0].Reset();
+    this.counters[1].Reset();
+    this.counters[2].Reset();
   }
 
-  writeCw(w8: number): void {
+  WriteCw(w8: number): void {
     const counterSet = (w8 >> 6) & 3;
     const modeSet = (w8 >> 1) & 3;
     const latchSet = (w8 >> 4) & 3;
@@ -359,36 +359,36 @@ export class TimerI8253 {
     const counter = this.counters[counterSet];
 
     if (latchSet === 0) {
-      counter.latch();
+      counter.Latch();
     } else {
-      counter.setMode(modeSet, latchSet, bcdSet === 1);
+      counter.SetMode(modeSet, latchSet, bcdSet === 1);
     }
   }
 
-  write(addr: number, w8: number): void {
+  Write(addr: number, w8: number): void {
     switch (addr & 3) {
       case 0x03:
-        this.writeCw(w8);
+        this.WriteCw(w8);
         return;
       default:
-        this.counters[addr & 3].write(w8);
+        this.counters[addr & 3].Write(w8);
         return;
     }
   }
 
-  read(addr: number): number {
+  Read(addr: number): number {
     switch (addr & 3) {
       case 0x03:
         return this.controlWord;
       default:
-        return this.counters[addr & 3].read();
+        return this.counters[addr & 3].Read();
     }
   }
 
-  clock(cycles: number): number {
-    const ch0 = this.counters[0].clock(cycles);
-    const ch1 = this.counters[1].clock(cycles);
-    const ch2 = this.counters[2].clock(cycles);
+  Clock(cycles: number): number {
+    const ch0 = this.counters[0].Clock(cycles);
+    const ch1 = this.counters[1].Clock(cycles);
+    const ch2 = this.counters[2].Clock(cycles);
     return (ch0 + ch1 + ch2) / 3.0;
   }
 }
