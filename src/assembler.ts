@@ -648,6 +648,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   function resolveAddressToken(arg: string, lineIndex: number): number | null {
     if (!arg) return null;
     const s = arg.trim();
+    const exprCtx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex };
     // simple numeric
     const num = parseNumberFull(s);
     if (num !== null) return num;
@@ -692,6 +693,13 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
             val = consts.get(tok)!;
           }
         }
+        if (val === null) {
+          try {
+            val = evaluateConditionExpression(tok, exprCtx, true);
+          } catch (err) {
+            val = null;
+          }
+        }
         if (val === null) return null;
         if (acc === null) acc = val;
         else {
@@ -720,6 +728,14 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     if (labels.has(s)) return labels.get(s)!.addr;
+
+    // final fallback: evaluate full expression (supports unary < and >)
+    try {
+      const value = evaluateConditionExpression(s, exprCtx, true);
+      return value;
+    } catch (err) {
+      // swallow so caller can emit a contextual error
+    }
     return null;
   }
 
@@ -1144,14 +1160,22 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       if (rp === 'H') opcode = 0x21;
       if (rp === 'SP') opcode = 0x31;
       if (opcode < 0) { errors.push(`Bad LXI register pair at ${srcLine}`); continue; }
-      let target = 0;
-      const num = parseNumberFull(val);
-      if (num !== null) {
-        target = num;
-      } else {
+      let target: number | null = parseNumberFull(val);
+      if (target === null) {
         const resolvedVal = resolveAddressToken(val, srcLine);
         if (resolvedVal !== null) target = resolvedVal;
-        else { errors.push(`Bad LXI value '${val}' at ${srcLine}`); target = 0; }
+      }
+      if (target === null) {
+        const exprResult = evaluateExpressionValue(val, srcLine, `Bad LXI value '${val}'`);
+        if (exprResult.error) {
+          errors.push(`${exprResult.error} at ${srcLine}`);
+          continue;
+        }
+        target = exprResult.value;
+      }
+      if (target === null) {
+        errors.push(`Bad LXI value '${val}' at ${srcLine}`);
+        continue;
       }
       if (!ensureImmediateRange(target, 16, `Immediate ${val}`, 'LXI', srcLine)) continue;
       out.push(opcode & 0xff);
