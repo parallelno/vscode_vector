@@ -967,8 +967,9 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
     // No source found for this address - show yellow highlight on the last highlighted line
     if (lastHighlightedEditor && lastHighlightedRange) {
       try {
-        // Clear the normal highlight and apply the yellow "no source" highlight
+        // Clear both decorations and apply the yellow "no source" highlight
         lastHighlightedEditor.setDecorations(pausedLineDecoration, []);
+        lastHighlightedEditor.setDecorations(noSourceDecoration, []);
         const decoration: vscode.DecorationOptions = {
           range: lastHighlightedRange,
           renderOptions: debugLine ? {
