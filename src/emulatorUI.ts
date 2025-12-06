@@ -935,6 +935,20 @@ function clearHighlightedSourceLine() {
   lastHighlightedEditor = null;
 }
 
+function createPausedLineDecoration(range: vscode.Range, debugLine?: string): vscode.DecorationOptions {
+  return {
+    range,
+    renderOptions: debugLine ? {
+      after: {
+        contentText: '  ' + debugLine,
+        color: '#b4ffb0',
+        fontStyle: 'normal',
+        fontWeight: 'normal'
+      }
+    } : undefined
+  };
+}
+
 function restoreHighlightedSourceLine() {
   if (!highlightContext || !lastHighlightedState || currentToolbarIsRunning) return;
   ensureHighlightDecoration(highlightContext);
@@ -952,17 +966,7 @@ function restoreHighlightedSourceLine() {
     const idx = Math.min(Math.max(line - 1, 0), totalLines - 1);
     const lineText = doc.lineAt(idx).text;
     const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
-    const decoration: vscode.DecorationOptions = {
-      range,
-      renderOptions: debugLine ? {
-        after: {
-          contentText: '  ' + debugLine,
-          color: '#b4ffb0',
-          fontStyle: 'normal',
-          fontWeight: 'normal'
-        }
-      } : undefined
-    };
+    const decoration = createPausedLineDecoration(range, debugLine);
     clearHighlightedSourceLine();
     editor.setDecorations(pausedLineDecoration!, [decoration]);
     lastHighlightedEditor = editor;
@@ -1011,17 +1015,7 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
       const idx = Math.min(Math.max(info.line - 1, 0), totalLines - 1);
       const lineText = doc.lineAt(idx).text;
       const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
-      const decoration: vscode.DecorationOptions = {
-        range,
-        renderOptions: debugLine ? {
-          after: {
-            contentText: '  ' + debugLine,
-            color: '#b4ffb0',
-            fontStyle: 'normal',
-            fontWeight: 'normal'
-          }
-        } : undefined
-      };
+      const decoration = createPausedLineDecoration(range, debugLine);
       clearHighlightedSourceLine();
       editor.setDecorations(pausedLineDecoration!, [decoration]);
       editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
