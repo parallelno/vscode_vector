@@ -200,6 +200,9 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     postToolbarState(isRunning);
     if (isRunning) {
       clearHighlightedSourceLine();
+      // Clear saved highlight state when resuming
+      lastHighlightAddress = undefined;
+      lastHighlightDebugLine = undefined;
       clearDataLineHighlights();
       lastDataAccessSnapshot = null;
       try {
@@ -389,6 +392,9 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     currentPanelController = null;
     lastBreakpointSource = null;
     clearHighlightedSourceLine();
+    // Clear saved highlight state on panel disposal
+    lastHighlightAddress = undefined;
+    lastHighlightDebugLine = undefined;
     lastAddressSourceMap = null;
     clearDataLineHighlights();
     lastDataAccessSnapshot = null;
@@ -936,8 +942,9 @@ function clearHighlightedSourceLine() {
     } catch (e) { /* ignore decoration clearing errors */ }
   }
   lastHighlightedEditor = null;
-  lastHighlightAddress = undefined;
-  lastHighlightDebugLine = undefined;
+  // NOTE: We intentionally do NOT clear lastHighlightAddress and lastHighlightDebugLine here
+  // because they are used to restore the highlight when editors change visibility.
+  // They are cleared explicitly when the emulator resumes or when the panel is disposed.
 }
 
 function reapplyPausedLineHighlight() {
