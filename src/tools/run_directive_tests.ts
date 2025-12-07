@@ -519,6 +519,20 @@ const tests: DirectiveTestCase[] = [
             success: false,
             errorsContains: ['Missing initial value for .var']
         }
+    },
+    {
+        name: '.var comprehensive test with multiple operations',
+        sourceFile: 'var_comprehensive.asm',
+        expect: {
+            bytes: [0x0A, 0x05, 0x08, 0x10, 0x21, 0x64, 0xC8, 0x96, 0xC8],  // 10, 5, 8, 16, 33, 100, 200, 150, 200
+            consts: {
+                Counter: 16,
+                Offset: 0x20,
+                Var1: 150,
+                Var2: 200
+            },
+            noWarnings: true
+        }
     }
 ];
 
