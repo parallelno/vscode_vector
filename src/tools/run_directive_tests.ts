@@ -438,6 +438,30 @@ const tests: DirectiveTestCase[] = [
                 'does not fit in 8-bit operand for CPI'
             ]
         }
+    },
+    {
+        name: '.error directive emits user-defined message and stops assembly',
+        sourceFile: 'error_basic.asm',
+        expect: {
+            success: false,
+            errorsContains: ['This is a test error']
+        }
+    },
+    {
+        name: '.error inside false .if block is not triggered',
+        sourceFile: 'error_conditional.asm',
+        expect: {
+            success: false,
+            errorsContains: ['Value', '150', 'exceeds maximum']
+        }
+    },
+    {
+        name: '.error supports labels and expressions as parameters',
+        sourceFile: 'error_expressions.asm',
+        expect: {
+            success: false,
+            errorsContains: ['Address high byte is', '18', 'at label', '256']
+        }
     }
 ];
 

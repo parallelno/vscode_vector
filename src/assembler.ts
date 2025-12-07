@@ -232,6 +232,11 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       errors.push(`Labels are not allowed on .print directives at ${originDesc}`);
       continue;
     }
+    const labelErrorMatch = line.match(/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s*\.error\b/i);
+    if (labelErrorMatch && line[0] !== '.') {
+      errors.push(`Labels are not allowed on .error directives at ${originDesc}`);
+      continue;
+    }
 
     const endifMatch = line.match(/^\.endif\b(.*)$/i);
     if (endifMatch) {
@@ -277,6 +282,9 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (!blockActive) continue;
 
     if (/^\.print\b/i.test(line)) {
+      continue;
+    }
+    if (/^\.error\b/i.test(line)) {
       continue;
     }
 
@@ -764,6 +772,11 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       errors.push(`Labels are not allowed on .print directives at ${originDesc}`);
       continue;
     }
+    const labelErrorMatch = line.match(/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s*\.error\b/i);
+    if (labelErrorMatch && line[0] !== '.') {
+      errors.push(`Labels are not allowed on .error directives at ${originDesc}`);
+      continue;
+    }
 
     const endifMatch = line.match(/^\.endif\b(.*)$/i);
     if (endifMatch) {
@@ -849,6 +862,44 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         }
       }
       continue;
+    }
+
+    const errorMatch = line.match(/^\.error\b(.*)$/i);
+    if (errorMatch) {
+      map[srcLine] = addr;
+      const argsText = (errorMatch[1] || '').trim();
+      const parts = argsText.length ? splitTopLevelArgs(argsText) : [];
+      const fragments: string[] = [];
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+      let failed = false;
+      for (const partRaw of parts) {
+        const part = partRaw.trim();
+        if (!part.length) continue;
+        try {
+          const literal = parseStringLiteral(part);
+          if (literal !== null) {
+            fragments.push(literal);
+            continue;
+          }
+        } catch (err: any) {
+          errors.push(`Invalid string literal in .error at ${originDesc}: ${err?.message || err}`);
+          failed = true;
+          break;
+        }
+        try {
+          const value = evaluateConditionExpression(part, ctx, true);
+          fragments.push(String(value));
+        } catch (err: any) {
+          errors.push(`Failed to evaluate .error expression '${part}' at ${originDesc}: ${err?.message || err}`);
+          failed = true;
+          break;
+        }
+      }
+      if (!failed) {
+        const errorMessage = fragments.length ? fragments.join(' ') : '';
+        errors.push(`.error: ${errorMessage} at ${originDesc}`);
+      }
+      return { success: false, errors, origins };
     }
 
     if (/^[A-Za-z_][A-Za-z0-9_]*:$/.test(line)) continue; // label only
