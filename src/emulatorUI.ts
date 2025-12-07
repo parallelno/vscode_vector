@@ -1028,14 +1028,17 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
   
   // Handle unmapped address case: show yellow highlight with explanation
   if (!info) {
-    // Clear previous highlight and show unmapped address indicator
+    // Save reference to the currently highlighted editor before clearing
+    const editorToUse = lastHighlightedEditor;
+    
+    // Clear previous highlight decorations
     clearHighlightedSourceLine();
     
-    // If we have a currently highlighted editor, show the unmapped indicator there
-    if (lastHighlightedEditor && unmappedAddressDecoration) {
+    // If we have an editor with a previous highlight, show the unmapped indicator there
+    if (editorToUse && unmappedAddressDecoration) {
       try {
-        const doc = lastHighlightedEditor.document;
-        const currentLine = lastHighlightedEditor.selection.active.line;
+        const doc = editorToUse.document;
+        const currentLine = editorToUse.selection.active.line;
         const idx = Math.min(Math.max(currentLine, 0), doc.lineCount - 1);
         const lineText = doc.lineAt(idx).text;
         const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
@@ -1051,7 +1054,8 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
             }
           }
         };
-        lastHighlightedEditor.setDecorations(unmappedAddressDecoration, [decoration]);
+        editorToUse.setDecorations(unmappedAddressDecoration, [decoration]);
+        lastHighlightedEditor = editorToUse;  // Restore the reference
       } catch (err) {
         /* ignore unmapped decoration errors */
       }
