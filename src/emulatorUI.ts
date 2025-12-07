@@ -1043,7 +1043,7 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
         const doc = editorToUse.document;
         const idx = Math.min(Math.max(lineToUse, 0), doc.lineCount - 1);
         const lineText = doc.lineAt(idx).text;
-        const range = new vscode.Range(idx, 0, idx, lineText.length);
+        const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
         const addrHex = '0x' + normalizedAddr.toString(16).toUpperCase().padStart(4, '0');
         const decoration: vscode.DecorationOptions = {
           range,
@@ -1090,7 +1090,7 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
       if (totalLines === 0) return;
       const idx = Math.min(Math.max(preferredLine - 1, 0), totalLines - 1);
       const lineText = doc.lineAt(idx).text;
-      const range = new vscode.Range(idx, 0, idx, lineText.length);
+      const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
       const decoration: vscode.DecorationOptions = {
         range,
         renderOptions: debugLine ? {
