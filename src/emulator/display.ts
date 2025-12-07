@@ -72,21 +72,22 @@ export class Update	{
 
 export enum BufferType { FRAME_BUFFER = 0, BACK_BUFFER = 1, GPU_BUFFER = 2 }
 
-export class State {
+export class DisplayState {
   update: Update = new Update();
 	frameBuffer?: Uint32Array;
+  // TODO: should be used by Recorder
   BuffUpdate?: ((buffer: BufferType) => void);
 }
 
 export class Display {
-  state: State = new State();
+  state: DisplayState = new DisplayState();
   memory?: Memory;
   io?: IO;
 
   // framebuffers use 32-bit RGBA values (little-endian: bytes in memory are R,G,B,A)
   // rasterizer draws here
   frameBuffer: Uint32Array = new Uint32Array(FRAME_LEN);
-  // to simulate VSYNC
+  // for VSYNC. it's a copy of a frame buffer when a frame is done
   backBuffer: Uint32Array = new Uint32Array(FRAME_LEN);
   // temp buffer for loading on GPU
   gpuBuffer: Uint32Array = new Uint32Array(FRAME_LEN);
@@ -255,9 +256,8 @@ export class Display {
       if (isNewFrame)
       {
         this.state.update.frameNum++;
-        // TODO: fix rasterizarion sync
-        // std::unique_lock<std::mutex> mlock(this.backBufferMutex);
-        this.backBuffer.set(this.frameBuffer); // copy a frame to a back buffer
+        // copy a frame to a back buffer for sync rasterization
+        this.backBuffer.set(this.frameBuffer);
       }
     }
   }
@@ -399,10 +399,7 @@ export class Display {
 
   GetFrame(vsync: boolean = true): Uint32Array
   {
-    // TODO: fix rasterizarion sync
-    //std::unique_lock<std::mutex> mlock(m_backBufferMutex);
     this.gpuBuffer.set(vsync ? this.backBuffer : this.frameBuffer);
-
     return this.gpuBuffer;
   }
 

@@ -14,6 +14,7 @@ import { disposeHardwareStatsTracking, resetHardwareStatsTracking, tryCollectHar
 import { parseAddressLike } from './emulatorUI/utils';
 import { KbOperation } from './emulator/keyboard';
 
+// set to true to enable instruction logging to file
 const log_tick_to_file = false;
 
 type SourceLineRef = { file: string; line: number };
@@ -115,7 +116,12 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
       const logName = parsed.name + '.debug.log';
       const logPath = path.join(parsed.dir, logName);
       debugStream = fs.createWriteStream(logPath, { flags: 'w' });
-      try { emuOutput.appendLine(`Instruction debug log: ${logPath}`); } catch (e) {}
+      debugStream.on('error', (err) => {
+        try { emuOutput.appendLine(`Debug log error: ${err}`); } catch (e) {}
+      });
+      debugStream.on('open', () => {
+        try { emuOutput.appendLine(`Debug log file created: ${logPath}`); } catch (e) {}
+      });
     }
   } catch (e) { debugStream = null; }
 
@@ -129,17 +135,24 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   // dispose the Output channel when the panel is closed
   panel.onDidDispose(
     () => {
+      if (emu.hardware) {
+        try { (emu.hardware as any).debugInstructionCallback = null; } catch (e) {}
+        try { emu.hardware.Request(HardwareReq.STOP); } catch (e) {}
+      }
+
+      try {
+        if (debugStream) {
+          debugStream.end();
+          debugStream = null;
+        } }
+      catch (ee) {}
+
       try {
         if (ownsOutputChannel) {
           emuOutput.dispose();
         }
       }
       catch (e) {}
-      try {
-        if (debugStream) {
-          debugStream.end();
-        } }
-      catch (ee) {}
 
       currentPanelController = null;
       lastBreakpointSource = null;
@@ -170,7 +183,11 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
         try {
           const line = getDebugLine(hw)
           if (debugStream && line) {
-            debugStream.write(line + '\n');
+            debugStream.write(line + '\n', (err) => {
+              if (err) {
+                 try { emuOutput.appendLine(`Log write error: ${err}`); } catch (e) {}
+              }
+            });
           }
         } catch (e) { }
       };
@@ -376,9 +393,8 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
 
       // throttle to approx real-time
       const elapsed = performance.now() - startTime;
-      if (elapsed < 1000/60) {
-        await new Promise(resolve => setTimeout(resolve, 1000/60 - elapsed));
-      }
+      const delay = Math.max(0, 1000/60 - elapsed);
+      await new Promise(resolve => setTimeout(resolve, delay));
 
     } while (running);
 

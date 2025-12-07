@@ -35,7 +35,6 @@ const MACHINE_CC: number = 4;
 // machine_cycle index indicating the instruction executon is over
 const FIRST_MACHINE_CICLE_IDX: number = 0;
 const PSW_INIT: number = 0b00000010;
-const PSW_NUL_FLAGS: number = ~0b00101000;
 
 export class RegPair {
   h: number = 0;
@@ -84,20 +83,20 @@ export class AF {
 
   get f(): number {
     let f = 0;
-    if (this.s) f |= 0b10000000;
-    if (this.z) f |= 0b01000000;
-    if (this.ac) f |= 0b00100000;;
-    if (this.p) f |= 0b00000100;
-    if (this.c) f |= 0b00000001;
+    if (this.s) f |=  0b10000000;
+    if (this.z) f |=  0b01000000;
+    if (this.ac) f |= 0b00010000;
+    if (this.p) f |=  0b00000100;
+    if (this.c) f |=  0b00000001;
     return f | PSW_INIT;
   }
 
   set f(value: number) {
-    this.s = (value & 0b10000000) !== 0;
-    this.z = (value & 0b01000000) !== 0;
-    this.ac = (value & 0b00100000) !== 0;
-    this.p = (value & 0b00000100) !== 0;
-    this.c = (value & 0b00000001) !== 0;
+    this.s = (value &  0b10000000) !== 0;
+    this.z = (value &  0b01000000) !== 0;
+    this.ac = (value & 0b00010000) !== 0;
+    this.p = (value &  0b00000100) !== 0;
+    this.c = (value &  0b00000001) !== 0;
   }
 
   get word(): number {
@@ -391,99 +390,109 @@ export default class CPU
 
   Decode()
   {
+    let BC = this._state.regs.bc;
+    let DE = this._state.regs.de;
+    let HL = this._state.regs.hl;
+    let SP = this._state.regs.sp;
+    let AF = this._state.regs.af;
+
+    const FZ = AF.z;
+    const FS = AF.s;
+    const FP = AF.p;
+
 	  switch (this._state.regs.ir.v)
 	  {
-    	case 0x7F: this._state.regs.af.a = this.MOVRegReg(this._state.regs.af.a, this._state.regs.af.a); break; // MOV A,A
-      case 0x78: this._state.regs.af.a = this.MOVRegReg(this._state.regs.af.a, this._state.regs.bc.h); break; // MOV A,B
-      case 0x79: this._state.regs.af.a = this.MOVRegReg(this._state.regs.af.a, this._state.regs.bc.l); break; // MOV A,C
-      case 0x7A: this._state.regs.af.a = this.MOVRegReg(this._state.regs.af.a, this._state.regs.de.h); break; // MOV A,D
-      case 0x7B: this._state.regs.af.a = this.MOVRegReg(this._state.regs.af.a, this._state.regs.de.l); break; // MOV A,E
-      case 0x7C: this._state.regs.af.a = this.MOVRegReg(this._state.regs.af.a, this._state.regs.hl.h); break; // MOV A,H
-      case 0x7D: this._state.regs.af.a = this.MOVRegReg(this._state.regs.af.a, this._state.regs.hl.l); break; // MOV A,L
+    	case 0x7F: AF.a = this.MOVRegReg(AF.a, AF.a); break; // MOV AF.a,AF.a
+      case 0x78: AF.a = this.MOVRegReg(AF.a, BC.h); break; // MOV AF.a,BC.h
+      case 0x79: AF.a = this.MOVRegReg(AF.a, BC.l); break; // MOV AF.a,BC.l
+      case 0x7A: AF.a = this.MOVRegReg(AF.a, DE.h); break; // MOV AF.a,DE.h
+      case 0x7B: AF.a = this.MOVRegReg(AF.a, DE.l); break; // MOV AF.a,DE.l
+      case 0x7C: AF.a = this.MOVRegReg(AF.a, HL.h); break; // MOV AF.a,HL.h
+      case 0x7D: AF.a = this.MOVRegReg(AF.a, HL.l); break; // MOV AF.a,HL.l
 
-      case 0x47: this._state.regs.bc.h = this.MOVRegReg(this._state.regs.bc.h, this._state.regs.af.a); break; // MOV B,A
-      case 0x40: this._state.regs.bc.h = this.MOVRegReg(this._state.regs.bc.h, this._state.regs.bc.h); break; // MOV B,B
-      case 0x41: this._state.regs.bc.h = this.MOVRegReg(this._state.regs.bc.h, this._state.regs.bc.l); break; // MOV B,C
-      case 0x42: this._state.regs.bc.h = this.MOVRegReg(this._state.regs.bc.h, this._state.regs.de.h); break; // MOV B,D
-      case 0x43: this._state.regs.bc.h = this.MOVRegReg(this._state.regs.bc.h, this._state.regs.de.l); break; // MOV B,E
-      case 0x44: this._state.regs.bc.h = this.MOVRegReg(this._state.regs.bc.h, this._state.regs.hl.h); break; // MOV B,H
-      case 0x45: this._state.regs.bc.h = this.MOVRegReg(this._state.regs.bc.h, this._state.regs.hl.l); break; // MOV B,L
-      case 0x4F: this._state.regs.bc.l = this.MOVRegReg(this._state.regs.bc.l, this._state.regs.af.a); break; // MOV C,A
-      case 0x48: this._state.regs.bc.l = this.MOVRegReg(this._state.regs.bc.l, this._state.regs.bc.h); break; // MOV C,B
-      case 0x49: this._state.regs.bc.l = this.MOVRegReg(this._state.regs.bc.l, this._state.regs.bc.l); break; // MOV C,C
-      case 0x4A: this._state.regs.bc.l = this.MOVRegReg(this._state.regs.bc.l, this._state.regs.de.h); break; // MOV C,D
-      case 0x4B: this._state.regs.bc.l = this.MOVRegReg(this._state.regs.bc.l, this._state.regs.de.l); break; // MOV C,E
-      case 0x4C: this._state.regs.bc.l = this.MOVRegReg(this._state.regs.bc.l, this._state.regs.hl.h); break; // MOV C,H
-      case 0x4D: this._state.regs.bc.l = this.MOVRegReg(this._state.regs.bc.l, this._state.regs.hl.l); break; // MOV C,L
+      case 0x47: BC.h = this.MOVRegReg(BC.h, AF.a); break; // MOV BC.h,AF.a
+      case 0x40: BC.h = this.MOVRegReg(BC.h, BC.h); break; // MOV BC.h,BC.h
+      case 0x41: BC.h = this.MOVRegReg(BC.h, BC.l); break; // MOV BC.h,BC.l
+      case 0x42: BC.h = this.MOVRegReg(BC.h, DE.h); break; // MOV BC.h,DE.h
+      case 0x43: BC.h = this.MOVRegReg(BC.h, DE.l); break; // MOV BC.h,DE.l
+      case 0x44: BC.h = this.MOVRegReg(BC.h, HL.h); break; // MOV BC.h,HL.h
+      case 0x45: BC.h = this.MOVRegReg(BC.h, HL.l); break; // MOV BC.h,HL.l
+      case 0x4F: BC.l = this.MOVRegReg(BC.l, AF.a); break; // MOV BC.l,AF.a
+      case 0x48: BC.l = this.MOVRegReg(BC.l, BC.h); break; // MOV BC.l,BC.h
+      case 0x49: BC.l = this.MOVRegReg(BC.l, BC.l); break; // MOV BC.l,BC.l
+      case 0x4A: BC.l = this.MOVRegReg(BC.l, DE.h); break; // MOV BC.l,DE.h
+      case 0x4B: BC.l = this.MOVRegReg(BC.l, DE.l); break; // MOV BC.l,DE.l
+      case 0x4C: BC.l = this.MOVRegReg(BC.l, HL.h); break; // MOV BC.l,HL.h
+      case 0x4D: BC.l = this.MOVRegReg(BC.l, HL.l); break; // MOV BC.l,HL.l
 
-      case 0x57: this._state.regs.de.h = this.MOVRegReg(this._state.regs.de.h, this._state.regs.af.a); break; // MOV D,A
-      case 0x50: this._state.regs.de.h = this.MOVRegReg(this._state.regs.de.h, this._state.regs.bc.h); break; // MOV D,B
-      case 0x51: this._state.regs.de.h = this.MOVRegReg(this._state.regs.de.h, this._state.regs.bc.l); break; // MOV D,C
-      case 0x52: this._state.regs.de.h = this.MOVRegReg(this._state.regs.de.h, this._state.regs.de.h); break; // MOV D,D
-      case 0x53: this._state.regs.de.h = this.MOVRegReg(this._state.regs.de.h, this._state.regs.de.l); break; // MOV D,E
-      case 0x54: this._state.regs.de.h = this.MOVRegReg(this._state.regs.de.h, this._state.regs.hl.h); break; // MOV D,H
-      case 0x55: this._state.regs.de.h = this.MOVRegReg(this._state.regs.de.h, this._state.regs.hl.l); break; // MOV D,L
+      case 0x57: DE.h = this.MOVRegReg(DE.h, AF.a); break; // MOV DE.h,AF.a
+      case 0x50: DE.h = this.MOVRegReg(DE.h, BC.h); break; // MOV DE.h,BC.h
+      case 0x51: DE.h = this.MOVRegReg(DE.h, BC.l); break; // MOV DE.h,BC.l
+      case 0x52: DE.h = this.MOVRegReg(DE.h, DE.h); break; // MOV DE.h,DE.h
+      case 0x53: DE.h = this.MOVRegReg(DE.h, DE.l); break; // MOV DE.h,DE.l
+      case 0x54: DE.h = this.MOVRegReg(DE.h, HL.h); break; // MOV DE.h,HL.h
+      case 0x55: DE.h = this.MOVRegReg(DE.h, HL.l); break; // MOV DE.h,HL.l
 
-      case 0x5F: this._state.regs.de.l = this.MOVRegReg(this._state.regs.de.l, this._state.regs.af.a); break; // MOV E,A
-      case 0x58: this._state.regs.de.l = this.MOVRegReg(this._state.regs.de.l, this._state.regs.bc.h); break; // MOV E,B
-      case 0x59: this._state.regs.de.l = this.MOVRegReg(this._state.regs.de.l, this._state.regs.bc.l); break; // MOV E,C
-      case 0x5A: this._state.regs.de.l = this.MOVRegReg(this._state.regs.de.l, this._state.regs.de.h); break; // MOV E,D
-      case 0x5B: this._state.regs.de.l = this.MOVRegReg(this._state.regs.de.l, this._state.regs.de.l); break; // MOV E,E
-      case 0x5C: this._state.regs.de.l = this.MOVRegReg(this._state.regs.de.l, this._state.regs.hl.h); break; // MOV E,H
-      case 0x5D: this._state.regs.de.l = this.MOVRegReg(this._state.regs.de.l, this._state.regs.hl.l); break; // MOV E,L
+      case 0x5F: DE.l = this.MOVRegReg(DE.l, AF.a); break; // MOV DE.l,AF.a
+      case 0x58: DE.l = this.MOVRegReg(DE.l, BC.h); break; // MOV DE.l,BC.h
+      case 0x59: DE.l = this.MOVRegReg(DE.l, BC.l); break; // MOV DE.l,BC.l
+      case 0x5A: DE.l = this.MOVRegReg(DE.l, DE.h); break; // MOV DE.l,DE.h
+      case 0x5B: DE.l = this.MOVRegReg(DE.l, DE.l); break; // MOV DE.l,DE.l
+      case 0x5C: DE.l = this.MOVRegReg(DE.l, HL.h); break; // MOV DE.l,HL.h
+      case 0x5D: DE.l = this.MOVRegReg(DE.l, HL.l); break; // MOV DE.l,HL.l
 
-      case 0x67: this._state.regs.hl.h = this.MOVRegReg(this._state.regs.hl.h, this._state.regs.af.a); break; // MOV H,A
-      case 0x60: this._state.regs.hl.h = this.MOVRegReg(this._state.regs.hl.h, this._state.regs.bc.h); break; // MOV H,B
-      case 0x61: this._state.regs.hl.h = this.MOVRegReg(this._state.regs.hl.h, this._state.regs.bc.l); break; // MOV H,C
-      case 0x62: this._state.regs.hl.h = this.MOVRegReg(this._state.regs.hl.h, this._state.regs.de.h); break; // MOV H,D
-      case 0x63: this._state.regs.hl.h = this.MOVRegReg(this._state.regs.hl.h, this._state.regs.de.l); break; // MOV H,E
-      case 0x64: this._state.regs.hl.h = this.MOVRegReg(this._state.regs.hl.h, this._state.regs.hl.h); break; // MOV H,H
-      case 0x65: this._state.regs.hl.h = this.MOVRegReg(this._state.regs.hl.h, this._state.regs.hl.l); break; // MOV H,L
-      case 0x6F: this._state.regs.hl.l = this.MOVRegReg(this._state.regs.hl.l, this._state.regs.af.a); break; // MOV L,A
-      case 0x68: this._state.regs.hl.l = this.MOVRegReg(this._state.regs.hl.l, this._state.regs.bc.h); break; // MOV L,B
-      case 0x69: this._state.regs.hl.l = this.MOVRegReg(this._state.regs.hl.l, this._state.regs.bc.l); break; // MOV L,C
-      case 0x6A: this._state.regs.hl.l = this.MOVRegReg(this._state.regs.hl.l, this._state.regs.de.h); break; // MOV L,D
-      case 0x6B: this._state.regs.hl.l = this.MOVRegReg(this._state.regs.hl.l, this._state.regs.de.l); break; // MOV L,E
-      case 0x6C: this._state.regs.hl.l = this.MOVRegReg(this._state.regs.hl.l, this._state.regs.hl.h); break; // MOV L,H
-      case 0x6D: this._state.regs.hl.l = this.MOVRegReg(this._state.regs.hl.l, this._state.regs.hl.l); break; // MOV L,L
+      case 0x67: HL.h = this.MOVRegReg(HL.h, AF.a); break; // MOV HL.h,AF.a
+      case 0x60: HL.h = this.MOVRegReg(HL.h, BC.h); break; // MOV HL.h,BC.h
+      case 0x61: HL.h = this.MOVRegReg(HL.h, BC.l); break; // MOV HL.h,BC.l
+      case 0x62: HL.h = this.MOVRegReg(HL.h, DE.h); break; // MOV HL.h,DE.h
+      case 0x63: HL.h = this.MOVRegReg(HL.h, DE.l); break; // MOV HL.h,DE.l
+      case 0x64: HL.h = this.MOVRegReg(HL.h, HL.h); break; // MOV HL.h,HL.h
+      case 0x65: HL.h = this.MOVRegReg(HL.h, HL.l); break; // MOV HL.h,HL.l
+      case 0x6F: HL.l = this.MOVRegReg(HL.l, AF.a); break; // MOV HL.l,AF.a
+      case 0x68: HL.l = this.MOVRegReg(HL.l, BC.h); break; // MOV HL.l,BC.h
+      case 0x69: HL.l = this.MOVRegReg(HL.l, BC.l); break; // MOV HL.l,BC.l
+      case 0x6A: HL.l = this.MOVRegReg(HL.l, DE.h); break; // MOV HL.l,DE.h
+      case 0x6B: HL.l = this.MOVRegReg(HL.l, DE.l); break; // MOV HL.l,DE.l
+      case 0x6C: HL.l = this.MOVRegReg(HL.l, HL.h); break; // MOV HL.l,HL.h
+      case 0x6D: HL.l = this.MOVRegReg(HL.l, HL.l); break; // MOV HL.l,HL.l
 
-      case 0x7E: this._state.regs.af.a = this.LoadRegPtr(this._state.regs.af.a, this._state.regs.hl.word); break; // MOV A,M
-      case 0x46: this._state.regs.bc.h = this.LoadRegPtr(this._state.regs.bc.h, this._state.regs.hl.word); break; // MOV B,M
-      case 0x4E: this._state.regs.bc.l = this.LoadRegPtr(this._state.regs.bc.l, this._state.regs.hl.word); break; // MOV C,M
-      case 0x56: this._state.regs.de.h = this.LoadRegPtr(this._state.regs.de.h, this._state.regs.hl.word); break; // MOV D,M
-      case 0x5E: this._state.regs.de.l = this.LoadRegPtr(this._state.regs.de.l, this._state.regs.hl.word); break; // MOV E,M
-      case 0x66: this._state.regs.hl.h = this.LoadRegPtr(this._state.regs.hl.h, this._state.regs.hl.word); break; // MOV H,M
-      case 0x6E: this._state.regs.hl.l = this.LoadRegPtr(this._state.regs.hl.l, this._state.regs.hl.word); break; // MOV L,M
+      case 0x7E: AF.a = this.LoadRegPtr(AF.a, HL.word); break; // MOV AF.a,M
+      case 0x46: BC.h = this.LoadRegPtr(BC.h, HL.word); break; // MOV BC.h,M
+      case 0x4E: BC.l = this.LoadRegPtr(BC.l, HL.word); break; // MOV BC.l,M
+      case 0x56: DE.h = this.LoadRegPtr(DE.h, HL.word); break; // MOV DE.h,M
+      case 0x5E: DE.l = this.LoadRegPtr(DE.l, HL.word); break; // MOV DE.l,M
+      case 0x66: HL.h = this.LoadRegPtr(HL.h, HL.word); break; // MOV HL.h,M
+      case 0x6E: HL.l = this.LoadRegPtr(HL.l, HL.word); break; // MOV HL.l,M
 
-      case 0x77: this.MOVMemReg(this._state.regs.af.a); break; // MOV M,A
-      case 0x70: this.MOVMemReg(this._state.regs.bc.h); break; // MOV M,B
-      case 0x71: this.MOVMemReg(this._state.regs.bc.l); break; // MOV M,C
-      case 0x72: this.MOVMemReg(this._state.regs.de.h); break; // MOV M,D
-      case 0x73: this.MOVMemReg(this._state.regs.de.l); break; // MOV M,E
-      case 0x74: this.MOVMemReg(this._state.regs.hl.h); break; // MOV M,H
-      case 0x75: this.MOVMemReg(this._state.regs.hl.l); break; // MOV M,L
+      case 0x77: this.MOVMemReg(AF.a); break; // MOV M,AF.a
+      case 0x70: this.MOVMemReg(BC.h); break; // MOV M,BC.h
+      case 0x71: this.MOVMemReg(BC.l); break; // MOV M,BC.l
+      case 0x72: this.MOVMemReg(DE.h); break; // MOV M,DE.h
+      case 0x73: this.MOVMemReg(DE.l); break; // MOV M,DE.l
+      case 0x74: this.MOVMemReg(HL.h); break; // MOV M,HL.h
+      case 0x75: this.MOVMemReg(HL.l); break; // MOV M,HL.l
 
-      case 0x3E: this._state.regs.af.a = this.MVIRegData(this._state.regs.af.a); break; // MVI A,uint8_t
-      case 0x06: this._state.regs.bc.h = this.MVIRegData(this._state.regs.bc.h); break; // MVI B,uint8_t
-      case 0x0E: this._state.regs.bc.l = this.MVIRegData(this._state.regs.bc.l); break; // MVI C,uint8_t
-      case 0x16: this._state.regs.de.h = this.MVIRegData(this._state.regs.de.h); break; // MVI D,uint8_t
-      case 0x1E: this._state.regs.de.l = this.MVIRegData(this._state.regs.de.l); break; // MVI E,uint8_t
-      case 0x26: this._state.regs.hl.h = this.MVIRegData(this._state.regs.hl.h); break; // MVI H,uint8_t
-      case 0x2E: this._state.regs.hl.l = this.MVIRegData(this._state.regs.hl.l); break; // MVI L,uint8_t
+      case 0x3E: AF.a = this.MVIRegData(AF.a); break; // MVI AF.a,uint8_t
+      case 0x06: BC.h = this.MVIRegData(BC.h); break; // MVI BC.h,uint8_t
+      case 0x0E: BC.l = this.MVIRegData(BC.l); break; // MVI BC.l,uint8_t
+      case 0x16: DE.h = this.MVIRegData(DE.h); break; // MVI DE.h,uint8_t
+      case 0x1E: DE.l = this.MVIRegData(DE.l); break; // MVI DE.l,uint8_t
+      case 0x26: HL.h = this.MVIRegData(HL.h); break; // MVI HL.h,uint8_t
+      case 0x2E: HL.l = this.MVIRegData(HL.l); break; // MVI HL.l,uint8_t
       case 0x36: this.MVIMemData(); break; // MVI M,uint8_t
 
-      case 0x0A: this._state.regs.af.a = this.LoadRegPtr(this._state.regs.af.a, this._state.regs.bc.word); break; // LDAX B
-      case 0x1A: this._state.regs.af.a = this.LoadRegPtr(this._state.regs.af.a, this._state.regs.de.word); break; // LDAX D
+      case 0x0A: AF.a = this.LoadRegPtr(AF.a, BC.word); break; // LDAX BC.h
+      case 0x1A: AF.a = this.LoadRegPtr(AF.a, DE.word); break; // LDAX DE.h
       case 0x3A: this.LDA(); break; // LDA word
 
-      case 0x02: this.STAX(this._state.regs.bc.word); break; // STAX B
-      case 0x12: this.STAX(this._state.regs.de.word); break; // STAX D
+      case 0x02: this.STAX(BC.word); break; // STAX BC.h
+      case 0x12: this.STAX(DE.word); break; // STAX DE.h
       case 0x32: this.STA(); break; // STA word
 
-      case 0x01: this.LXI(this._state.regs.bc); break; // LXI B,word
-      case 0x11: this.LXI(this._state.regs.de); break; // LXI D,word
-      case 0x21: this.LXI(this._state.regs.hl); break; // LXI H,word
-      case 0x31: this.LXI(this._state.regs.sp); break; // LXI SP,word
+      case 0x01: this.LXI(BC); break; // LXI BC.h,word
+      case 0x11: this.LXI(DE); break; // LXI DE.h,word
+      case 0x21: this.LXI(HL); break; // LXI HL.h,word
+      case 0x31: this.LXI(SP); break; // LXI SP,word
       case 0x2A: this.LHLD(); break; // LHLD
       case 0x22: this.SHLD(); break; // SHLD
       case 0xF9: this.SPHL(); break; // SPHL
@@ -491,90 +500,90 @@ export default class CPU
       case 0xEB: this.XCHG(); break; // XCHG
       case 0xE3: this.XTHL(); break; // XTHL
 
-      case 0xC5: this.PUSH(this._state.regs.bc.h, this._state.regs.bc.l); break; // PUSH B
-      case 0xD5: this.PUSH(this._state.regs.de.h, this._state.regs.de.l); break; // PUSH D
-      case 0xE5: this.PUSH(this._state.regs.hl.h, this._state.regs.hl.l); break; // PUSH H
-      case 0xF5: this.PUSH(this._state.regs.af.a, this._state.regs.af.f); break; // PUSH PSW
-      case 0xC1: this._state.regs.bc.word = this.POP(this._state.regs.bc.word); break; // POP B
-      case 0xD1: this._state.regs.de.word = this.POP(this._state.regs.de.word); break; // POP D
-      case 0xE1: this._state.regs.hl.word = this.POP(this._state.regs.hl.word); break; // POP H
-      case 0xF1: this._state.regs.af.word = this.POP(this._state.regs.af.word); break; // POP PSW
+      case 0xC5: this.PUSH(BC.h, BC.l); break; // PUSH BC.h
+      case 0xD5: this.PUSH(DE.h, DE.l); break; // PUSH DE.h
+      case 0xE5: this.PUSH(HL.h, HL.l); break; // PUSH HL.h
+      case 0xF5: this.PUSH(AF.a, AF.f); break; // PUSH PSW
+      case 0xC1: BC.word = this.POP(BC.word); break; // POP BC.h
+      case 0xD1: DE.word = this.POP(DE.word); break; // POP DE.h
+      case 0xE1: HL.word = this.POP(HL.word); break; // POP HL.h
+      case 0xF1: AF.word = this.POP(AF.word); break; // POP PSW
 
-      case 0x87: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.af.a, false); break; // ADD A
-      case 0x80: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.bc.h, false); break; // ADD B
-      case 0x81: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.bc.l, false); break; // ADD C
-      case 0x82: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.de.h, false); break; // ADD D
-      case 0x83: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.de.l, false); break; // ADD E
-      case 0x84: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.hl.h, false); break; // ADD H
-      case 0x85: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.hl.l, false); break; // ADD L
+      case 0x87: AF.a = this.ADD(AF.a, AF.a, false); break; // ADD AF.a
+      case 0x80: AF.a = this.ADD(AF.a, BC.h, false); break; // ADD BC.h
+      case 0x81: AF.a = this.ADD(AF.a, BC.l, false); break; // ADD BC.l
+      case 0x82: AF.a = this.ADD(AF.a, DE.h, false); break; // ADD DE.h
+      case 0x83: AF.a = this.ADD(AF.a, DE.l, false); break; // ADD DE.l
+      case 0x84: AF.a = this.ADD(AF.a, HL.h, false); break; // ADD HL.h
+      case 0x85: AF.a = this.ADD(AF.a, HL.l, false); break; // ADD HL.l
       case 0x86: this.ADDMem(false); break; // ADD M
       case 0xC6: this.ADI(false); break; // ADI uint8_t
 
-      case 0x8F: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.af.a, true); break; // ADC A
-      case 0x88: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.bc.h, true); break; // ADC B
-      case 0x89: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.bc.l, true); break; // ADC C
-      case 0x8A: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.de.h, true); break; // ADC D
-      case 0x8B: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.de.l, true); break; // ADC E
-      case 0x8C: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.hl.h, true); break; // ADC H
-      case 0x8D: this._state.regs.af.a = this.ADD(this._state.regs.af.a, this._state.regs.hl.l, true); break; // ADC L
-      case 0x8E: this.ADDMem(true); break; // ADC M
-      case 0xCE: this.ADI(true); break; // ACI uint8_t
+      case 0x8F: AF.a = this.ADD(AF.a, AF.a, this._state.regs.af.c); break; // ADC AF.a
+      case 0x88: AF.a = this.ADD(AF.a, BC.h, this._state.regs.af.c); break; // ADC BC.h
+      case 0x89: AF.a = this.ADD(AF.a, BC.l, this._state.regs.af.c); break; // ADC BC.l
+      case 0x8A: AF.a = this.ADD(AF.a, DE.h, this._state.regs.af.c); break; // ADC DE.h
+      case 0x8B: AF.a = this.ADD(AF.a, DE.l, this._state.regs.af.c); break; // ADC DE.l
+      case 0x8C: AF.a = this.ADD(AF.a, HL.h, this._state.regs.af.c); break; // ADC HL.h
+      case 0x8D: AF.a = this.ADD(AF.a, HL.l, this._state.regs.af.c); break; // ADC HL.l
+      case 0x8E: this.ADDMem(this._state.regs.af.c); break; // ADC M
+      case 0xCE: this.ADI(this._state.regs.af.c); break; // ACI uint8_t
 
-      case 0x97: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.af.a, false); break; // SUB A
-      case 0x90: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.bc.h, false); break; // SUB B
-      case 0x91: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.bc.l, false); break; // SUB C
-      case 0x92: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.de.h, false); break; // SUB D
-      case 0x93: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.de.l, false); break; // SUB E
-      case 0x94: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.hl.h, false); break; // SUB H
-      case 0x95: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.hl.l, false); break; // SUB L
+      case 0x97: AF.a = this.SUB(AF.a, AF.a, false); break; // SUB AF.a
+      case 0x90: AF.a = this.SUB(AF.a, BC.h, false); break; // SUB BC.h
+      case 0x91: AF.a = this.SUB(AF.a, BC.l, false); break; // SUB BC.l
+      case 0x92: AF.a = this.SUB(AF.a, DE.h, false); break; // SUB DE.h
+      case 0x93: AF.a = this.SUB(AF.a, DE.l, false); break; // SUB DE.l
+      case 0x94: AF.a = this.SUB(AF.a, HL.h, false); break; // SUB HL.h
+      case 0x95: AF.a = this.SUB(AF.a, HL.l, false); break; // SUB HL.l
       case 0x96: this.SUBMem(false); break; // SUB M
       case 0xD6: this.SBI(false); break; // SUI uint8_t
 
-      case 0x9F: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.af.a, this._state.regs.af.c); break; // SBB A
-      case 0x98: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.bc.h, this._state.regs.af.c); break; // SBB B
-      case 0x99: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.bc.l, this._state.regs.af.c); break; // SBB C
-      case 0x9A: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.de.h, this._state.regs.af.c); break; // SBB D
-      case 0x9B: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.de.l, this._state.regs.af.c); break; // SBB E
-      case 0x9C: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.hl.h, this._state.regs.af.c); break; // SBB H
-      case 0x9D: this._state.regs.af.a = this.SUB(this._state.regs.af.a, this._state.regs.hl.l, this._state.regs.af.c); break; // SBB L
+      case 0x9F: AF.a = this.SUB(AF.a, AF.a, this._state.regs.af.c); break; // SBB AF.a
+      case 0x98: AF.a = this.SUB(AF.a, BC.h, this._state.regs.af.c); break; // SBB BC.h
+      case 0x99: AF.a = this.SUB(AF.a, BC.l, this._state.regs.af.c); break; // SBB BC.l
+      case 0x9A: AF.a = this.SUB(AF.a, DE.h, this._state.regs.af.c); break; // SBB DE.h
+      case 0x9B: AF.a = this.SUB(AF.a, DE.l, this._state.regs.af.c); break; // SBB DE.l
+      case 0x9C: AF.a = this.SUB(AF.a, HL.h, this._state.regs.af.c); break; // SBB HL.h
+      case 0x9D: AF.a = this.SUB(AF.a, HL.l, this._state.regs.af.c); break; // SBB HL.l
       case 0x9E: this.SUBMem(this._state.regs.af.c); break; // SBB M
       case 0xDE: this.SBI(this._state.regs.af.c); break; // SBI uint8_t
 
-      case 0x09: this.DAD(this._state.regs.bc); break; // DAD B
-      case 0x19: this.DAD(this._state.regs.de); break; // DAD D
-      case 0x29: this.DAD(this._state.regs.hl); break; // DAD H
-      case 0x39: this.DAD(this._state.regs.sp); break; // DAD SP
+      case 0x09: this.DAD(BC); break; // DAD BC.h
+      case 0x19: this.DAD(DE); break; // DAD DE.h
+      case 0x29: this.DAD(HL); break; // DAD HL.h
+      case 0x39: this.DAD(SP); break; // DAD SP
 
-      case 0x3C: this._state.regs.af.a = this.INR(this._state.regs.af.a); break; // INR A
-      case 0x04: this._state.regs.bc.h = this.INR(this._state.regs.bc.h); break; // INR B
-      case 0x0C: this._state.regs.bc.l = this.INR(this._state.regs.bc.l); break; // INR C
-      case 0x14: this._state.regs.de.h = this.INR(this._state.regs.de.h); break; // INR D
-      case 0x1C: this._state.regs.de.l = this.INR(this._state.regs.de.l); break; // INR E
-      case 0x24: this._state.regs.hl.h = this.INR(this._state.regs.hl.h); break; // INR H
-      case 0x2C: this._state.regs.hl.l = this.INR(this._state.regs.hl.l); break; // INR L
+      case 0x3C: AF.a = this.INR(AF.a); break; // INR AF.a
+      case 0x04: BC.h = this.INR(BC.h); break; // INR BC.h
+      case 0x0C: BC.l = this.INR(BC.l); break; // INR BC.l
+      case 0x14: DE.h = this.INR(DE.h); break; // INR DE.h
+      case 0x1C: DE.l = this.INR(DE.l); break; // INR DE.l
+      case 0x24: HL.h = this.INR(HL.h); break; // INR HL.h
+      case 0x2C: HL.l = this.INR(HL.l); break; // INR HL.l
       case 0x34: this.INRMem(); break; // INR M
 
-      case 0x3D: this._state.regs.af.a = this.DCR(this._state.regs.af.a); break; // DCR A
-      case 0x05: this._state.regs.bc.h = this.DCR(this._state.regs.bc.h); break; // DCR B
-      case 0x0D: this._state.regs.bc.l = this.DCR(this._state.regs.bc.l); break; // DCR C
-      case 0x15: this._state.regs.de.h = this.DCR(this._state.regs.de.h); break; // DCR D
-      case 0x1D: this._state.regs.de.l = this.DCR(this._state.regs.de.l); break; // DCR E
-      case 0x25: this._state.regs.hl.h = this.DCR(this._state.regs.hl.h); break; // DCR H
-      case 0x2D: this._state.regs.hl.l = this.DCR(this._state.regs.hl.l); break; // DCR L
+      case 0x3D: AF.a = this.DCR(AF.a); break; // DCR AF.a
+      case 0x05: BC.h = this.DCR(BC.h); break; // DCR BC.h
+      case 0x0D: BC.l = this.DCR(BC.l); break; // DCR BC.l
+      case 0x15: DE.h = this.DCR(DE.h); break; // DCR DE.h
+      case 0x1D: DE.l = this.DCR(DE.l); break; // DCR DE.l
+      case 0x25: HL.h = this.DCR(HL.h); break; // DCR HL.h
+      case 0x2D: HL.l = this.DCR(HL.l); break; // DCR HL.l
       case 0x35: this.DCRMem(); break; // DCR M
 
-      case 0x03: this.INX(this._state.regs.bc); break; // INX B
-      case 0x13: this.INX(this._state.regs.de); break; // INX D
-      case 0x23: this.INX(this._state.regs.hl); break; // INX H
-      case 0x33: this.INX(this._state.regs.sp); break; // INX SP
+      case 0x03: this.INX(BC); break; // INX BC.h
+      case 0x13: this.INX(DE); break; // INX DE.h
+      case 0x23: this.INX(HL); break; // INX HL.h
+      case 0x33: this.INX(SP); break; // INX SP
 
-      case 0x0B: this.DCX(this._state.regs.bc); break; // DCX B
-      case 0x1B: this.DCX(this._state.regs.de); break; // DCX D
-      case 0x2B: this.DCX(this._state.regs.hl); break; // DCX H
-      case 0x3B: this.DCX(this._state.regs.sp); break; // DCX SP
+      case 0x0B: this.DCX(BC); break; // DCX BC.h
+      case 0x1B: this.DCX(DE); break; // DCX DE.h
+      case 0x2B: this.DCX(HL); break; // DCX HL.h
+      case 0x3B: this.DCX(SP); break; // DCX SP
 
       case 0x27: this.DAA(); break; // DAA
-      case 0x2F: this._state.regs.af.a = (~this._state.regs.af.a) & 0xFF; break; // CMA
+      case 0x2F: AF.a = (~AF.a) & 0xFF; break; // CMA
       case 0x37: this._state.regs.af.c = true; break; // STC
       case 0x3F: this._state.regs.af.c = !this._state.regs.af.c; break; // CMC
 
@@ -583,56 +592,56 @@ export default class CPU
       case 0x17: this.RAL(); break; // RAL
       case 0x1F: this.RAR(); break; // RAR
 
-      case 0xA7: this.ANA(this._state.regs.af.a); break; // ANA A
-      case 0xA0: this.ANA(this._state.regs.bc.h); break; // ANA B
-      case 0xA1: this.ANA(this._state.regs.bc.l); break; // ANA C
-      case 0xA2: this.ANA(this._state.regs.de.h); break; // ANA D
-      case 0xA3: this.ANA(this._state.regs.de.l); break; // ANA E
-      case 0xA4: this.ANA(this._state.regs.hl.h); break; // ANA H
-      case 0xA5: this.ANA(this._state.regs.hl.l); break; // ANA L
+      case 0xA7: this.ANA(AF.a); break; // ANA AF.a
+      case 0xA0: this.ANA(BC.h); break; // ANA BC.h
+      case 0xA1: this.ANA(BC.l); break; // ANA BC.l
+      case 0xA2: this.ANA(DE.h); break; // ANA DE.h
+      case 0xA3: this.ANA(DE.l); break; // ANA DE.l
+      case 0xA4: this.ANA(HL.h); break; // ANA HL.h
+      case 0xA5: this.ANA(HL.l); break; // ANA HL.l
       case 0xA6: this.ANAMem(); break; // ANA M
       case 0xE6: this.ANI(); break; // ANI uint8_t
 
-      case 0xAF: this.XRA(this._state.regs.af.a); break; // XRA A
-      case 0xA8: this.XRA(this._state.regs.bc.h); break; // XRA B
-      case 0xA9: this.XRA(this._state.regs.bc.l); break; // XRA C
-      case 0xAA: this.XRA(this._state.regs.de.h); break; // XRA D
-      case 0xAB: this.XRA(this._state.regs.de.l); break; // XRA E
-      case 0xAC: this.XRA(this._state.regs.hl.h); break; // XRA H
-      case 0xAD: this.XRA(this._state.regs.hl.l); break; // XRA L
+      case 0xAF: this.XRA(AF.a); break; // XRA AF.a
+      case 0xA8: this.XRA(BC.h); break; // XRA BC.h
+      case 0xA9: this.XRA(BC.l); break; // XRA BC.l
+      case 0xAA: this.XRA(DE.h); break; // XRA DE.h
+      case 0xAB: this.XRA(DE.l); break; // XRA DE.l
+      case 0xAC: this.XRA(HL.h); break; // XRA HL.h
+      case 0xAD: this.XRA(HL.l); break; // XRA HL.l
       case 0xAE: this.XRAMem(); break; // XRA M
       case 0xEE: this.XRI(); break; // XRI uint8_t
 
-      case 0xB7: this.ORA(this._state.regs.af.a); break; // ORA A
-      case 0xB0: this.ORA(this._state.regs.bc.h); break; // ORA B
-      case 0xB1: this.ORA(this._state.regs.bc.l); break; // ORA C
-      case 0xB2: this.ORA(this._state.regs.de.h); break; // ORA D
-      case 0xB3: this.ORA(this._state.regs.de.l); break; // ORA E
-      case 0xB4: this.ORA(this._state.regs.hl.h); break; // ORA H
-      case 0xB5: this.ORA(this._state.regs.hl.l); break; // ORA L
+      case 0xB7: this.ORA(AF.a); break; // ORA AF.a
+      case 0xB0: this.ORA(BC.h); break; // ORA BC.h
+      case 0xB1: this.ORA(BC.l); break; // ORA BC.l
+      case 0xB2: this.ORA(DE.h); break; // ORA DE.h
+      case 0xB3: this.ORA(DE.l); break; // ORA DE.l
+      case 0xB4: this.ORA(HL.h); break; // ORA HL.h
+      case 0xB5: this.ORA(HL.l); break; // ORA HL.l
       case 0xB6: this.ORAMem(); break; // ORA M
       case 0xF6: this.ORI(); break; // ORI uint8_t
 
-      case 0xBF: this.CMP(this._state.regs.af.a); break; // CMP A
-      case 0xB8: this.CMP(this._state.regs.bc.h); break; // CMP B
-      case 0xB9: this.CMP(this._state.regs.bc.l); break; // CMP C
-      case 0xBA: this.CMP(this._state.regs.de.h); break; // CMP D
-      case 0xBB: this.CMP(this._state.regs.de.l); break; // CMP E
-      case 0xBC: this.CMP(this._state.regs.hl.h); break; // CMP H
-      case 0xBD: this.CMP(this._state.regs.hl.l); break; // CMP L
+      case 0xBF: this.CMP(AF.a); break; // CMP AF.a
+      case 0xB8: this.CMP(BC.h); break; // CMP BC.h
+      case 0xB9: this.CMP(BC.l); break; // CMP BC.l
+      case 0xBA: this.CMP(DE.h); break; // CMP DE.h
+      case 0xBB: this.CMP(DE.l); break; // CMP DE.l
+      case 0xBC: this.CMP(HL.h); break; // CMP HL.h
+      case 0xBD: this.CMP(HL.l); break; // CMP HL.l
       case 0xBE: this.CMPMem(); break; // CMP M
       case 0xFE: this.CPI(); break; // CPI uint8_t
 
       case 0xC3: this.JMP(); break; // JMP
       case 0xCB: this.JMP(); break; // undocumented JMP
-      case 0xC2: this.JMP(this._state.regs.af.z == false); break; // JNZ
-      case 0xCA: this.JMP(this._state.regs.af.z == true); break; // JZ
+      case 0xC2: this.JMP(FZ == false); break; // JNZ
+      case 0xCA: this.JMP(FZ == true); break; // JZ
       case 0xD2: this.JMP(this._state.regs.af.c == false); break; // JNC
       case 0xDA: this.JMP(this._state.regs.af.c == true); break; // JC
-      case 0xE2: this.JMP(this._state.regs.af.p == false); break; // JPO
-      case 0xEA: this.JMP(this._state.regs.af.p == true); break; // JPE
-      case 0xF2: this.JMP(this._state.regs.af.s == false); break; // JP
-      case 0xFA: this.JMP(this._state.regs.af.s == true); break; // JM
+      case 0xE2: this.JMP(FP == false); break; // JPO
+      case 0xEA: this.JMP(FP == true); break; // JPE
+      case 0xF2: this.JMP(FS == false); break; // JP
+      case 0xFA: this.JMP(FS == true); break; // JM
 
       case 0xE9: this.PCHL(); break; // PCHL
       case 0xCD: this.CALL(); break; // CALL
@@ -640,24 +649,25 @@ export default class CPU
       case 0xED: this.CALL(); break; // undocumented CALL
       case 0xFD: this.CALL(); break; // undocumented CALL
 
-      case 0xC4: this.CALL(this._state.regs.af.z == false); break; // CNZ
-      case 0xCC: this.CALL(this._state.regs.af.z == true); break; // CZ
+      case 0xC4: this.CALL(FZ == false); break; // CNZ
+      case 0xCC: this.CALL(FZ == true); break; // CZ
       case 0xD4: this.CALL(this._state.regs.af.c == false); break; // CNC
       case 0xDC: this.CALL(this._state.regs.af.c == true); break; // CC
-      case 0xE4: this.CALL(this._state.regs.af.p == false); break; // CPO
-      case 0xEC: this.CALL(this._state.regs.af.p == true); break; // CPE
-      case 0xF4: this.CALL(this._state.regs.af.s == false); break; // CP
-      case 0xFC: this.CALL(this._state.regs.af.s == true); break; // CM
+      case 0xE4: this.CALL(FP == false); break; // CPO
+      case 0xEC: this.CALL(FP == true); break; // CPE
+      case 0xF4: this.CALL(FS == false); break; // CP
+      case 0xFC: this.CALL(FS == true); break; // CM
+
       case 0xC9: this.RET(); break; // RET
       case 0xD9: this.RET(); break; // undocumented RET
-      case 0xC0: this.RETCond(this._state.regs.af.z == false); break; // RNZ
-      case 0xC8: this.RETCond(this._state.regs.af.z == true); break; // RZ
+      case 0xC0: this.RETCond(FZ == false); break; // RNZ
+      case 0xC8: this.RETCond(FZ == true); break; // RZ
       case 0xD0: this.RETCond(this._state.regs.af.c == false); break; // RNC
       case 0xD8: this.RETCond(this._state.regs.af.c == true); break; // RC
-      case 0xE0: this.RETCond(this._state.regs.af.p == false); break; // RPO
-      case 0xE8: this.RETCond(this._state.regs.af.p == true); break; // RPE
-      case 0xF0: this.RETCond(this._state.regs.af.s == false); break; // RP
-      case 0xF8: this.RETCond(this._state.regs.af.s == true); break; // RM
+      case 0xE0: this.RETCond(FP == false); break; // RPO
+      case 0xE8: this.RETCond(FP == true); break; // RPE
+      case 0xF0: this.RETCond(FS == false); break; // RP
+      case 0xF8: this.RETCond(FS == true); break; // RM
 
       case 0xC7: this.RST(0); break; // RST 0
       case 0xCF: this.RST(1); break; // RST 1
