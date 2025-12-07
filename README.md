@@ -1,10 +1,23 @@
 # Intel 8080 Assembler + Debugger (Minimal)
 
-This repository contains an VS Code extention with key feadures: a two-pass Intel 8080 assembler, a tiny Vector 06c emulator, and a debugger, quality of life VS Code functionality to emprover Vector 06c development process.
+This repository contains a VS Code extension with key features: a two-pass Intel 8080 assembler, a tiny Vector 06c emulator, and a debugger, along with quality of life VS Code functionality to improve the Vector 06c development process.
 
-// TODO: Add the Table of contents here
+## Table of Contents
 
-Quick start
+- [Quick start](#quick-start)
+- [Test Suites](#test-suites)
+  - [Assembler directive tests](#1-assembler-directive-tests)
+  - [Emulator tests](#2-emulator-tests)
+- [How to assemble and run](#how-to-assemble-and-run)
+- [VS Code editor helpers](#vs-code-editor-helpers)
+- [Emulator panel controls](#emulator-panel-controls)
+- [Symbol hover hints while paused](#symbol-hover-hints-while-paused)
+- [Memory Dump panel](#memory-dump-panel)
+- [Assembler](#assembler)
+- [Tools](#tools)
+- [Implementation notes](#implementation-notes)
+
+## Quick start
 
 1. Install dependencies:
 
@@ -24,10 +37,9 @@ npm run compile
 npm run test
 ```
 
-Test Suits
---------------------------
+## Test Suites
 
-1. Assembler directive tests
+### 1. Assembler directive tests
 
 ```pwsh
 npm run test-directives
@@ -36,7 +48,7 @@ npm run test-directives
 The command recompiles the TypeScript sources and executes every test case under `test/assembler/directives`, reporting a PASS/FAIL line for each directive scenario plus a summary total. The process exits with a non-zero status when a failure is detected, so it can plug directly into CI.
 Current coverage includes `.org`, `.align` (success + failure paths), `.if`/`.endif`, `.loop`/`.endloop` (standalone and inside macros), `.include` (flat + nested + missing-file errors), `.print`, `DS`, literal/binary/hex formats with expression evaluation, and both macro-bodied plus standalone local-label resolution. Add more fixture `.asm` files under `test/assembler/directives` and register them in `src/tools/run_directive_tests.ts` to grow the matrix.
 
-2. Emulator tests
+### 2. Emulator tests
 
 Run the i8080 CPU emulator test suite at any time:
 
@@ -66,8 +78,7 @@ Add more test `.asm` files under `.test/emulator/` and register them in `src/too
 - Number of instructions to execute
 - Expected register values, flag states, and/or memory contents
 
-How to assemble and run
------------------------
+## How to assemble and run
 
 - Compile TypeScript:
 
@@ -91,15 +102,13 @@ node .\scripts\run-assembler.js
 C:\Work\Programming\devector\bin\devector.exe .\test.rom
 ```
 
-VS Code editor helpers
-----------------------
+## VS Code editor helpers
 
 The bundled extension now exposes quality-of-life helpers whenever you edit `.asm` sources in VS Code:
 
 - **Ctrl+click navigation for includes**: hold `Ctrl` (or `Cmd` on macOS) to underline the path in the ASM '.include' directive and click it to open the target file.
 
-Emulator panel controls
------------------------
+## Emulator panel controls
 
 Launching the VS Code emulator panel loads the ROM and shows a compact toolbar on top of the frame preview. The buttons behave like classic debugger controls:
 
@@ -113,8 +122,7 @@ Launching the VS Code emulator panel loads the ROM and shows a compact toolbar o
 
 The Step buttons automatically disable whenever the emulator is running and re-enable when it pauses or hits a breakpoint so you cannot queue manual steps mid-run.
 
-Symbol hover hints while paused
--------------------------------
+## Symbol hover hints while paused
 
 When the emulator is paused (manually or because it hit a breakpoint) you can hover any label or named constant in an `.asm` file that belongs to the loaded ROM and VS Code shows a tooltip with both the hexadecimal and decimal value. The hint data comes directly from the ROM’s `.debug.json` metadata, so it works for symbols introduced through `.include` chains as well. This is handy for confirming the current address/value of a label without opening the token file or dumping registers.
 
@@ -130,13 +138,11 @@ The tooltip length automatically matches the instruction length reported by `CPU
 
 Data directives (`DB`/`.byte`, `DW`/`.word`). The specific values are highlighted while paused (blue for reads, red for writes). Hovering a highlighted value shows the live memory at that address (hex + decimal) from the paused emulator.
 
-Memory Dump panel
-------------------
+## Memory Dump panel
 
 The emulator view now embeds a **Memory Dump** panel under the frame preview. It streams a 16x16 hexdump that automatically tracks the current PC (both the hex bytes and ASCII column highlight the byte that will execute next). Uncheck **Follow PC** to freeze the window on a specific address, type any hex/decimal start value, or use the +/-0x10 and +/-0x100 buttons plus **Refresh** to nudge through RAM manually.
 
-Assembler
-------------------
+## Assembler
 
 - `.org` directive: supported (decimal, `0x..`, or `$..`). Example: `.org 0x100`.
 
@@ -254,10 +260,9 @@ Nested macros are supported (up to 32 levels deep), but you cannot open another 
 ```
 
 
-Tools
-----------------------
+## Tools
 
-FDD utility CLI
+### FDD utility CLI
 
 ```pwsh
 npm run compile # make sure out/tools/fddutil.js exists
@@ -283,19 +288,8 @@ Key switches:
 
 Adjust the emulator path to the location of `devector.exe` on your machine.
 
-Implementation notes
---------------------
+## Implementation notes
 
 - `src/assembler/utils.ts`: houses `encodeTextToBytes`, `parseTextLiteralToBytes`, and text case helpers used by `.encoding` / `.text`.
 - `src/assembler.ts`: runs `.encoding`/`.text` handling in both passes so address calculation and byte emission stay in sync.
 - `test/assembler/directives/`: now includes fixtures for every `.encoding` type/case option plus `.text` edge cases (escapes, labels, errors) that are wired into `run_directive_tests.ts`.
-
-Want help?
-
-Tell me whether you want:
-
-- The `assemble:run` npm script added automatically, or
-- Oversize-immediate warnings promoted to errors, or
-- Unit tests added for `.include` origin mapping and immediate-size warnings.
-
-I won't make those changes without your confirmation.
