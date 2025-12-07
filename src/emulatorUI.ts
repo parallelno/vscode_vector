@@ -12,6 +12,7 @@ import { getDebugLine, getDebugState } from './emulatorUI/debugOutput';
 import { handleMemoryDumpControlMessage, resetMemoryDumpState, updateMemoryDumpFromHardware } from './emulatorUI/memoryDump';
 import { disposeHardwareStatsTracking, resetHardwareStatsTracking, tryCollectHardwareStats } from './emulatorUI/hardwareStats';
 import { parseAddressLike } from './emulatorUI/utils';
+import { KbOperation } from './emulator/keyboard';
 
 const log_every_frame = false;
 const log_tick_to_file = false;
@@ -309,15 +310,13 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   panel.webview.onDidReceiveMessage(msg => {
     if (msg && msg.type === 'key') {
       // keyboard events: forward to keyboard handling
-      // const op = (keyboard as any).KeyHandling(msg.code, msg.kind === 'down' ? 'down' : 'up');
-      // if (op === 'RESTART') {
-      //   // quick restart: reload ROM and reset PC/SP
-      //   if (romBuf) {
-      //     emu.load(Buffer.from(romBuf), 0x0100);
-      //     emu.regs.PC = 0x0000;
-      //     emu.regs.SP = 0x0000;
-      //   }
-      // }
+      const op = emu.hardware?.keyboard?.KeyHandling(msg.code, msg.kind === 'down' ? 'down' : 'up') ?? KbOperation.NONE;
+      if (op === KbOperation.RESET) {
+        emu.hardware?.Request(HardwareReq.RESET);
+      }
+      else if (op === KbOperation.RESTART) {
+        emu.hardware?.Request(HardwareReq.RESTART);
+      }
     } else if (msg && msg.type === 'stop') {
       emu.hardware?.Request(HardwareReq.STOP);
       emitToolbarState(false);
@@ -331,6 +330,9 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   panel.onDidChangeViewState(() => {
     if (panel.visible) {
       syncToolbarState();
+      // Re-send the current frame to the webview to restore canvas content
+      // that may have been discarded while the tab was hidden
+      sendFrameToWebview();
     }
   }, null, context.subscriptions);
 
@@ -990,7 +992,8 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
   if (!highlightContext || addr === undefined || addr === null) return;
   ensureHighlightDecoration(highlightContext);
   if (!pausedLineDecoration || !lastAddressSourceMap || lastAddressSourceMap.size === 0) return;
-  const info = lastAddressSourceMap.get(addr & 0xffff);
+  const normalizedAddr = addr & 0xffff;
+  const info = lastAddressSourceMap.get(normalizedAddr);
   if (!info) return;
   const targetPath = path.resolve(info.file);
   // Store the highlight state for restoration when the editor becomes visible again
@@ -1010,9 +1013,10 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
       if (!editor) {
         editor = await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
       }
+      const preferredLine = resolvePreferredHighlightLine(targetPath, normalizedAddr, doc) ?? info.line;
       const totalLines = doc.lineCount;
       if (totalLines === 0) return;
-      const idx = Math.min(Math.max(info.line - 1, 0), totalLines - 1);
+      const idx = Math.min(Math.max(preferredLine - 1, 0), totalLines - 1);
       const lineText = doc.lineAt(idx).text;
       const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
       const decoration = createPausedLineDecoration(range, debugLine);
@@ -1267,7 +1271,11 @@ function buildAddressToSourceMap(tokens: any, tokenPath: string): Map<number, So
       const lineNum = Number(lineKey);
       if (!Number.isFinite(lineNum)) continue;
       const normalizedAddr = addr & 0xffff;
-      if (!map.has(normalizedAddr)) {
+      const existing = map.get(normalizedAddr);
+      // Prefer lines with higher line numbers for the same address within the same file,
+      // since actual code lines come after labels that share the same address.
+      // Across different files, keep the first occurrence.
+      if (!existing || (existing.file === resolvedPath && lineNum > existing.line)) {
         map.set(normalizedAddr, { file: resolvedPath, line: lineNum });
       }
     }

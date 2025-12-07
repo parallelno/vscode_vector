@@ -1,10 +1,23 @@
 # Intel 8080 Assembler + Debugger (Minimal)
 
-This repository contains an VS Code extention with key feadures: a two-pass Intel 8080 assembler, a tiny Vector 06c emulator, and a debugger, quality of life VS Code functionality to emprover Vector 06c development process.
+This repository contains a VS Code extension with key features: a two-pass Intel 8080 assembler, a tiny Vector 06c emulator, and a debugger, along with quality of life VS Code functionality to improve the Vector 06c development process.
 
-// TODO: Add the Table of contents here
+## Table of Contents
 
-Quick start
+- [Quick start](#quick-start)
+- [Test Suites](#test-suites)
+  - [Assembler directive tests](#1-assembler-directive-tests)
+  - [Emulator tests](#2-emulator-tests)
+- [How to assemble and run](#how-to-assemble-and-run)
+- [VS Code editor helpers](#vs-code-editor-helpers)
+- [Emulator panel controls](#emulator-panel-controls)
+- [Symbol hover hints while paused](#symbol-hover-hints-while-paused)
+- [Memory Dump panel](#memory-dump-panel)
+- [Assembler](#assembler)
+- [Tools](#tools)
+- [Implementation notes](#implementation-notes)
+
+## Quick start
 
 1. Install dependencies:
 
@@ -24,10 +37,9 @@ npm run compile
 npm run test
 ```
 
-Test Suits
---------------------------
+## Test Suites
 
-1. Assembler directive tests
+### 1. Assembler directive tests
 
 ```pwsh
 npm run test-directives
@@ -36,7 +48,7 @@ npm run test-directives
 The command recompiles the TypeScript sources and executes every test case under `test/assembler/directives`, reporting a PASS/FAIL line for each directive scenario plus a summary total. The process exits with a non-zero status when a failure is detected, so it can plug directly into CI.
 Current coverage includes `.org`, `.align` (success + failure paths), `.if`/`.endif`, `.loop`/`.endloop` (standalone and inside macros), `.include` (flat + nested + missing-file errors), `.print`, `DS`, literal/binary/hex formats with expression evaluation, and both macro-bodied plus standalone local-label resolution. Add more fixture `.asm` files under `test/assembler/directives` and register them in `src/tools/run_directive_tests.ts` to grow the matrix.
 
-2. Emulator tests
+### 2. Emulator tests
 
 Run the i8080 CPU emulator test suite at any time:
 
@@ -66,8 +78,7 @@ Add more test `.asm` files under `.test/emulator/` and register them in `src/too
 - Number of instructions to execute
 - Expected register values, flag states, and/or memory contents
 
-How to assemble and run
------------------------
+## How to assemble and run
 
 - Compile TypeScript:
 
@@ -91,15 +102,13 @@ node .\scripts\run-assembler.js
 C:\Work\Programming\devector\bin\devector.exe .\test.rom
 ```
 
-VS Code editor helpers
-----------------------
+## VS Code editor helpers
 
 The bundled extension now exposes quality-of-life helpers whenever you edit `.asm` sources in VS Code:
 
 - **Ctrl+click navigation for includes**: hold `Ctrl` (or `Cmd` on macOS) to underline the path in the ASM '.include' directive and click it to open the target file.
 
-Emulator panel controls
------------------------
+## Emulator panel controls
 
 Launching the VS Code emulator panel loads the ROM and shows a compact toolbar on top of the frame preview. The buttons behave like classic debugger controls:
 
@@ -113,8 +122,7 @@ Launching the VS Code emulator panel loads the ROM and shows a compact toolbar o
 
 The Step buttons automatically disable whenever the emulator is running and re-enable when it pauses or hits a breakpoint so you cannot queue manual steps mid-run.
 
-Symbol hover hints while paused
--------------------------------
+## Symbol hover hints while paused
 
 When the emulator is paused (manually or because it hit a breakpoint) you can hover any label or named constant in an `.asm` file that belongs to the loaded ROM and VS Code shows a tooltip with both the hexadecimal and decimal value. The hint data comes directly from the ROM’s `.debug.json` metadata, so it works for symbols introduced through `.include` chains as well. This is handy for confirming the current address/value of a label without opening the token file or dumping registers.
 
@@ -130,13 +138,111 @@ The tooltip length automatically matches the instruction length reported by `CPU
 
 Data directives (`DB`/`.byte`, `DW`/`.word`). The specific values are highlighted while paused (blue for reads, red for writes). Hovering a highlighted value shows the live memory at that address (hex + decimal) from the paused emulator.
 
-Memory Dump panel
-------------------
+## Memory Dump panel
 
 The emulator view now embeds a **Memory Dump** panel under the frame preview. It streams a 16x16 hexdump that automatically tracks the current PC (both the hex bytes and ASCII column highlight the byte that will execute next). Uncheck **Follow PC** to freeze the window on a specific address, type any hex/decimal start value, or use the +/-0x10 and +/-0x100 buttons plus **Refresh** to nudge through RAM manually.
 
-Assembler
-------------------
+## Assembler
+
+### Expressions and Operators
+
+The assembler supports a rich expression system used throughout directives (`.if`, `.loop`, `.align`, `.print`, etc.), immediate values, and address calculations. Expressions can combine numeric literals, symbols, and operators.
+
+**Numeric Literals**
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| Decimal | `42`, `-5` | Standard decimal numbers |
+| Hex `$` | `$FF`, `$1234` | Hexadecimal with `$` prefix |
+| Hex `0x` | `0xFF`, `0x1234` | Hexadecimal with `0x` prefix |
+| Binary `%` | `%1010`, `%11_00` | Binary with `%` prefix (underscores allowed) |
+| Binary `0b` | `0b1010`, `0b11_00` | Binary with `0b` prefix (underscores allowed) |
+| Binary `b` | `b1010`, `b11_00` | Binary with `b` prefix (underscores allowed) |
+| Character | `'A'`, `'\n'` | ASCII character (supports escapes) |
+
+**Arithmetic Operators**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `+` | Addition | `Value + 10` |
+| `-` | Subtraction | `EndAddr - StartAddr` |
+| `*` | Multiplication | `Count * 2` |
+| `/` | Division | `Total / 4` |
+| `%` | Modulo (remainder) | `Offset % 256` |
+
+**Comparison Operators**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `==` | Equal | `Value == 0` |
+| `!=` | Not equal | `Flag != FALSE` |
+| `<` | Less than | `Count < 10` |
+| `<=` | Less than or equal | `Index <= Max` |
+| `>` | Greater than | `Size > 0` |
+| `>=` | Greater than or equal | `Addr >= $100` |
+
+**Bitwise Operators**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `&` | Bitwise AND | `Value & $0F` |
+| `\|` | Bitwise OR | `Flags \| $80` |
+| `^` | Bitwise XOR | `Data ^ $FF` |
+| `~` | Bitwise NOT | `~Mask` |
+| `<<` | Left shift | `1 << 4` |
+| `>>` | Right shift | `Value >> 8` |
+
+**Logical Operators**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `!` | Logical NOT | `!Enabled` |
+| `&&` | Logical AND | `(A > 0) && (B < 10)` |
+| `\|\|` | Logical OR | `(X == 0) \|\| (Y == 0)` |
+
+**Unary Prefix Operators**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `+` | Unary plus (identity) | `+Value` |
+| `-` | Unary minus (negation) | `-Offset` |
+| `<` | Low byte (bits 0-7) | `<$1234` → `$34` |
+| `>` | High byte (bits 8-15) | `>$1234` → `$12` |
+
+The `<` (low byte) and `>` (high byte) unary operators extract 8-bit portions from 16-bit values. This is useful for splitting addresses or constants when working with 8-bit instructions:
+
+```
+ADDR = $1234
+
+mvi l, <ADDR    ; Load low byte ($34) into L
+mvi h, >ADDR    ; Load high byte ($12) into H
+
+db <$ABCD       ; Emits $CD
+db >$ABCD       ; Emits $AB
+```
+
+**Symbols**
+
+Expressions can reference:
+- Labels (e.g., `StartAddr`, `Loop`)
+- Constants defined with `=` or `EQU` (e.g., `MAX_VALUE`)
+- Local labels prefixed with `@` (e.g., `@loop`)
+- Boolean literals `TRUE` (1) and `FALSE` (0)
+
+**Operator Precedence** (highest to lowest)
+
+1. Parentheses `()`
+2. Unary operators: `+`, `-`, `!`, `~`, `<`, `>`
+3. Multiplicative: `*`, `/`, `%`
+4. Additive: `+`, `-`
+5. Shift: `<<`, `>>`
+6. Relational: `<`, `<=`, `>`, `>=`
+7. Equality: `==`, `!=`
+8. Bitwise AND: `&`
+9. Bitwise XOR: `^`
+10. Bitwise OR: `|`
+11. Logical AND: `&&`
+12. Logical OR: `||`
 
 - `.org` directive: supported (decimal, `0x..`, or `$..`). Example: `.org 0x100`.
 
@@ -254,10 +360,11 @@ Nested macros are supported (up to 32 levels deep), but you cannot open another 
 ```
 
 
-Tools
-----------------------
+## Tools
 
-FDD utility CLI
+### FDD utility CLI
+
+The FDD utility tool is a command-line tool that reads and writes FDD images, and adds files to the image. It is useful for creating custom FDD images for the Vector 06c emulator.
 
 ```pwsh
 npm run compile # make sure out/tools/fddutil.js exists
@@ -271,31 +378,3 @@ Key switches:
 - `-i <file>` adds a host file into the image; repeat the flag for each additional file.
 - `-o <file>` writes the resulting `.fdd` image.
 - `-h` prints the usage summary.
-
-
-- If you want a single npm script that compiles, assembles, updates labels, and runs the emulator, you can add an npm script to `package.json`. Example:
-
-```json
-"scripts": {
-  "assemble:run": "npm run compile && node ./scripts/run-assembler.js && node ./scripts/update-test-json.js && C:\\Work\\Programming\\devector\\bin\\devector.exe .\\test.rom"
-}
-```
-
-Adjust the emulator path to the location of `devector.exe` on your machine.
-
-Implementation notes
---------------------
-
-- `src/assembler/utils.ts`: houses `encodeTextToBytes`, `parseTextLiteralToBytes`, and text case helpers used by `.encoding` / `.text`.
-- `src/assembler.ts`: runs `.encoding`/`.text` handling in both passes so address calculation and byte emission stay in sync.
-- `test/assembler/directives/`: now includes fixtures for every `.encoding` type/case option plus `.text` edge cases (escapes, labels, errors) that are wired into `run_directive_tests.ts`.
-
-Want help?
-
-Tell me whether you want:
-
-- The `assemble:run` npm script added automatically, or
-- Oversize-immediate warnings promoted to errors, or
-- Unit tests added for `.include` origin mapping and immediate-size warnings.
-
-I won't make those changes without your confirmation.

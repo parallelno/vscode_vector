@@ -55,7 +55,7 @@ const S_HALT = 0x08;       // Halt bit
 // Port enum
 // ============================================================================
 
-export enum Port {
+export enum FdcPort {
     COMMAND = 0,
     STATUS = 0,
     TRACK = 1,
@@ -107,7 +107,7 @@ export class FDisk {
         this.header = new Uint8Array(6);
     }
 
-    mount(diskData: Uint8Array, diskPath: string): void {
+    Mount(diskData: Uint8Array, diskPath: string): void {
         // Copy disk data
         const copyLen = Math.min(diskData.length, FDD_SIZE);
         this.data.set(diskData.subarray(0, copyLen));
@@ -122,11 +122,11 @@ export class FDisk {
         this.writes = 0;
     }
 
-    getData(): Uint8Array {
+    GetData(): Uint8Array {
         return this.data;
     }
 
-    getDisk(): FDisk | null {
+    GetDisk(): FDisk | null {
         return this.mounted ? this : null;
     }
 }
@@ -160,14 +160,14 @@ export class Fdc1793 {
             this.disks.push(new FDisk());
         }
         this.regs = new Uint8Array(5);
-        this.reset();
+        this.Reset();
     }
 
     /**
      * Seek to given side / track / sector.
      * Returns sector offset (position) on success or -1 on failure.
      */
-    private seek(sideID: number, trackID: number, sectorID: number): number {
+    private Seek(sideID: number, trackID: number, sectorID: number): number {
         if (!this.disk) return -1;
 
         const sectors = FDD_SECTORS_PER_TRACK * (trackID * FDD_SIDES + sideID);
@@ -187,7 +187,7 @@ export class Fdc1793 {
     /**
      * Resets the state of the WD1793 FDC.
      */
-    private reset(): void {
+    private Reset(): void {
         this.regs[0] = 0x00;
         this.regs[1] = 0x00;
         this.regs[2] = 0x00;
@@ -208,11 +208,11 @@ export class Fdc1793 {
     /**
      * Mount a disk image to a drive.
      */
-    mount(driveIdx: number, data: Uint8Array, path: string): void {
+    Mount(driveIdx: number, data: Uint8Array, path: string): void {
         const idx = driveIdx % Fdc1793.DRIVES_MAX;
-        this.disks[idx].mount(data, path);
+        this.disks[idx].Mount(data, path);
         if (idx === this.drive) {
-            this.reset();
+            this.Reset();
         }
     }
 
@@ -220,9 +220,9 @@ export class Fdc1793 {
      * Reads a value from a WD1793 register.
      * Returns the read data on success or 0xFF on failure (bad register address).
      */
-    read(port: Port): number {
+    Read(port: FdcPort): number {
         switch (port) {
-            case Port.STATUS: {
+            case FdcPort.STATUS: {
                 let status = this.regs[0];
                 // If no disk present, set F_NOTREADY
                 if (!this.disk) {
@@ -239,25 +239,25 @@ export class Fdc1793 {
                 return status;
             }
 
-            case Port.TRACK:
-            case Port.SECTOR:
+            case FdcPort.TRACK:
+            case FdcPort.SECTOR:
                 return this.regs[port];
 
-            case Port.DATA:
+            case FdcPort.DATA:
                 if (this.rwLen > 0 && this.disk) {
                     // Check if reading header data (READ-ADDRESS command)
                     if (this.readingHeader) {
-                        this.regs[Port.DATA] = this.disk.header[this.headerPtr++];
+                        this.regs[FdcPort.DATA] = this.disk.header[this.headerPtr++];
                     } else {
                         // Read sector data
-                        this.regs[Port.DATA] = this.disk.data[this.ptr++];
+                        this.regs[FdcPort.DATA] = this.disk.data[this.ptr++];
                     }
                     this.disk.reads++;
                     if (--this.rwLen) {
                         this.wait = 255; // Reset timeout watchdog
                         // Advance to the next sector if needed (only for sector reads)
                         if (!this.readingHeader && !(this.rwLen & (FDD_SECTOR_LEN - 1))) {
-                            this.regs[Port.SECTOR]++;
+                            this.regs[FdcPort.SECTOR]++;
                         }
                     } else {
                         // Read completed
@@ -266,9 +266,9 @@ export class Fdc1793 {
                         this.readingHeader = false;
                     }
                 }
-                return this.regs[Port.DATA];
+                return this.regs[FdcPort.DATA];
 
-            case Port.READY:
+            case FdcPort.READY:
                 // After some idling, stop read/write operations
                 if (this.wait) {
                     if (--this.wait === 0) {
@@ -287,11 +287,11 @@ export class Fdc1793 {
      * Writes a value into the WD1793 register.
      * Returns WD1793_IRQ or WD1793_DRQ
      */
-    write(port: Port, val: number): number {
+    Write(port: FdcPort, val: number): number {
         let J: number;
 
         switch (port) {
-            case Port.COMMAND:
+            case FdcPort.COMMAND:
                 // Reset an interrupt request
                 this.irq = 0;
 
@@ -373,7 +373,7 @@ export class Fdc1793 {
                         {
                             // Seek to the requested sector
                             const seekSide = (val & C_SIDECOMP) ? ((val & C_SIDE) ? 1 : 0) : this.side;
-                            const position = this.seek(seekSide, this.regs[1], this.regs[2]);
+                            const position = this.Seek(seekSide, this.regs[1], this.regs[2]);
 
                             // If seek successful, set up reading operation
                             if (position < 0) {
@@ -395,7 +395,7 @@ export class Fdc1793 {
                         {
                             // Seek to the requested sector
                             const seekSide = (val & C_SIDECOMP) ? ((val & C_SIDE) ? 1 : 0) : this.side;
-                            const position = this.seek(seekSide, this.regs[1], this.regs[2]);
+                            const position = this.Seek(seekSide, this.regs[1], this.regs[2]);
 
                             // If seek successful, set up writing operation
                             if (position < 0) {
@@ -421,7 +421,7 @@ export class Fdc1793 {
                             let foundPosition = -1;
                             if (this.disk) {
                                 for (J = 0; J < 256; J++) {
-                                    const position = this.seek(this.side, this.track, J);
+                                    const position = this.Seek(this.side, this.track, J);
                                     if (position >= 0) {
                                         foundPosition = position;
                                         break;
@@ -452,13 +452,13 @@ export class Fdc1793 {
                         {
                             // The full protocol is not implemented (involves parsing lead-in & lead-out);
                             // it only sets the track data to 0xE5
-                            let position = this.seek(0, this.regs[1], 1);
+                            let position = this.Seek(0, this.regs[1], 1);
                             if (position >= 0 && this.disk) {
                                 this.disk.data.fill(0xE5, position, position + FDD_SECTOR_LEN * FDD_SECTORS_PER_TRACK);
                                 this.disk.updated = true;
                             }
                             if (FDD_SIDES > 1) {
-                                position = this.seek(1, this.regs[1], 1);
+                                position = this.Seek(1, this.regs[1], 1);
                                 if (position >= 0 && this.disk) {
                                     this.disk.data.fill(0xE5, position, position + FDD_SECTOR_LEN * FDD_SECTORS_PER_TRACK);
                                     this.disk.updated = true;
@@ -473,14 +473,14 @@ export class Fdc1793 {
                 }
                 break;
 
-            case Port.TRACK:
-            case Port.SECTOR:
+            case FdcPort.TRACK:
+            case FdcPort.SECTOR:
                 if (!(this.regs[0] & F_BUSY)) {
                     this.regs[port] = val;
                 }
                 break;
 
-            case Port.DATA:
+            case FdcPort.DATA:
                 // When writing data, store value to disk
                 if (this.rwLen > 0 && this.disk) {
                     // Write data
@@ -501,18 +501,18 @@ export class Fdc1793 {
                     }
                 }
                 // Save last written value
-                this.regs[Port.DATA] = val;
+                this.regs[FdcPort.DATA] = val;
                 break;
 
-            case Port.SYSTEM:
+            case FdcPort.SYSTEM:
                 // Reset controller if S_RESET goes up
                 // Note: Original has a TODO about whether reset is still required
                 // if ((this.regs[4] ^ val) & val & S_RESET) {
-                //     this.reset();
+                //     this.Reset();
                 // }
 
                 this.drive = val & S_DRIVE;
-                this.disk = this.disks[this.drive].getDisk();
+                this.disk = this.disks[this.drive].GetDisk();
 
                 // Kishinev FDC: 0011xSDD
                 //   S - side
@@ -520,7 +520,7 @@ export class Fdc1793 {
                 this.side = ((~val) >> 2) & 1; // inverted side
 
                 // Save the last written value
-                this.regs[Port.SYSTEM] = val;
+                this.regs[FdcPort.SYSTEM] = val;
                 break;
         }
 
@@ -530,7 +530,7 @@ export class Fdc1793 {
     /**
      * Get FDC info for debugging.
      */
-    getFdcInfo(): FdcInfo {
+    GetFdcInfo(): FdcInfo {
         return {
             drive: this.drive,
             side: this.side,
@@ -547,7 +547,7 @@ export class Fdc1793 {
     /**
      * Get disk info for a specific drive.
      */
-    getFddInfo(driveIdx: number): DiskInfo {
+    GetFddInfo(driveIdx: number): DiskInfo {
         const idx = driveIdx % Fdc1793.DRIVES_MAX;
         return {
             path: this.disks[idx].path,
@@ -561,7 +561,7 @@ export class Fdc1793 {
     /**
      * Get a copy of the disk image data.
      */
-    getFddImage(driveIdx: number): Uint8Array {
+    GetFddImage(driveIdx: number): Uint8Array {
         const idx = driveIdx % Fdc1793.DRIVES_MAX;
         return new Uint8Array(this.disks[idx].data);
     }
@@ -569,7 +569,7 @@ export class Fdc1793 {
     /**
      * Reset the updated flag for a drive.
      */
-    resetUpdate(driveIdx: number): void {
+    ResetUpdate(driveIdx: number): void {
         const idx = driveIdx % Fdc1793.DRIVES_MAX;
         this.disks[idx].updated = false;
     }

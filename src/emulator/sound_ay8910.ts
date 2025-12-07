@@ -63,7 +63,7 @@ export class SoundAY8910 {
    * @param ch Channel number (0, 1, or 2)
    * @returns Channel output value (0.0 to 1.0)
    */
-  private cstep(ch: number): number {
+  private CStep(ch: number): number {
     const chOffset = ch << 1;
     const periodLow = this.ayr[chOffset];
     const periodHigh = this.ayr[1 | chOffset];
@@ -91,7 +91,7 @@ export class SoundAY8910 {
    * Envelope step - advances the envelope generator
    * @returns Current envelope value (0-15)
    */
-  private estep(): number {
+  private EStep(): number {
     if (this.envx >> 4) {
       if (this.ay13 & 1) { // ENV.HOLD
         return ((this.ay13 >> 1) ^ this.ay13) & 2 ? 15 : 0;
@@ -110,7 +110,7 @@ export class SoundAY8910 {
     const envPeriod = (this.ayr[11] << 1) | (this.ayr[12] << 9);
     if (++this.envc >= envPeriod) {
       this.envc = 0;
-      this.envv = this.estep();
+      this.envv = this.EStep();
     }
 
     const noisePeriod = this.ayr[6] << 1;
@@ -120,13 +120,13 @@ export class SoundAY8910 {
       this.noir = (this.noir ^ (this.noiv * 0x24000)) >> 1;
     }
 
-    return (this.cstep(0) + this.cstep(1) + this.cstep(2)) / 3.0;
+    return (this.CStep(0) + this.CStep(1) + this.CStep(2)) / 3.0;
   }
 
   /**
    * Mute operation - advances counters without producing output
    */
-  aymute(): void {
+  Mute(): void {
     const envPeriod = (this.ayr[11] << 1) | (this.ayr[12] << 9);
     if (++this.envc >= envPeriod) {
       this.envc = 0;

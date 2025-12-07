@@ -1,10 +1,11 @@
 type KeyCode = string;
 type RowColumnCode = number;
-enum Operation {
+export enum KbOperation {
   NONE = 0,
   RESET = 1,
   RESTART = 2
 }
+
 export class Keyboard
 {
   private encodingMatrix: Uint8Array = new Uint8Array(8).fill(0);
@@ -14,20 +15,20 @@ export class Keyboard
   public keyUS = false; // key on russian keyboard 'УС'
   public keyRus = false; // key on russian keyboard 'Рус Lat'
 
-  rebootType: Operation = Operation.NONE;
+  rebootType: KbOperation = KbOperation.NONE;
 
   constructor() {
     this.InitMapping();
   }
 
-  KeyHandling(code: string, action: string): Operation
+  KeyHandling(code: string, action: string): KbOperation
   {
     switch (code) {
       case 'F11': // BLK + VVOD functionality
-        if (action === 'up') return Operation.RESET;
+        if (action === 'up') return KbOperation.RESET;
         break;
       case 'F12': // BLK + SBR functionality
-        if (action === 'up') return Operation.RESTART;
+        if (action === 'up') return KbOperation.RESTART;
         break;
       case 'ShiftLeft': // SS (shift) key
       case 'ShiftRight':
@@ -54,7 +55,7 @@ export class Keyboard
         }
     }
 
-    return Operation.NONE;
+    return KbOperation.NONE;
   }
 
   // rows: bitmask where 0 bit means the row is selected (active-low). Returns ~encoded result like C++

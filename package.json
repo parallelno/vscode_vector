@@ -29,8 +29,7 @@
     "typescript": "^4.9.5"
   },
   "dependencies": {
-    "pngjs": "^7.0.0",
-    "vscode-debugadapter": "^1.47.0"
+    "pngjs": "^7.0.0"
   },
   "activationEvents": [
     "onCommand:i8080.compile",

@@ -553,16 +553,17 @@ export function getWebviewContent() {
       }
     });
     // keyboard forwarding
-    window.addEventListener('keydown', e => {
-      if (!shouldForwardKey(e)) return;
-      vscode.postMessage({ type: 'key', kind: 'down', key: e.key, code: e.code });
-      e.preventDefault();
-    });
-    window.addEventListener('keyup', e => {
-      if (!shouldForwardKey(e)) return;
-      vscode.postMessage({ type: 'key', kind: 'up', key: e.key, code: e.code });
-      e.preventDefault();
-    });
+    // Capture events before VS Code so Alt/menus never steal focus when emulator is active.
+    const forwardKeyEvent = (kind) => (event) => {
+      if (!shouldForwardKey(event)) return;
+      vscode.postMessage({ type: 'key', kind, key: event.key, code: event.code });
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+
+    window.addEventListener('keydown', forwardKeyEvent('down'), true);
+    window.addEventListener('keyup', forwardKeyEvent('up'), true);
 
     postMemoryCommand('refresh');
   </script>

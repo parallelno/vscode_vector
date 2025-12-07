@@ -1,11 +1,16 @@
+import { HardwareReq } from './hardware_reqs';
 import CPU, { CpuState } from './cpu_i8080';
 import Memory, { MemState } from './memory';
-import { Keyboard } from './keyboard';
 import IO from './io';
+import { Keyboard } from './keyboard';
 import { Display } from './display';
-import { HardwareReq } from './hardware_reqs';
+import { TimerI8253 } from './timer_i8253';
+import { AYWrapper, SoundAY8910 } from './sound_ay8910';
+import { Fdc1793 } from './fdc_wd1793';
 import { DebugFunc, DebugReqHandlingFunc, ReqData } from './hardware_types';
 import { cp } from 'fs';
+import { Audio } from './audio';
+import { setFlagsFromString } from 'v8';
 
 enum Status {
 			RUN = 0,
@@ -36,11 +41,17 @@ export class Hardware
   status: Status = Status.STOP;
   execSpeed: ExecSpeed = ExecSpeed.NORMAL; // execution speed
 
-  cpu?: CPU;
-  memory?: Memory;
-  keyboard?: Keyboard;
+  _cpu?: CPU;
+  _memory?: Memory;
+  _keyboard?: Keyboard;
   io?: IO;
   _display?: Display;
+  _timer?: TimerI8253;
+  _ay?: SoundAY8910;
+  _ayWrapper?: AYWrapper;
+  _fdc?: Fdc1793;
+  _audio?: Audio;
+
   // Optional callback invoked after each instruction is executed.
   // The callback is called from the hardware execution thread.
   debugInstructionCallback?: ((hw: Hardware) => void) | null = null;
@@ -55,13 +66,19 @@ export class Hardware
     ramDiskDataPath: string,
     ramDiskClearAfterRestart: boolean)
   {
-    this.memory = new Memory(
+    this._memory = new Memory(
       pathBootData, ramDiskDataPath, ramDiskClearAfterRestart);
-    this.keyboard = new Keyboard();
-    this.io = new IO();
-    this.cpu = new CPU(
-      this.memory, this.io.PortIn.bind(this.io), this.io.PortOut.bind(this.io));
-    this._display = new Display(this.memory, this.io);
+    this._keyboard = new Keyboard();
+    this._timer = new TimerI8253();
+    this._ay = new SoundAY8910();
+    this._ayWrapper = new AYWrapper(this._ay);
+    this._audio = new Audio(this._timer, this._ayWrapper);
+    this._fdc = new Fdc1793();
+    this.io = new IO(this._keyboard, this._memory, this._timer, this._ay, this._fdc);
+    this._cpu = new CPU(
+      this._memory, this.io.PortIn.bind(this.io), this.io.PortOut.bind(this.io));
+    this._display = new Display(this._memory, this.io);
+
 
     this.Init();
   }
@@ -74,7 +91,7 @@ export class Hardware
   // when HW needs Reset
   Init()
   {
-    this.memory?.Init();
+    this._memory?.Init();
     this._display?.Init();
     this.io?.Init();
   }
@@ -83,16 +100,15 @@ export class Hardware
   ExecuteInstruction(): boolean
   {
     // mem debug init
-    //this.memory?.DebugInit();
+    //this._memory?.DebugInit();
 
     do
     {
       this._display?.Rasterize();
-      this.cpu?.ExecuteMachineCycle(this._display?.IsIRQ() ?? false);
-      // TODO: add audio support
-      //this.audio?.Clock(2, this.io?.GetBeeper() ?? false);
+      this._cpu?.ExecuteMachineCycle(this._display?.IsIRQ() ?? false);
+      this._audio?.Clock(2, this.io?.GetBeeper() ?? 0);
 
-    } while (!this.cpu?.IsInstructionExecuted());
+    } while (!this._cpu?.IsInstructionExecuted());
 
     // invoke per-instruction debug callback (if attached)
     try {
@@ -105,18 +121,18 @@ export class Hardware
 
     // debug per instruction
     try {
-      if (this.debugAttached && this.Debug && this.cpu && this.memory /*&& this.io && this._display*/)
+      if (this.debugAttached && this.Debug && this._cpu && this._memory /*&& this.io && this._display*/)
       {
-          const break_ = this.Debug(this.cpu.state, this.memory.state /*, this.io.state, this._display.state*/);
+          const break_ = this.Debug(this._cpu.state, this._memory.state /*, this.io.state, this._display.state*/);
           if (break_) return true;
       }
     } catch (e) {
         console.error('Debug per instruction error', e);
     }
 
-    if (this.memory?.IsException())
+    if (this._memory?.IsException())
     {
-      this.memory.InitRamDiskMapping(); // reset RAM Disk mode collision
+      this._memory.InitRamDiskMapping(); // reset RAM Disk mode collision
       console.log("ERROR: more than one RAM Disk has mapping enabled");
       return true;
     }
@@ -180,7 +196,7 @@ export class Hardware
     }
 
     case HardwareReq.GET_CC:
-      out = {"cc": this.cpu?.cc };
+      out = {"cc": this._cpu?.cc };
       break;
 
 /*
@@ -189,7 +205,7 @@ export class Hardware
       break;
 
     case HardwareReq.GET_REG_PC:
-      out = {"pc": this.cpu?.GetPC() };
+      out = {"pc": this._cpu?.GetPC() };
       break;
 
     case HardwareReq.GET_RUSLAT_HISTORY:
@@ -282,14 +298,14 @@ export class Hardware
 
     case HardwareReq.GET_MEMORY_MAPPING:
       out = {
-        {"mapping", this.memory.GetState().update.mapping.data},
-        {"ramdiskIdx", this.memory.GetState().update.ramdiskIdx},
+        {"mapping", this._memory.GetState().update.mapping.data},
+        {"ramdiskIdx", this._memory.GetState().update.ramdiskIdx},
         };
       break;
 
     case HardwareReq.GET_MEMORY_MAPPINGS:{
-      auto mappingsP = this.memory.GetMappingsP();
-      out = {{"ramdiskIdx", this.memory.GetState().update.ramdiskIdx}};
+      auto mappingsP = this._memory.GetMappingsP();
+      out = {{"ramdiskIdx", this._memory.GetState().update.ramdiskIdx}};
       for (auto i=0; i < Memory::RAM_DISK_MAX; i++) {
         out["mapping"+std::to_string(i)] = mappingsP[i].data;
       }
@@ -297,7 +313,7 @@ export class Hardware
     }
     case HardwareReq.GET_GLOBAL_ADDR_RAM:
       out = {
-        {"data", this.memory.GetGlobalAddr(dataJ["addr"], AddrSpace.RAM)}
+        {"data", this._memory.GetGlobalAddr(dataJ["addr"], AddrSpace.RAM)}
         };
       break;
 
@@ -372,7 +388,7 @@ export class Hardware
     }
 */
     case HardwareReq.SET_MEM:
-      this.memory?.SetRam(data["addr"], data["data"]);
+      this._memory?.SetRam(data["addr"], data["data"]);
       break;
 /*
     case HardwareReq.SET_BYTE_GLOBAL:
@@ -448,8 +464,8 @@ export class Hardware
       break;
 
     default:
-      if (this.DebugReqHandling && this.cpu && this.memory /*&& this.io && this._display*/){
-        out = this.DebugReqHandling(req, data, this.cpu.state, this.memory.state/*, this.io.state, this.display.state*/);
+      if (this.DebugReqHandling && this._cpu && this._memory /*&& this.io && this._display*/){
+        out = this.DebugReqHandling(req, data, this._cpu.state, this._memory.state/*, this.io.state, this.display.state*/);
       }
       break;
     }
@@ -460,32 +476,28 @@ export class Hardware
   Reset()
   {
     this.Init();
-    this.cpu?.Reset();
-    // TODO: add support for audio
-    //this.audio?.Reset();
+    this._cpu?.Reset();
+    this._audio?.Reset();
   }
 
   Restart()
   {
-    this.cpu?.Reset();
-    // TODO: add support for audio
-    //this.audio?.Reset();
-    this.memory?.Restart();
+    this._cpu?.Reset();
+    this._audio?.Reset();
+    this._memory?.Restart();
   }
 
   Stop()
   {
     this.status = Status.STOP;
-    // TODO: add support for audio
-    //this.audio?.Pause(true);
+    this._audio?.Pause(true);
   }
 
   // to continue execution
   Run()
   {
     this.status = Status.RUN;
-    // TODO: add support for audio
-    //this.audio?.Pause(false);
+    this._audio?.Pause(false);
   }
 /*
   GetRegs() const
@@ -723,4 +735,7 @@ export class Hardware
   }
 
   get display(): Display | undefined { return this._display; }
+  get memory(): Memory | undefined { return this._memory; }
+  get cpu(): CPU | undefined { return this._cpu; }
+  get keyboard(): Keyboard | undefined { return this._keyboard; }
 }
