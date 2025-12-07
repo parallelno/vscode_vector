@@ -308,10 +308,14 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         if (consts.has(rhs)) val = consts.get(rhs)!;
         else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
       }
-      // If still null and expression contains < or >, try evaluating as expression
-      if (val === null && containsLowHighByteOperators(rhs)) {
+      // If still null, try evaluating as expression
+      if (val === null) {
         const result = evaluateExpressionValue(rhs, i + 1, `Bad initial value '${rhs}' for .var ${name}`);
         val = result.value;
+        if (result.error) {
+          errors.push(result.error);
+          val = null;
+        }
       }
       if (val === null) {
         errors.push(`Bad initial value '${rhs}' for .var ${name} at ${i + 1}`);
@@ -826,6 +830,28 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
   const ifStackSecond: IfFrame[] = [];
 
+  // Helper function to process variable assignment in second pass
+  function processVariableAssignment(name: string, rhs: string, srcLine: number, originDesc: string): void {
+    let val: number | null = parseNumberFull(rhs);
+    if (val === null) {
+      if (consts.has(rhs)) val = consts.get(rhs)!;
+      else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
+    }
+    // If still null, try evaluating as expression
+    if (val === null) {
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+      try {
+        val = evaluateConditionExpression(rhs, ctx, true);
+      } catch (err: any) {
+        errors.push(`Failed to evaluate expression '${rhs}' for ${name} at ${originDesc}: ${err?.message || err}`);
+        val = null;
+      }
+    }
+    if (val !== null) {
+      consts.set(name, val);
+    }
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const srcLine = i + 1;
@@ -1016,24 +1042,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       if (variables.has(name)) {
         // This is a variable assignment - process it
         const rhs = tokens.slice(2).join(' ').trim();
-        let val: number | null = parseNumberFull(rhs);
-        if (val === null) {
-          if (consts.has(rhs)) val = consts.get(rhs)!;
-          else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
-        }
-        // If still null, try evaluating as expression
-        if (val === null) {
-          const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-          try {
-            val = evaluateConditionExpression(rhs, ctx, true);
-          } catch (err: any) {
-            errors.push(`Failed to evaluate expression '${rhs}' for ${name} at ${originDesc}: ${err?.message || err}`);
-            val = null;
-          }
-        }
-        if (val !== null) {
-          consts.set(name, val);
-        }
+        processVariableAssignment(name, rhs, srcLine, originDesc);
       }
       // Skip in second pass (constants were already processed in first pass)
       continue;
@@ -1045,24 +1054,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
         const name = assignMatch[1];
         if (variables.has(name)) {
           const rhs = assignMatch[2].trim();
-          let val: number | null = parseNumberFull(rhs);
-          if (val === null) {
-            if (consts.has(rhs)) val = consts.get(rhs)!;
-            else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
-          }
-          // If still null, try evaluating as expression
-          if (val === null) {
-            const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-            try {
-              val = evaluateConditionExpression(rhs, ctx, true);
-            } catch (err: any) {
-              errors.push(`Failed to evaluate expression '${rhs}' for ${name} at ${originDesc}: ${err?.message || err}`);
-              val = null;
-            }
-          }
-          if (val !== null) {
-            consts.set(name, val);
-          }
+          processVariableAssignment(name, rhs, srcLine, originDesc);
         }
       }
       continue;
