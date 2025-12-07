@@ -192,23 +192,23 @@
         "prg_main.asm": [
             {
                 "line": 10,
-                "enabled": true,
+                "enabled": false,
                 "addr": "0x0100"
             },
             {
                 "line": 16,
-                "enabled": true,
+                "enabled": false,
                 "label": "next",
                 "addr": "0x010A"
             },
             {
-                "line": 39,
-                "enabled": true
+                "line": 52,
+                "enabled": false,
+                "addr": "0x013F"
             },
             {
-                "line": 52,
-                "enabled": true,
-                "addr": "0x013F"
+                "line": 39,
+                "enabled": false
             }
         ]
     }
