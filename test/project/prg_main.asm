@@ -5,21 +5,6 @@
 
 .org 0x100
 start:
-			CONST1 = 0x4020
-			CONST2 = 0x8000
-			mvi a, >CONST2 + <CONST1
-			//mvi b, 2 * <CONST1
-			//mvi c, CONST1 + >CONST2
-			lxi h, CONST1 + >CONST2
-			jmp next
-			.byte 0x00, 0x00
-next:
-			; Initialize registers to zero
-			mvi a, OPCODE_EI
-			sta temp_data
-			mvi a, OPCODE_RET
-			sta temp_data
-
 			lxi sp, 0x8000
 			lxi b, 0
 			lxi d, 0

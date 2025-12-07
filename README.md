@@ -289,6 +289,17 @@ The example above emits `Value` three times (0, 1, 2) and leaves `Value` set to 
 ```
 
 Strings honor standard escapes (`\n`, `\t`, `\"`, etc.). Non-string arguments are printed in decimal.
+- `.error`: immediately halt the second pass with a fatal diagnostic that uses the same argument rules as `.print`. Use it for compile-time validation inside conditionals or macros. Arguments can be strings, numbers, labels, or expressions, separated by commas. When the directive executes the assembler stops and surfaces the concatenated message to the user. Because inactive `.if` blocks are skipped during expansion, `.error` calls inside false branches never trigger:
+
+```
+MAX_SIZE = 100
+
+.if (BUFFER_SIZE > MAX_SIZE)
+  .error "Buffer size", BUFFER_SIZE, "exceeds", MAX_SIZE
+.endif
+```
+
+Typical use cases include guardrails for configuration constants, macro argument validation, and short-circuiting builds when a derived value falls outside a legal range.
 - `.align value`: pad the output with zero bytes until the program counter reaches the next multiple of `value`, then resume emitting instructions. The argument can be any expression understood by the `.if` evaluator, must be positive, and has to be a power of two (1, 2, 4, 8, ...). If the current address is already aligned no padding is emitted. Example:
 
 ```
