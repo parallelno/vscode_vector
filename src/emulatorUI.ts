@@ -1007,36 +1007,55 @@ function highlightSourceFromHardware(hardware: Hardware | undefined | null) {
   try {
     const state = getDebugState(hardware);
     const debugLine = getDebugLine(hardware);
-    highlightSourceAddress(state.global_addr, debugLine);
+    highlightSourceAddress(hardware, state.global_addr, debugLine);
   } catch (e) {
     /* ignore highlight errors */
   }
 }
 
-function highlightSourceAddress(addr?: number, debugLine?: string) {
+function disassembleInstructionAt(hardware: Hardware | undefined | null, addr: number): string | undefined {
+  const memory = hardware?.memory;
+  if (!memory) return undefined;
+  const normalizedAddr = addr & 0xffff;
+  const opcode = memory.GetByte(normalizedAddr);
+  if (typeof opcode !== 'number' || Number.isNaN(opcode)) return undefined;
+  const rawLen = CPU.GetInstrLen(opcode);
+  const instrLen = Math.max(1, Math.min(3, Number.isFinite(rawLen) ? rawLen : 1));
+  const bytes: number[] = [];
+  for (let i = 0; i < instrLen; i++) {
+    const byteVal = memory.GetByte((normalizedAddr + i) & 0xffff);
+    if (typeof byteVal !== 'number' || Number.isNaN(byteVal)) return undefined;
+    bytes.push(byteVal & 0xff);
+  }
+  const listing = bytes.map(formatHexByte).join(' ');
+  const display = formatInstructionHoverText(opcode, bytes, '');
+  return `${display} (bytes: ${listing})`;
+}
+
+function highlightSourceAddress(hardware: Hardware | undefined | null, addr?: number, debugLine?: string) {
   if (!highlightContext || addr === undefined || addr === null) return;
   ensureHighlightDecoration(highlightContext);
-  
+
   const normalizedAddr = addr & 0xffff;
-  
+
   // Check if we have a source map and if this address is mapped
   if (!lastAddressSourceMap || lastAddressSourceMap.size === 0) {
     // No source map at all - clear any previous highlights
     clearHighlightedSourceLine();
     return;
   }
-  
+
   const info = lastAddressSourceMap.get(normalizedAddr);
-  
+
   // Handle unmapped address case: show yellow highlight with explanation
   if (!info) {
     // Save reference to the currently highlighted editor and line before clearing
     const editorToUse = lastHighlightedEditor;
     const lineToUse = lastHighlightedLine;
-    
+
     // Clear previous highlight decorations
     clearHighlightedSourceLine();
-    
+
     // If we have an editor with a previous highlight, show the unmapped indicator there
     if (editorToUse && unmappedAddressDecoration && lineToUse !== null) {
       try {
@@ -1045,11 +1064,13 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
         const lineText = doc.lineAt(idx).text;
         const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
         const addrHex = '0x' + normalizedAddr.toString(16).toUpperCase().padStart(4, '0');
+        const disasm = disassembleInstructionAt(hardware, normalizedAddr);
+        const disasmText = disasm ? ` - executing ${disasm}` : ' - executing unmapped code';
         const decoration: vscode.DecorationOptions = {
           range,
           renderOptions: {
             after: {
-              contentText: `  No source mapping for address ${addrHex} - executing unmapped code`,
+              contentText: `  No source mapping for address ${addrHex}${disasmText}`,
               color: '#ffcc00',
               fontStyle: 'italic',
               fontWeight: 'normal'
@@ -1065,10 +1086,10 @@ function highlightSourceAddress(addr?: number, debugLine?: string) {
     }
     return;
   }
-  
+
   // We have a mapping - show normal green highlight
   if (!pausedLineDecoration) return;
-  
+
   const targetPath = path.resolve(info.file);
   const run = async () => {
     try {

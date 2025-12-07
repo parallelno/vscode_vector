@@ -136,6 +136,8 @@ memory: 0x21 0xA0 0x40
 
 The tooltip length automatically matches the instruction length reported by `CPU.GetInstrLen`, so multi-byte opcodes such as `J*`, `C*`, `STA/LDA`, `IN/OUT`, and the byte-immediate ALU ops all display their encoded operands with no manual math.
 
+When execution pauses, the executing code line in the editor receives a translucent green highlight with a HW states. If no source mapping is available, the debugger highlights the last line in yellow printing the opcode executed.
+
 Data directives (`DB`/`.byte`, `DW`/`.word`). The specific values are highlighted while paused (blue for reads, red for writes). Hovering a highlighted value shows the live memory at that address (hex + decimal) from the paused emulator.
 
 ## Memory Dump panel
