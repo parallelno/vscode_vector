@@ -286,10 +286,9 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     
     const croppedFrame = new Uint32Array(OUTPUT_WIDTH * OUTPUT_HEIGHT);
     
-    // In MODE_256 (false), pixels are doubled in the buffer (each pixel appears twice)
-    // In MODE_512 (true), pixels are not doubled
-    // MODE_256 = false, MODE_512 = true
-    const pixelStep = (displayMode === false) ? 2 : 1;  // MODE_256: step 2, MODE_512: step 1
+    // In MODE_256, pixels are doubled in the buffer (each pixel appears twice)
+    // In MODE_512, pixels are not doubled
+    const pixelStep = (displayMode === IO.MODE_256) ? 2 : 1;
     
     for (let y = 0; y < OUTPUT_HEIGHT; y++) {
       const srcY = startLine + y;
@@ -318,8 +317,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
         
         if (currentViewMode === 'noBorder') {
           // Get current display mode to handle pixel doubling correctly
-          // MODE_256 = false (default), MODE_512 = true
-          const displayMode = emu.hardware.display.io?.GetDisplayMode() ?? false;
+          const displayMode = emu.hardware.display.io?.GetDisplayMode() ?? IO.MODE_256;
           // Crop to 256×192 active area with 4:3 aspect ratio
           const cropped = cropFrameToNoBorder(fullFrame, displayMode);
           panel.webview.postMessage({ type: 'frame', width: cropped.width, height: cropped.height, data: cropped.data.buffer });
