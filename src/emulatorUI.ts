@@ -18,7 +18,7 @@ import { KbOperation } from './emulator/keyboard';
 const log_tick_to_file = false;
 
 // Display constants for 4:3 aspect ratio
-const DISPLAY_WIDTH = 342;   // 256 * 4/3 ≈ 342 for 4:3 aspect ratio  
+const DISPLAY_WIDTH = 342;   // 256 * 4/3 ≈ 342 for 4:3 aspect ratio
 const DISPLAY_HEIGHT = 256;  // Full height of active area
 
 type SourceLineRef = { file: string; line: number };
@@ -97,6 +97,9 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   resetMemoryDumpState();
 
   const emu = new Emulator(context.extensionPath, '', {}, programPath);
+
+  // Pre-allocated buffer for frame cropping to avoid allocation on every frame
+  let croppedFrameBuffer = new Uint32Array(DISPLAY_WIDTH * DISPLAY_HEIGHT);
 
   let debugStream: fs.WriteStream | null = null;
 
@@ -213,6 +216,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
    * Crop the full framebuffer to 4:3 aspect ratio.
    * The full frame is 768×312, we crop to 342×256 (4:3 aspect ratio).
    * This shows the active area (centered at X=384, Y=168) with proper aspect ratio.
+   * Reuses the pre-allocated buffer for performance.
    */
   const cropFrameTo4x3 = (fullFrame: Uint32Array): Uint32Array => {
     // Calculate the center of the active area
@@ -223,16 +227,14 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     const cropOffsetX = Math.floor(activeAreaCenterX - DISPLAY_WIDTH / 2);
     const cropOffsetY = Math.floor(activeAreaCenterY - DISPLAY_HEIGHT / 2);
     
-    const cropped = new Uint32Array(DISPLAY_WIDTH * DISPLAY_HEIGHT);
-    
     for (let y = 0; y < DISPLAY_HEIGHT; y++) {
       const srcY = cropOffsetY + y;
       const srcOffset = srcY * FRAME_W + cropOffsetX;
       const dstOffset = y * DISPLAY_WIDTH;
-      cropped.set(fullFrame.subarray(srcOffset, srcOffset + DISPLAY_WIDTH), dstOffset);
+      croppedFrameBuffer.set(fullFrame.subarray(srcOffset, srcOffset + DISPLAY_WIDTH), dstOffset);
     }
     
-    return cropped;
+    return croppedFrameBuffer;
   };
 
   /**
