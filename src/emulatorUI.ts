@@ -7,6 +7,7 @@ import { HardwareReq } from './emulator/hardware_reqs';
 import { FRAME_H, FRAME_LEN, FRAME_W } from './emulator/display';
 import Memory, { AddrSpace, MAPPING_MODE_MASK, MemoryAccessSnapshot } from './emulator/memory';
 import CPU, { CpuState } from './emulator/cpu_i8080';
+import IO from './emulator/io';
 import { getWebviewContent } from './emulatorUI/webviewContent';
 import { getDebugLine, getDebugState } from './emulatorUI/debugOutput';
 import { handleMemoryDumpControlMessage, resetMemoryDumpState, updateMemoryDumpFromHardware } from './emulatorUI/memoryDump';
@@ -266,33 +267,37 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
    * The active area is 256 lines tall starting at line 40 (SCAN_ACTIVE_AREA_TOP).
    * For a 4:3 aspect ratio with width 256, height should be 192 (256 / 4 * 3 = 192).
    * The output is cropped to 256×192 and centered within the active area.
+   * 
+   * @param fullFrame The full 768×312 framebuffer
+   * @param displayMode The current display mode (MODE_256 or MODE_512)
    */
-  const cropFrameToNoBorder = (fullFrame: Uint32Array): { data: Uint32Array; width: number; height: number } => {
+  const cropFrameToNoBorder = (fullFrame: Uint32Array, displayMode: boolean): { data: Uint32Array; width: number; height: number } => {
     const SCAN_ACTIVE_AREA_TOP = 40; // 24 vsync + 16 vblank top
     const ACTIVE_AREA_H = 256;
     const BORDER_LEFT = 128; // in 768px buffer
     
-    // For 4:3 aspect ratio with width 256: height = 256 / 4 * 3 = 192
+    // For 4:3 aspect ratio with width 256: height = 256 * 3 / 4 = 192
     const OUTPUT_WIDTH = 256;
-    const OUTPUT_HEIGHT = 192;
+    const OUTPUT_HEIGHT = Math.floor(OUTPUT_WIDTH * 3 / 4); // 192 for 4:3 aspect ratio
     
     // Center vertically within the 256-line active area
     const verticalOffset = Math.floor((ACTIVE_AREA_H - OUTPUT_HEIGHT) / 2);
     const startLine = SCAN_ACTIVE_AREA_TOP + verticalOffset;
     
-    // In MODE_256, pixels are doubled in the buffer, so we need to skip every other pixel
-    // to get the actual 256-pixel-wide image. In MODE_512, we would take consecutive pixels.
-    // For simplicity, we assume MODE_256 is most common and take every 2nd pixel.
     const croppedFrame = new Uint32Array(OUTPUT_WIDTH * OUTPUT_HEIGHT);
+    
+    // In MODE_256, pixels are doubled in the buffer (each pixel appears twice)
+    // In MODE_512, pixels are not doubled
+    const pixelStep = displayMode === IO.MODE_256 ? 2 : 1;
     
     for (let y = 0; y < OUTPUT_HEIGHT; y++) {
       const srcY = startLine + y;
       const srcOffset = srcY * FRAME_W + BORDER_LEFT;
       const dstOffset = y * OUTPUT_WIDTH;
       
-      // Copy 256 pixels, taking every 2nd pixel to account for MODE_256 doubling
+      // Copy pixels with appropriate stepping based on display mode
       for (let x = 0; x < OUTPUT_WIDTH; x++) {
-        croppedFrame[dstOffset + x] = fullFrame[srcOffset + x * 2];
+        croppedFrame[dstOffset + x] = fullFrame[srcOffset + x * pixelStep];
       }
     }
     
@@ -311,8 +316,10 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
         const fullFrame = emu.hardware.display.GetFrame();
         
         if (currentViewMode === 'noBorder') {
+          // Get current display mode to handle pixel doubling correctly
+          const displayMode = emu.hardware.display.io?.GetDisplayMode() ?? IO.MODE_256;
           // Crop to 256×192 active area with 4:3 aspect ratio
-          const cropped = cropFrameToNoBorder(fullFrame);
+          const cropped = cropFrameToNoBorder(fullFrame, displayMode);
           panel.webview.postMessage({ type: 'frame', width: cropped.width, height: cropped.height, data: cropped.data.buffer });
         } else {
           // Send full 768×312 frame
