@@ -41,6 +41,7 @@ let unmappedAddressDecoration: vscode.TextEditorDecorationType | null = null;
 let lastHighlightedEditor: vscode.TextEditor | null = null;
 let lastHighlightedLine: number | null = null;
 let currentToolbarIsRunning = true;
+let currentEmulationSpeed: number | 'max' = 1;
 let dataReadDecoration: vscode.TextEditorDecorationType | null = null;
 let dataWriteDecoration: vscode.TextEditorDecorationType | null = null;
 let lastDataAccessSnapshot: MemoryAccessSnapshot | null = null;
@@ -357,6 +358,16 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
       handleDebugAction(msg.action);
     } else if (msg && msg.type === 'memoryDumpControl') {
       handleMemoryDumpControlMessage(msg, panel, emu.hardware);
+    } else if (msg && msg.type === 'speedChange') {
+      const speedValue = msg.speed;
+      if (speedValue === 'max') {
+        currentEmulationSpeed = 'max';
+      } else {
+        const parsed = parseFloat(speedValue);
+        if (!isNaN(parsed) && parsed > 0) {
+          currentEmulationSpeed = parsed;
+        }
+      }
     }
   }, undefined, context.subscriptions);
 
@@ -393,9 +404,15 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
 
       running = emu.hardware?.Request(HardwareReq.IS_RUNNING)['isRunning'] ?? false;
 
-      // throttle to approx real-time
+      // throttle to approx real-time, adjusted by emulation speed
       const elapsed = performance.now() - startTime;
-      const delay = Math.max(0, 1000/60 - elapsed);
+      let delay: number;
+      if (currentEmulationSpeed === 'max') {
+        delay = 0; // no delay for max speed
+      } else {
+        const targetFrameTime = (1000 / 60) / currentEmulationSpeed;
+        delay = Math.max(0, targetFrameTime - elapsed);
+      }
       await new Promise(resolve => setTimeout(resolve, delay));
 
     } while (running);
