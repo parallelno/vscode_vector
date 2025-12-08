@@ -1,8 +1,0 @@
-{
-    "name": "test_max_speed",
-    "main": "prg_main.asm",
-    "rom": "./out/test_max_speed.rom",
-    "settings": {
-        "speed": "max"
-    }
-}

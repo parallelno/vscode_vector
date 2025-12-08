@@ -55,11 +55,11 @@ let lastDataAccessSnapshot: MemoryAccessSnapshot | null = null;
 let currentPanelController: { pause: () => void; resume: () => void; stepFrame: () => void; } | null = null;
 
 
-type OpenEmulatorOptions = { 
+type OpenEmulatorOptions = {
   /** Path to the ROM or FDD file to load */
-  programPath?: string; 
+  programPath?: string;
   /** Path to the debug symbols file */
-  debugPath?: string; 
+  debugPath?: string;
   /** Path to the project.json file (used for saving emulation speed on close) */
   projectPath?: string;
   /** Initial emulation speed to set when starting the emulator */
@@ -151,8 +151,8 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   // Set initial speed from options if provided
   if (options?.initialSpeed !== undefined) {
     currentEmulationSpeed = options.initialSpeed;
-    try { 
-      panel.webview.postMessage({ type: 'setSpeed', speed: options.initialSpeed }); 
+    try {
+      panel.webview.postMessage({ type: 'setSpeed', speed: options.initialSpeed });
     } catch (e) {}
   }
 
@@ -418,6 +418,9 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
       // Re-send the current frame to the webview to restore canvas content
       // that may have been discarded while the tab was hidden
       sendFrameToWebview();
+      try {
+        panel.webview.postMessage({ type: 'setSpeed', speed: currentEmulationSpeed });
+      } catch (e) {}
     }
   }, null, context.subscriptions);
 
@@ -1045,7 +1048,7 @@ function clearHighlightedSourceLine() {
  * This function is called when the visible editors change (e.g., when tabs are moved or split).
  * It restores the paused line decoration (green highlight) or unmapped address decoration (yellow)
  * to maintain continuity of the debugger state visualization.
- * 
+ *
  * The function only operates when:
  * - The emulator is paused (not running)
  * - There is a saved highlight state (file path and decoration)

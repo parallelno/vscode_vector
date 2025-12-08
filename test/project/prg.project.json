@@ -1,5 +1,8 @@
 {
     "name": "prg",
     "main": "prg_main.asm",
-    "rom": "./out/game.rom"
+    "rom": "./out/game.rom",
+    "settings": {
+        "speed": 1
+    }
 }

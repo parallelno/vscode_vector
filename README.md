@@ -115,7 +115,18 @@ You can configure your project using a `.project.json` file. This file defines t
     "rom": "./out/game.rom",
     "fdd": "./out/game.fdd",
     "settings": {
-        "speed": 2
+        "speed": 1.5
+    }
+}
+```
+```json
+{
+    "name": "my_project",
+    "main": "main.asm",
+    "rom": "./out/game.rom",
+    "fdd": "./out/game.fdd",
+    "settings": {
+        "speed": "max"
     }
 }
 ```

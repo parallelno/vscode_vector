@@ -1,9 +1,0 @@
-{
-    "name": "test_settings",
-    "main": "prg_main.asm",
-    "rom": "./out/test_settings.rom",
-    "fdd": "./out/GJ.fdd",
-    "settings": {
-        "speed": 2
-    }
-}
