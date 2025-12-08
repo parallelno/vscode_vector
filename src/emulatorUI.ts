@@ -18,7 +18,7 @@ import { KbOperation } from './emulator/keyboard';
 const log_tick_to_file = false;
 
 // Display constants for 4:3 aspect ratio
-const DISPLAY_WIDTH = 342;   // 256 * 4/3 ≈ 342 for 4:3 aspect ratio
+const DISPLAY_WIDTH = 342;   // 256 * 4/3 = 341.33, rounded to 342 for even dimensions
 const DISPLAY_HEIGHT = 256;  // Full height of active area
 
 type SourceLineRef = { file: string; line: number };
