@@ -119,6 +119,13 @@ Launching the VS Code emulator panel loads the ROM and shows a compact toolbar o
 - **Step Frame** stops the emulator, runs one full frame with no breaks, and leaves execution paused for inspection.
 - **Step 256** runs 256 single-instruction steps in succession so you can advance through short loops faster without resuming full speed.
 - **Restart** stops the hardware, resets/restarts the ROM, reloads it into memory, and then resumes running.
+- **Speed** dropdown allows you to control the emulation speed with the following options:
+  - **0.1x** - Run at 1/10th normal speed (slow motion for debugging)
+  - **1x** - Normal speed (default, 60 FPS)
+  - **2x** - 2x normal speed
+  - **4x** - 4x normal speed
+  - **8x** - 8x normal speed
+  - **Max** - Run as fast as possible with no frame delay
 
 The Step buttons automatically disable whenever the emulator is running and re-enable when it pauses or hits a breakpoint so you cannot queue manual steps mid-run.
 

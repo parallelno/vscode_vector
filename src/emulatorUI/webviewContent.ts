@@ -11,6 +11,9 @@ export function getWebviewContent() {
     .toolbar button[data-toggle="run-pause"]{min-width:72px;text-align:center}
     .toolbar button:hover:not(:disabled){background:#2c2c2c}
     .toolbar button:disabled{opacity:0.4;cursor:not-allowed}
+    .toolbar select{background:#1e1e1e;border:1px solid #555;color:#fff;padding:3px 5px;border-radius:3px;cursor:pointer;font-size:10px;font-family:Consolas,monospace}
+    .toolbar select:hover{background:#2c2c2c}
+    .toolbar label{display:flex;align-items:center;gap:4px;font-size:10px;text-transform:uppercase;letter-spacing:0.05em}
     .display-row{display:flex;flex-direction:column;gap:16px;padding:16px;align-items:stretch;background:#050505}
     .display-row__canvas{display:flex;justify-content:center;align-items:center}
     .display-row__canvas canvas{display:block;background:#111;border:1px solid #222;max-width:100%;height:auto}
@@ -82,6 +85,17 @@ export function getWebviewContent() {
     <button type="button" data-action="step256">Step 256</button>
     <button type="button" data-action="stepFrame">Step Frame</button>
     <button type="button" data-action="restart">Restart</button>
+    <label>
+      Speed:
+      <select id="speed-select">
+        <option value="0.1">0.1x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+        <option value="8">8x</option>
+        <option value="max">Max</option>
+      </select>
+    </label>
   </div>
   <div class="display-row">
     <div class="display-row__canvas">
@@ -165,6 +179,7 @@ export function getWebviewContent() {
     const toolbar = document.querySelector('.toolbar');
     const pauseRunButton = toolbar ? toolbar.querySelector('button[data-action="pause"]') : null;
     const stepButtonActions = ['stepOver','stepInto','stepOut','stepFrame','step256'];
+    const speedSelect = document.getElementById('speed-select');
     const memoryDumpContent = document.getElementById('memory-dump');
     const memoryFollowCheckbox = document.getElementById('memory-follow');
     const memoryStartInput = document.getElementById('memory-start');
@@ -477,6 +492,12 @@ export function getWebviewContent() {
 
     if (memoryRefreshButton instanceof HTMLButtonElement) {
       memoryRefreshButton.addEventListener('click', () => postMemoryCommand('refresh'));
+    }
+
+    if (speedSelect instanceof HTMLSelectElement) {
+      speedSelect.addEventListener('change', () => {
+        vscode.postMessage({ type: 'speedChange', speed: speedSelect.value });
+      });
     }
 
     const shouldForwardKey = (event) => {
