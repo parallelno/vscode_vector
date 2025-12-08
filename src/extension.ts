@@ -645,7 +645,8 @@ export function activate(context: vscode.ExtensionContext) {
     const projectData = {
       name: trimmed,
       main: 'main.asm',
-      rom: romName
+      rom: romName,
+      fdd: ""
     };
     const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const targetPath = path.join(workspaceRoot, `${safeName}.project.json`);

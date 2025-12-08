@@ -48,7 +48,7 @@ let lastDataAccessSnapshot: MemoryAccessSnapshot | null = null;
 let currentPanelController: { pause: () => void; resume: () => void; stepFrame: () => void; } | null = null;
 
 
-type OpenEmulatorOptions = { programPath?: string; romPath?: string; debugPath?: string };
+type OpenEmulatorOptions = { programPath?: string; debugPath?: string };
 
 export async function openEmulatorPanel(context: vscode.ExtensionContext, logChannel?: vscode.OutputChannel, options?: OpenEmulatorOptions)
 {
@@ -64,7 +64,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     return candidates && candidates.length ? candidates[0].fsPath : '';
   };
 
-  let programPath = (options?.programPath || options?.romPath || '').trim();
+  let programPath = (options?.programPath|| '').trim();
   if (!programPath) {
     programPath = await pickProgramFromDialog();
   }

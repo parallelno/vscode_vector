@@ -450,15 +450,15 @@ export class Hardware
         {"scrollVert", m_display.GetScrollVert()}
         };
       break;
-
+*/
     case HardwareReq.LOAD_FDD:
-      m_fdc.Mount(dataJ["driveIdx"], dataJ["data"], dataJ["path"]);
+      this._fdc?.Mount(data["driveIdx"], data["data"], data["path"]);
       break;
 
     case HardwareReq.RESET_UPDATE_FDD:
-      m_fdc.ResetUpdate(dataJ["driveIdx"]);
+      this._fdc?.ResetUpdate(data["driveIdx"]);
       break;
-*/
+
     case HardwareReq.DEBUG_ATTACH:
       this.debugAttached = data["data"];
       break;

@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { ROM_LOAD_ADDR } from './emulator/memory';
 import Debugger from './emulator/debugger';
+import { FDD_SIZE } from './emulator/fdc_wd1793';
 
 export type EmulatorSettings = { [key: string]: any };
 
@@ -70,8 +71,8 @@ export class Emulator {
         this.LoadRom(path);
         break;
       case this.EXT_FDD:
-        // TODO: implement FDD handling
-        // RecentFilesUpdate(FileType::FDD, path, 0, true);
+        // TODO: send this as parameters: driveIdx, autoBoot
+        this.LoadFdd(path);
         break;
       case this.EXT_REC:
         // TODO: implement REC handling
@@ -101,6 +102,48 @@ export class Emulator {
     //this.scheduler.AddSignal({dev::Signals::DISASM_UPDATE});
 
     console.log("File loaded: " + path);
+  }
+
+
+
+	LoadFdd(path: string, driveIdx: number = 0, autoBoot: boolean = true)
+  {
+    const buffer = fs.readFileSync(path);
+    let fddimg = new Uint8Array(buffer);
+    if (!fddimg || fddimg.length === 0) {
+      console.log("Error occurred while loading the file. Path: " + path + ". " +
+        "Please ensure the file exists and you have the correct permissions to read it.");
+      return;
+    }
+
+    if (fddimg.length > FDD_SIZE) {
+      console.log("Fdc1793 Warning: disk image is too big. " +
+        `It size will be concatenated to ${FDD_SIZE}. ` +
+        `Original size: ${fddimg.length} bytes, path: ${path}`);
+      fddimg = fddimg.slice(0, FDD_SIZE);
+    }
+
+    if (autoBoot) this._hardware?.Request(HardwareReq.STOP);
+
+    // loading the fdd data
+    this._hardware?.Request(
+      HardwareReq.LOAD_FDD, {"data": fddimg , "driveIdx": driveIdx, "path": path});
+
+    // TODO: check if we still need this
+    //this._debugger?.GetDebugData().LoadDebugData(_path);
+
+    if (autoBoot)
+    {
+      this._hardware?.Request(HardwareReq.RESET);
+      // has to be called after Hardware loading FDD
+      // image because it stores the last state of Hardware
+      this._hardware?.Request(HardwareReq.DEBUG_RESET, { "resetRecorder": true });
+
+      // TODO: check if we still need this
+      //this._scheduler.AddSignal({dev::Signals::DISASM_UPDATE});
+
+      this._hardware?.Request(HardwareReq.RUN);
+    }
   }
 
   get hardware(): Hardware | undefined { return this._hardware; }
