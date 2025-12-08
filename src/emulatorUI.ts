@@ -280,17 +280,17 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     const OUTPUT_WIDTH = 256;
     const OUTPUT_HEIGHT = Math.floor(OUTPUT_WIDTH * 3 / 4); // 192 for 4:3 aspect ratio
     
-    // Center vertically within the 256-line active area
+    // Center vertically within the 256-line active area: (256 - 192) / 2 = 32
     const verticalOffset = Math.floor((ACTIVE_AREA_H - OUTPUT_HEIGHT) / 2);
     const startLine = SCAN_ACTIVE_AREA_TOP + verticalOffset;
     
     const croppedFrame = new Uint32Array(OUTPUT_WIDTH * OUTPUT_HEIGHT);
     
-    // In MODE_256, pixels are doubled in the buffer (each pixel appears twice)
-    // In MODE_512, pixels are not doubled
-    // IO.MODE_256 = false, IO.MODE_512 = true
-    // When MODE_256 (false): need step 2 to skip doubled pixels
-    // When MODE_512 (true): need step 1 for consecutive pixels
+    // Pixel stepping depends on display mode:
+    // MODE_256 (false): Pixels are doubled in buffer → step 2 to get unique pixels
+    // MODE_512 (true): Pixels are not doubled → step 1 for consecutive pixels
+    // Test: displayMode=false → (false === false) ? 2 : 1 → 2 ✓
+    //       displayMode=true  → (true === false) ? 2 : 1 → 1 ✓
     const pixelStep = (displayMode === IO.MODE_256) ? 2 : 1;
     
     for (let y = 0; y < OUTPUT_HEIGHT; y++) {
