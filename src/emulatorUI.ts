@@ -72,6 +72,8 @@ type OpenEmulatorOptions = {
   initialViewMode?: ViewMode;
   /** Path to the RAM disk data file for persistence */
   ramDiskDataPath?: string;
+  /** Path to the FDD data file for persistence */
+  fddDataPath?: string;
 };
 
 export async function openEmulatorPanel(context: vscode.ExtensionContext, logChannel?: vscode.OutputChannel, options?: OpenEmulatorOptions)
@@ -118,7 +120,8 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
 
   const emu = new Emulator(context.extensionPath, '', {
     ramDiskDataPath: options?.ramDiskDataPath,
-    ramDiskClearAfterRestart: !options?.ramDiskDataPath  // Only clear if no persistence path
+    ramDiskClearAfterRestart: !options?.ramDiskDataPath,  // Only clear if no persistence path
+    fddDataPath: options?.fddDataPath
   }, programPath);
 
   let debugStream: fs.WriteStream | null = null;

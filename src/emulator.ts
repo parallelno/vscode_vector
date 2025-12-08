@@ -10,6 +10,7 @@ import { FDD_SIZE } from './emulator/fdc_wd1793';
 export type EmulatorSettings = { 
   ramDiskDataPath?: string;
   ramDiskClearAfterRestart?: boolean;
+  fddDataPath?: string;
   [key: string]: any;
 };
 
@@ -24,6 +25,7 @@ export class Emulator {
 
   ramDiskClearAfterRestart = true;
   ramDiskDataPath: string | null = null;
+  fddDataPath: string | null = null;
 
   constructor(extensionPath: string, settingsPath: string, settings: EmulatorSettings, romFddRecPath: string) {
     // Load settings
@@ -32,6 +34,9 @@ export class Emulator {
     }
     if (settings.ramDiskClearAfterRestart !== undefined) {
       this.ramDiskClearAfterRestart = settings.ramDiskClearAfterRestart;
+    }
+    if (settings.fddDataPath !== undefined) {
+      this.fddDataPath = settings.fddDataPath;
     }
     this.Init(extensionPath, romFddRecPath);
   }
@@ -50,7 +55,7 @@ export class Emulator {
       pathBootData = pathModule.join(extensionPath, 'res', 'boot', 'boot.bin');
     }
 
-    this._hardware = new Hardware(pathBootData, this.ramDiskDataPath ?? '', this.ramDiskClearAfterRestart);
+    this._hardware = new Hardware(pathBootData, this.ramDiskDataPath ?? '', this.ramDiskClearAfterRestart, this.fddDataPath ?? '');
     this._debugger = new Debugger(this._hardware);
   }
 

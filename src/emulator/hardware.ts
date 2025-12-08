@@ -64,7 +64,8 @@ export class Hardware
   constructor(
     pathBootData: string,
     ramDiskDataPath: string,
-    ramDiskClearAfterRestart: boolean)
+    ramDiskClearAfterRestart: boolean,
+    fddDataPath: string)
   {
     this._memory = new Memory(
       pathBootData, ramDiskDataPath, ramDiskClearAfterRestart);
@@ -73,7 +74,7 @@ export class Hardware
     this._ay = new SoundAY8910();
     this._ayWrapper = new AYWrapper(this._ay);
     this._audio = new Audio(this._timer, this._ayWrapper);
-    this._fdc = new Fdc1793();
+    this._fdc = new Fdc1793(fddDataPath);
     this.io = new IO(this._keyboard, this._memory, this._timer, this._ay, this._fdc);
     this._cpu = new CPU(
       this._memory, this.io.PortIn.bind(this.io), this.io.PortOut.bind(this.io));
@@ -87,6 +88,8 @@ export class Hardware
   {
     // Save RAM disk data before destruction
     this._memory?.SaveRamDiskData();
+    // Save FDD data before destruction
+    this._fdc?.SaveFddData();
     this.ReqHandling(HardwareReq.EXIT);
   }
 
