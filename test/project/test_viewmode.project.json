@@ -1,0 +1,10 @@
+{
+    "name": "test_viewmode",
+    "main": "prg_main.asm",
+    "rom": "./out/test_viewmode.rom",
+    "fdd": "./out/GJ.fdd",
+    "settings": {
+        "speed": 1,
+        "viewMode": "noBorder"
+    }
+}

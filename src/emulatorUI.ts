@@ -262,33 +262,35 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   };
 
   /**
-   * Crops the full 768×312 framebuffer to show only the 256×256 active area.
-   * The active area starts at line 40 (SCAN_ACTIVE_AREA_TOP) and is centered horizontally.
-   * For a 4:3 aspect ratio display, we extract 256×192 centered vertically within the active area.
+   * Crops the full 768×312 framebuffer to show only the active area with 4:3 aspect ratio.
+   * The active area is 256 lines tall starting at line 40 (SCAN_ACTIVE_AREA_TOP).
+   * For a 4:3 aspect ratio display with height 256, width should be 342 (256 * 4/3 ≈ 342).
+   * The output is centered horizontally within the full frame.
    */
   const cropFrameToNoBorder = (fullFrame: Uint32Array): { data: Uint32Array; width: number; height: number } => {
     const SCAN_ACTIVE_AREA_TOP = 40; // 24 vsync + 16 vblank top
     const ACTIVE_AREA_H = 256;
-    const BORDER_LEFT = 128; // in 768px buffer for MODE_512
+    const BORDER_LEFT = 128; // in 768px buffer
     
-    // For 4:3 aspect ratio with width 256: height should be 192 (256/4*3 = 192)
-    const OUTPUT_WIDTH = 256;
-    const OUTPUT_HEIGHT = 192;
+    // For 4:3 aspect ratio with height 256: width = 256 * 4/3 ≈ 342
+    const OUTPUT_WIDTH = 342;
+    const OUTPUT_HEIGHT = 256;
     
-    // Center the 192 height within the 256 active area
-    const verticalOffset = Math.floor((ACTIVE_AREA_H - OUTPUT_HEIGHT) / 2);
-    const startLine = SCAN_ACTIVE_AREA_TOP + verticalOffset;
+    const startLine = SCAN_ACTIVE_AREA_TOP;
+    // Center horizontally: the active area in MODE_512 is 512px wide starting at pixel 128
+    // For MODE_256 with pixel doubling, we want 342 pixels from the buffer
+    const startX = BORDER_LEFT + Math.floor((512 - OUTPUT_WIDTH) / 2);
     
     const croppedFrame = new Uint32Array(OUTPUT_WIDTH * OUTPUT_HEIGHT);
     
     for (let y = 0; y < OUTPUT_HEIGHT; y++) {
       const srcY = startLine + y;
-      const srcOffset = srcY * FRAME_W + BORDER_LEFT;
+      const srcOffset = srcY * FRAME_W + startX;
       const dstOffset = y * OUTPUT_WIDTH;
       
-      // Copy 256 pixels from the center of each line
+      // Copy OUTPUT_WIDTH pixels from each line
       for (let x = 0; x < OUTPUT_WIDTH; x++) {
-        croppedFrame[dstOffset + x] = fullFrame[srcOffset + x * 2]; // *2 because MODE_256 duplicates pixels
+        croppedFrame[dstOffset + x] = fullFrame[srcOffset + x];
       }
     }
     
@@ -307,7 +309,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
         const fullFrame = emu.hardware.display.GetFrame();
         
         if (currentViewMode === 'noBorder') {
-          // Crop to 256×192 active area with 4:3 aspect ratio
+          // Crop to 342×256 active area with 4:3 aspect ratio
           const cropped = cropFrameToNoBorder(fullFrame);
           panel.webview.postMessage({ type: 'frame', width: cropped.width, height: cropped.height, data: cropped.data.buffer });
         } else {
