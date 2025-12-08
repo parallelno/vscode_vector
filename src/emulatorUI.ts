@@ -272,9 +272,9 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
    * @param displayMode The current display mode (MODE_256 or MODE_512)
    */
   const cropFrameToNoBorder = (fullFrame: Uint32Array, displayMode: boolean): { data: Uint32Array; width: number; height: number } => {
-    const SCAN_ACTIVE_AREA_TOP = 40; // 24 vsync + 16 vblank top
-    const ACTIVE_AREA_H = 256;
-    const BORDER_LEFT = 128; // in 768px buffer
+    const SCAN_ACTIVE_AREA_TOP = 40; // 24 vsync + 16 vblank top (from display.ts)
+    const ACTIVE_AREA_H = 256; // (from display.ts)
+    const BORDER_LEFT = 128; // in 768px buffer (from display.ts)
     
     // For 4:3 aspect ratio with width 256: height = 256 * 3 / 4 = 192
     const OUTPUT_WIDTH = 256;
@@ -288,6 +288,9 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     
     // In MODE_256, pixels are doubled in the buffer (each pixel appears twice)
     // In MODE_512, pixels are not doubled
+    // IO.MODE_256 = false, IO.MODE_512 = true
+    // When MODE_256 (false): need step 2 to skip doubled pixels
+    // When MODE_512 (true): need step 1 for consecutive pixels
     const pixelStep = (displayMode === IO.MODE_256) ? 2 : 1;
     
     for (let y = 0; y < OUTPUT_HEIGHT; y++) {
