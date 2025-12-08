@@ -250,10 +250,10 @@ export function activate(context: vscode.ExtensionContext) {
     const addr = lookupLineAddress(tokens, filePath, line);
     if (addr) entry.addr = addr;
   };
-  async function compileAsmSource(srcPath: string, contents: string, options: { outPath?: string } = {}): Promise<boolean> {
+  async function compileAsmSource(srcPath: string, contents: string, options: { outPath?: string; debugPath?: string } = {}): Promise<boolean> {
     if (!srcPath) return false;
     const outPath = options.outPath || srcPath.replace(/\.asm$/i, '.rom');
-    const writeRes = assembleAndWrite(contents, outPath, srcPath);
+    const writeRes = assembleAndWrite(contents, outPath, srcPath, options.debugPath);
     emitPrintMessages(writeRes.printMessages);
     emitWarnings(writeRes.warnings);
     if (!writeRes.success) {
@@ -284,8 +284,13 @@ export function activate(context: vscode.ExtensionContext) {
     try {
       const includedFiles = new Set<string>(Array.from(findIncludedFiles(srcPath, contents)));
       let tokenPath: string;
-      if (/\.[^/.]+$/.test(outPath)) tokenPath = outPath.replace(/\.[^/.]+$/, '.debug.json');
-      else tokenPath = outPath + '.debug.json';
+      if (options.debugPath) {
+        tokenPath = options.debugPath;
+      } else if (/\.[^/.]+$/.test(outPath)) {
+        tokenPath = outPath.replace(/\.[^/.]+$/, '.debug.json');
+      } else {
+        tokenPath = outPath + '.debug.json';
+      }
       if (fs.existsSync(tokenPath)) {
         try {
           const tokenText = fs.readFileSync(tokenPath, 'utf8');
@@ -360,6 +365,7 @@ export function activate(context: vscode.ExtensionContext) {
     name: string;
     mainPath?: string;
     outputBase: string;
+    romName: string;
   };
 
   function findProjectJsonFiles(workspaceRoot: string): string[] {
@@ -396,10 +402,11 @@ export function activate(context: vscode.ExtensionContext) {
       const rawName = typeof data?.name === 'string' && data.name.trim().length ? data.name.trim() : path.basename(projectPath);
       const defaultBase = path.basename(projectPath).replace(/\.project\.json$/i, '') || 'vector_project';
       const outputBase = sanitizeFileName(rawName, sanitizeFileName(defaultBase, 'vector_project'));
+      const romName = typeof data?.rom === 'string' && data.rom.trim().length ? data.rom.trim() : `${outputBase}.rom`;
       const name = rawName;
       const mainEntry = typeof data?.main === 'string' ? data.main : undefined;
       const mainPath = mainEntry ? (path.isAbsolute(mainEntry) ? mainEntry : path.resolve(path.dirname(projectPath), mainEntry)) : undefined;
-      return { projectPath, name, mainPath, outputBase };
+      return { projectPath, name, mainPath, outputBase, romName };
     } catch (err) {
       if (!opts.quiet) {
         logOutput(`Devector: Failed to read ${projectPath}: ${err instanceof Error ? err.message : String(err)}`);
@@ -446,8 +453,9 @@ export function activate(context: vscode.ExtensionContext) {
       return false;
     }
     const projectDir = path.dirname(projectPath);
-    const romPath = path.join(projectDir, `${info.outputBase}.rom`);
-    const success = await compileAsmSource(info.mainPath, contents, { outPath: romPath });
+    const romPath = path.join(projectDir, info.romName);
+    const debugPath = path.join(projectDir, `${info.outputBase}.debug.json`);
+    const success = await compileAsmSource(info.mainPath, contents, { outPath: romPath, debugPath });
     if (success) {
       const reason = options.reason ? ` (${options.reason})` : '';
       logOutput(`Devector: Compiled project ${path.basename(projectPath)} -> ${path.basename(romPath)}${reason}`);
@@ -459,7 +467,7 @@ export function activate(context: vscode.ExtensionContext) {
     return success;
   }
 
-  async function pickProjectRomPath(options: { compileBeforeRun?: boolean } = {}): Promise<{ project: ProjectInfo; romPath: string } | undefined> {
+  async function pickProjectRomPath(options: { compileBeforeRun?: boolean } = {}): Promise<{ project: ProjectInfo; romPath: string; debugPath: string } | undefined> {
     if (!vscode.workspace.workspaceFolders || !vscode.workspace.workspaceFolders.length) {
       vscode.window.showErrorMessage('Open a folder before running a ROM.');
       return undefined;
@@ -477,7 +485,7 @@ export function activate(context: vscode.ExtensionContext) {
       const picks = infos.map((info) => ({
         label: info.name,
         description: path.relative(workspaceRoot, info.projectPath) || info.projectPath,
-        detail: `${info.outputBase}.rom`,
+        detail: info.romName,
         target: info
       }));
       const pick = await vscode.window.showQuickPick(picks, { placeHolder: 'Select a project ROM to run' });
@@ -485,7 +493,8 @@ export function activate(context: vscode.ExtensionContext) {
       selected = pick.target;
     }
 
-    const romPath = path.join(path.dirname(selected.projectPath), `${selected.outputBase}.rom`);
+    const romPath = path.join(path.dirname(selected.projectPath), selected.romName);
+    const debugPath = path.join(path.dirname(selected.projectPath), `${selected.outputBase}.debug.json`);
     const ensureRomReady = async (): Promise<boolean> => {
       if (options.compileBeforeRun) {
         const compiled = await compileProjectFile(selected.projectPath, { notify: true, reason: 'compile & run' });
@@ -510,13 +519,13 @@ export function activate(context: vscode.ExtensionContext) {
       return undefined;
     }
 
-    return { project: selected, romPath };
+    return { project: selected, romPath, debugPath };
   }
 
   async function launchProjectRomEmulator(options: { compileBeforeRun?: boolean } = {}): Promise<boolean> {
     const romSelection = await pickProjectRomPath({ compileBeforeRun: options.compileBeforeRun });
     if (!romSelection) return false;
-    await openEmulatorPanel(context, devectorOutput, { romPath: romSelection.romPath });
+    await openEmulatorPanel(context, devectorOutput, { romPath: romSelection.romPath, debugPath: romSelection.debugPath });
     return true;
   }
 
@@ -600,15 +609,17 @@ export function activate(context: vscode.ExtensionContext) {
     if (!name) return;
     const trimmed = name.trim();
     const safeName = sanitizeFileName(trimmed, 'vector_project');
+    const romBaseName = sanitizeFileName(trimmed, safeName);
+    const romName = `${romBaseName}.rom`;
     const projectData = {
       name: trimmed,
-      main: 'main.asm'
+      main: 'main.asm',
+      rom: romName
     };
     const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const targetPath = path.join(workspaceRoot, `${safeName}.project.json`);
     const mainAsmPath = path.join(workspaceRoot, 'main.asm');
-    const romBaseName = sanitizeFileName(trimmed, safeName);
-    const romPath = path.join(workspaceRoot, `${romBaseName}.rom`);
+    const romPath = path.join(workspaceRoot, romName);
     if (fs.existsSync(targetPath)) {
       const overwrite = await vscode.window.showWarningMessage(
         `${path.basename(targetPath)} already exists. Overwrite?`,

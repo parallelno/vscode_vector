@@ -19,7 +19,7 @@ const log_tick_to_file = false;
 
 type SourceLineRef = { file: string; line: number };
 
-let lastBreakpointSource: { romPath: string; hardware?: Hardware | null; log?: vscode.OutputChannel } | null = null;
+let lastBreakpointSource: { romPath: string; debugPath?: string; hardware?: Hardware | null; log?: vscode.OutputChannel } | null = null;
 let lastAddressSourceMap: Map<number, SourceLineRef> | null = null;
 type SymbolMeta = { value: number; kind: 'label' | 'const' };
 type SymbolCache = {
@@ -48,7 +48,7 @@ let lastDataAccessSnapshot: MemoryAccessSnapshot | null = null;
 let currentPanelController: { pause: () => void; resume: () => void; stepFrame: () => void; } | null = null;
 
 
-type OpenEmulatorOptions = { romPath?: string };
+type OpenEmulatorOptions = { romPath?: string; debugPath?: string };
 
 export async function openEmulatorPanel(context: vscode.ExtensionContext, logChannel?: vscode.OutputChannel, options?: OpenEmulatorOptions)
 {
@@ -172,9 +172,9 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   emu.hardware?.Request(HardwareReq.DEBUG_ATTACH, { data: true });
   emu.hardware?.Request(HardwareReq.RUN);
 
-  const appliedBreakpoints = loadBreakpointsFromToken(romPath, emu.hardware, emuOutput);
+  const appliedBreakpoints = loadBreakpointsFromToken(romPath, emu.hardware, emuOutput, options?.debugPath);
 
-  lastBreakpointSource = { romPath, hardware: emu.hardware, log: emuOutput };
+  lastBreakpointSource = { romPath, debugPath: options?.debugPath, hardware: emu.hardware, log: emuOutput };
 
   // attach per-instruction callback to hardware (if available)
   try {
@@ -412,7 +412,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
 
 export function reloadEmulatorBreakpointsFromFile(): number {
   if (!lastBreakpointSource) return 0;
-  return loadBreakpointsFromToken(lastBreakpointSource.romPath, lastBreakpointSource.hardware, lastBreakpointSource.log);
+  return loadBreakpointsFromToken(lastBreakpointSource.romPath, lastBreakpointSource.hardware, lastBreakpointSource.log, lastBreakpointSource.debugPath);
 }
 
 
@@ -659,11 +659,11 @@ export function resolveDataDirectiveHover(document: vscode.TextDocument, positio
 }
 
 
-function loadBreakpointsFromToken(romPath: string, hardware: Hardware | undefined | null, log?: vscode.OutputChannel): number {
+function loadBreakpointsFromToken(romPath: string, hardware: Hardware | undefined | null, log?: vscode.OutputChannel, debugPath?: string): number {
   lastAddressSourceMap = null;
   clearSymbolMetadataCache();
   if (!hardware || !romPath) return 0;
-  const tokenPath = deriveTokenPath(romPath);
+  const tokenPath = deriveTokenPath(romPath, debugPath);
   if (!tokenPath || !fs.existsSync(tokenPath)) return 0;
 
   let tokens: any;
@@ -701,7 +701,8 @@ function loadBreakpointsFromToken(romPath: string, hardware: Hardware | undefine
   return desired.size;
 }
 
-function deriveTokenPath(romPath: string): string {
+function deriveTokenPath(romPath: string, debugPath?: string): string {
+  if (debugPath) return debugPath;
   if (!romPath) return '';
   if (/\.[^/.]+$/.test(romPath)) return romPath.replace(/\.[^/.]+$/, '.debug.json');
   return romPath + '.debug.json';

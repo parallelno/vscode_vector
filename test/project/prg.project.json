@@ -1,4 +1,5 @@
 {
     "name": "prg",
-    "main": "prg_main.asm"
+    "main": "prg_main.asm",
+    "rom": "./out/game.rom"
 }

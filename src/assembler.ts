@@ -1639,7 +1639,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 }
 
 // convenience when using from extension
-export function assembleAndWrite(source: string, outPath: string, sourcePath?: string): AssembleWriteResult {
+export function assembleAndWrite(source: string, outPath: string, sourcePath?: string, debugPath?: string): AssembleWriteResult {
   const startTime = Date.now();
   const res = assemble(source, sourcePath);
   if (!res.success || !res.output) {
@@ -1734,13 +1734,17 @@ export function assembleAndWrite(source: string, outPath: string, sourcePath?: s
   }
   fs.writeFileSync(outPath, res.output);
 
-  // write token file (JSON) next to outPath, same base name but .json extension
+  // write debug file (JSON)
   try {
   // token file uses a `.debug.json` suffix (e.g. `test.rom` -> `test.debug.json`).
-  // If the ROM path has no extension, append `.debug.json` verbatim.
   let tokenPath: string;
-  if (/\.[^/.]+$/.test(outPath)) tokenPath = outPath.replace(/\.[^/.]+$/, '.debug.json');
-  else tokenPath = outPath + '.debug.json';
+  if (debugPath) {
+    tokenPath = debugPath;
+  } else if (/\.[^/.]+$/.test(outPath)) {
+    tokenPath = outPath.replace(/\.[^/.]+$/, '.debug.json');
+  } else {
+    tokenPath = outPath + '.debug.json';
+  }
     const tokens: any = {
       labels: {},
       consts: {}
