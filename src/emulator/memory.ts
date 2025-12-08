@@ -100,10 +100,13 @@ export class Memory {
 
   memType: MemType = MemType.ROM;
   ramDiskClearAfterRestart: boolean = false;
+  ramDiskDataPath: string = '';
 
   constructor(pathBootData: string, ramDiskDataPath: string, ramDiskClearAfterRestart: boolean) {
-    // TODO: handle the ramDiskDataPath
+    this.ramDiskDataPath = ramDiskDataPath;
+    this.ramDiskClearAfterRestart = ramDiskClearAfterRestart;
 
+    // Load ROM if specified
     if (pathBootData) {
       try {
         // check if file exists
@@ -118,7 +121,23 @@ export class Memory {
         process.exit(1);
       }
     }
-    this.ramDiskClearAfterRestart = ramDiskClearAfterRestart;
+
+    // Load RAM disk data if path is provided and file exists
+    if (ramDiskDataPath && !ramDiskClearAfterRestart) {
+      try {
+        if (fs.existsSync(ramDiskDataPath)) {
+          const ramDiskData = fs.readFileSync(ramDiskDataPath);
+          // Copy RAM disk data to the appropriate region of RAM
+          const ramDiskStart = MEMORY_MAIN_LEN;
+          const ramDiskLength = MEMORY_RAMDISK_LEN * RAM_DISK_MAX;
+          const copyLength = Math.min(ramDiskData.length, ramDiskLength);
+          this.ram.set(ramDiskData.slice(0, copyLength), ramDiskStart);
+        }
+      } catch (err) {
+        console.error(`Failed to load RAM disk data from ${ramDiskDataPath}:`, err);
+        // Continue without RAM disk data
+      }
+    }
   }
 
   private normalizeAddr(addr: number): number {
@@ -190,6 +209,24 @@ export class Memory {
   Restart() {
 	this.memType = MemType.RAM;
 	this.InitRamDiskMapping();
+  }
+
+  SaveRamDiskData(): void {
+    if (!this.ramDiskDataPath || this.ramDiskClearAfterRestart) {
+      return;
+    }
+
+    try {
+      // Extract RAM disk data from the RAM buffer
+      const ramDiskStart = MEMORY_MAIN_LEN;
+      const ramDiskLength = MEMORY_RAMDISK_LEN * RAM_DISK_MAX;
+      const ramDiskData = this.ram.slice(ramDiskStart, ramDiskStart + ramDiskLength);
+      
+      // Save to file
+      fs.writeFileSync(this.ramDiskDataPath, ramDiskData);
+    } catch (err) {
+      console.error(`Failed to save RAM disk data to ${this.ramDiskDataPath}:`, err);
+    }
   }
 
   SetMemType(_memType: MemType) {

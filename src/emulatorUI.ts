@@ -70,6 +70,8 @@ type OpenEmulatorOptions = {
   initialSpeed?: number | 'max';
   /** Initial view mode for display rendering */
   initialViewMode?: ViewMode;
+  /** Path to the RAM disk data file for persistence */
+  ramDiskDataPath?: string;
 };
 
 export async function openEmulatorPanel(context: vscode.ExtensionContext, logChannel?: vscode.OutputChannel, options?: OpenEmulatorOptions)
@@ -114,7 +116,10 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   resetHardwareStatsTracking();
   resetMemoryDumpState();
 
-  const emu = new Emulator(context.extensionPath, '', {}, programPath);
+  const emu = new Emulator(context.extensionPath, '', {
+    ramDiskDataPath: options?.ramDiskDataPath,
+    ramDiskClearAfterRestart: !options?.ramDiskDataPath  // Only clear if no persistence path
+  }, programPath);
 
   let debugStream: fs.WriteStream | null = null;
 
@@ -176,6 +181,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
       if (emu.hardware) {
         try { (emu.hardware as any).debugInstructionCallback = null; } catch (e) {}
         try { emu.hardware.Request(HardwareReq.STOP); } catch (e) {}
+        try { emu.hardware.Destructor(); } catch (e) {}
       }
 
       try {

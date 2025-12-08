@@ -85,6 +85,8 @@ export class Hardware
 
   Destructor()
   {
+    // Save RAM disk data before destruction
+    this._memory?.SaveRamDiskData();
     this.ReqHandling(HardwareReq.EXIT);
   }
 

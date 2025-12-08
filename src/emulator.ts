@@ -7,7 +7,11 @@ import { ROM_LOAD_ADDR } from './emulator/memory';
 import Debugger from './emulator/debugger';
 import { FDD_SIZE } from './emulator/fdc_wd1793';
 
-export type EmulatorSettings = { [key: string]: any };
+export type EmulatorSettings = { 
+  ramDiskDataPath?: string;
+  ramDiskClearAfterRestart?: boolean;
+  [key: string]: any;
+};
 
 
 export class Emulator {
@@ -19,10 +23,16 @@ export class Emulator {
   private _debugger?: Debugger;
 
   ramDiskClearAfterRestart = true;
-  // TODO: add ramDiskDataPath to settings
   ramDiskDataPath: string | null = null;
 
   constructor(extensionPath: string, settingsPath: string, settings: EmulatorSettings, romFddRecPath: string) {
+    // Load settings
+    if (settings.ramDiskDataPath !== undefined) {
+      this.ramDiskDataPath = settings.ramDiskDataPath;
+    }
+    if (settings.ramDiskClearAfterRestart !== undefined) {
+      this.ramDiskClearAfterRestart = settings.ramDiskClearAfterRestart;
+    }
     this.Init(extensionPath, romFddRecPath);
   }
 
@@ -40,10 +50,6 @@ export class Emulator {
       pathBootData = pathModule.join(extensionPath, 'res', 'boot', 'boot.bin');
     }
 
-    // TODO: load these from settings
-    this.ramDiskDataPath = null;
-    // TODO: load these from settings
-    this.ramDiskClearAfterRestart = true;
     this._hardware = new Hardware(pathBootData, this.ramDiskDataPath ?? '', this.ramDiskClearAfterRestart);
     this._debugger = new Debugger(this._hardware);
   }

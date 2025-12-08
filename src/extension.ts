@@ -373,6 +373,8 @@ export function activate(context: vscode.ExtensionContext) {
       speed?: number | 'max';
       /** View mode for display rendering: 'full' (768×312) or 'noBorder' (256×192 4:3 aspect) */
       viewMode?: 'full' | 'noBorder';
+      /** Path to the RAM disk data file for persistence */
+      ramDiskDataPath?: string;
     };
   };
 
@@ -417,7 +419,7 @@ export function activate(context: vscode.ExtensionContext) {
       const mainPath = mainEntry ? (path.isAbsolute(mainEntry) ? mainEntry : path.resolve(path.dirname(projectPath), mainEntry)) : undefined;
       
       // Parse settings
-      let settings: { speed?: number | 'max'; viewMode?: 'full' | 'noBorder' } | undefined = undefined;
+      let settings: { speed?: number | 'max'; viewMode?: 'full' | 'noBorder'; ramDiskDataPath?: string } | undefined = undefined;
       if (data?.settings && typeof data.settings === 'object') {
         let speed: number | 'max' | undefined = undefined;
         if (data.settings.speed === 'max') {
@@ -431,8 +433,13 @@ export function activate(context: vscode.ExtensionContext) {
           viewMode = data.settings.viewMode;
         }
         
-        if (speed !== undefined || viewMode !== undefined) {
-          settings = { speed, viewMode };
+        let ramDiskDataPath: string | undefined = undefined;
+        if (typeof data.settings.ramDiskDataPath === 'string' && data.settings.ramDiskDataPath.trim().length > 0) {
+          ramDiskDataPath = data.settings.ramDiskDataPath.trim();
+        }
+        
+        if (speed !== undefined || viewMode !== undefined || ramDiskDataPath !== undefined) {
+          settings = { speed, viewMode, ramDiskDataPath };
         }
       }
       
@@ -589,7 +596,8 @@ export function activate(context: vscode.ExtensionContext) {
       debugPath: programSelection.debugPath,
       projectPath: programSelection.project.projectPath,
       initialSpeed: programSelection.project.settings?.speed,
-      initialViewMode: programSelection.project.settings?.viewMode
+      initialViewMode: programSelection.project.settings?.viewMode,
+      ramDiskDataPath: programSelection.project.settings?.ramDiskDataPath
     });
     return true;
   }
