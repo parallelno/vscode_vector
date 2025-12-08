@@ -50,9 +50,13 @@ let currentPanelController: { pause: () => void; resume: () => void; stepFrame: 
 
 
 type OpenEmulatorOptions = { 
+  /** Path to the ROM or FDD file to load */
   programPath?: string; 
+  /** Path to the debug symbols file */
   debugPath?: string; 
+  /** Path to the project.json file (used for saving emulation speed on close) */
   projectPath?: string;
+  /** Initial emulation speed to set when starting the emulator */
   initialSpeed?: number | 'max';
 };
 

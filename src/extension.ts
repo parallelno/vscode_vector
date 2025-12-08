@@ -367,7 +367,9 @@ export function activate(context: vscode.ExtensionContext) {
     outputBase: string;
     romName: string;
     fddName?: string;
+    /** Optional project settings */
     settings?: {
+      /** Emulation speed multiplier (e.g., 1, 2, 4) or 'max' for maximum speed */
       speed?: number | 'max';
     };
   };
