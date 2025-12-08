@@ -40,6 +40,8 @@ let pausedLineDecoration: vscode.TextEditorDecorationType | null = null;
 let unmappedAddressDecoration: vscode.TextEditorDecorationType | null = null;
 let lastHighlightedEditor: vscode.TextEditor | null = null;
 let lastHighlightedLine: number | null = null;
+let lastHighlightedFilePath: string | null = null;
+let lastHighlightDecoration: vscode.DecorationOptions | null = null;
 let currentToolbarIsRunning = true;
 let dataReadDecoration: vscode.TextEditorDecorationType | null = null;
 let dataWriteDecoration: vscode.TextEditorDecorationType | null = null;
@@ -370,8 +372,13 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   }, null, context.subscriptions);
 
   const editorVisibilityDisposable = vscode.window.onDidChangeVisibleTextEditors(() => {
-    if (!currentToolbarIsRunning && lastDataAccessSnapshot) {
-      applyDataLineHighlightsFromSnapshot(lastDataAccessSnapshot);
+    if (!currentToolbarIsRunning) {
+      // Reapply execution highlight when editor visibility changes
+      reapplyExecutionHighlight();
+      // Reapply data line highlights (reads/writes)
+      if (lastDataAccessSnapshot) {
+        applyDataLineHighlightsFromSnapshot(lastDataAccessSnapshot);
+      }
     }
   });
   context.subscriptions.push(editorVisibilityDisposable);
@@ -972,7 +979,43 @@ function clearHighlightedSourceLine() {
   }
   lastHighlightedEditor = null;
   lastHighlightedLine = null;
+  lastHighlightedFilePath = null;
+  lastHighlightDecoration = null;
 }
+
+function reapplyExecutionHighlight() {
+  // Only reapply if we have saved highlight state and emulator is paused
+  if (!lastHighlightedFilePath || !lastHighlightDecoration || currentToolbarIsRunning) {
+    return;
+  }
+
+  // Find the editor for the highlighted file in visible editors
+  const editor = vscode.window.visibleTextEditors.find(
+    (ed: vscode.TextEditor) => ed.document.uri.fsPath === lastHighlightedFilePath
+  );
+
+  if (!editor) {
+    return;
+  }
+
+  // Determine which decoration type to use based on the saved decoration
+  const decorationType = lastHighlightDecoration.renderOptions?.after?.color === '#ffcc00'
+    ? unmappedAddressDecoration
+    : pausedLineDecoration;
+
+  if (!decorationType) {
+    return;
+  }
+
+  try {
+    // Reapply the decoration to the editor
+    editor.setDecorations(decorationType, [lastHighlightDecoration]);
+    lastHighlightedEditor = editor;
+  } catch (e) {
+    /* ignore reapply errors */
+  }
+}
+
 
 function isSkippableHighlightLine(text: string): boolean {
   const trimmed = text.trim();
@@ -1105,6 +1148,8 @@ function highlightSourceAddress(hardware: Hardware | undefined | null, addr?: nu
         editorToUse.setDecorations(unmappedAddressDecoration, [decoration]);
         lastHighlightedEditor = editorToUse;  // Restore the reference
         lastHighlightedLine = idx;  // Restore the line number
+        lastHighlightedFilePath = doc.uri.fsPath;
+        lastHighlightDecoration = decoration;
       } catch (err) {
         /* ignore unmapped decoration errors */
       }
@@ -1153,6 +1198,8 @@ function highlightSourceAddress(hardware: Hardware | undefined | null, addr?: nu
       editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
       lastHighlightedEditor = editor;
       lastHighlightedLine = idx;
+      lastHighlightedFilePath = targetPath;
+      lastHighlightDecoration = decoration;
     } catch (err) {
       /* ignore highlight errors */
     }
