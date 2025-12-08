@@ -146,6 +146,16 @@ You can configure your project using a `.project.json` file. This file defines t
   - Default: `1` (normal speed).
   - This setting is automatically updated when you change the speed in the emulator panel, persisting your preference across sessions.
 
+- **fddDataPath**: (Optional) Path to save FDD disk data for persistence across emulator restarts.
+  - When set, any writes to the FDD (floppy disk) during emulation are automatically saved to this file when the emulator closes.
+  - On the next run, you can load this saved data to preserve changes made to the disk.
+  - Example: `"fddDataPath": "./out/saved_disk.fdd"`
+  - If not set, FDD changes are lost on each emulator restart.
+
+- **ramDiskDataPath**: (Optional) Path to save RAM disk data for persistence across emulator restarts.
+  - When set, RAM disk contents are automatically saved to this file when the emulator closes and loaded on startup.
+  - Example: `"ramDiskDataPath": "./out/ramdisk.bin"`
+
 ## VS Code editor helpers
 
 The bundled extension now exposes quality-of-life helpers whenever you edit `.asm` sources in VS Code:

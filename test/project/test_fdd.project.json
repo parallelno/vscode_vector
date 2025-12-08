@@ -1,0 +1,8 @@
+{
+    "name": "Test FDD Persistence",
+    "fdd": "../../res/fdd/rds308.fdd",
+    "settings": {
+        "speed": 1,
+        "fddDataPath": "./out/test_fdd_data.fdd"
+    }
+}
