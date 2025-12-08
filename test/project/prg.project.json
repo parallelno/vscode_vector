@@ -1,6 +1,5 @@
 {
     "name": "prg",
     "main": "prg_main.asm",
-    "rom": "./out/game.rom",
-    "fdd": "./out/GJ.fdd"
+    "rom": "./out/game.rom"
 }

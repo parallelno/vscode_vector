@@ -102,6 +102,39 @@ node .\scripts\run-assembler.js
 C:\Work\Programming\devector\bin\devector.exe .\test.rom
 ```
 
+## Project Configuration
+
+You can configure your project using a `.project.json` file. This file defines the project name, main assembly file, output ROM name, and optional settings.
+
+### Example `.project.json`
+
+```json
+{
+    "name": "my_project",
+    "main": "main.asm",
+    "rom": "./out/game.rom",
+    "fdd": "./out/game.fdd",
+    "settings": {
+        "speed": 2
+    }
+}
+```
+
+### Fields
+
+- **name**: The name of the project.
+- **main**: The main assembly file to compile.
+- **rom**: The path to the output ROM file.
+- **fdd**: (Optional) The path to the FDD disk image to run. The emulator runs prefers fdd over rom if present a valid path.
+- **settings**: (Optional) Project-specific settings.
+
+### Settings
+
+- **speed**: Controls the initial emulation speed.
+  - Values: `0.1`, `1`, `2`, `4`, `8`, or `"max"`.
+  - Default: `1` (normal speed).
+  - This setting is automatically updated when you change the speed in the emulator panel, persisting your preference across sessions.
+
 ## VS Code editor helpers
 
 The bundled extension now exposes quality-of-life helpers whenever you edit `.asm` sources in VS Code:

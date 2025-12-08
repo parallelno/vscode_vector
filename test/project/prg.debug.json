@@ -169,5 +169,13 @@
             }
         }
     },
-    "breakpoints": {}
+    "breakpoints": {
+        "fill_buff.asm": [
+            {
+                "line": 8,
+                "enabled": true,
+                "addr": "0x0216"
+            }
+        ]
+    }
 }
