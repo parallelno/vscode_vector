@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Hardware } from './emulator/hardware';
 import { HardwareReq } from './emulator/hardware_reqs';
-import { FRAME_H, FRAME_LEN, FRAME_W } from './emulator/display';
+import { FRAME_H, FRAME_LEN, FRAME_W, SCAN_ACTIVE_AREA_TOP, ACTIVE_AREA_W, ACTIVE_AREA_H, BORDER_LEFT } from './emulator/display';
 import Memory, { AddrSpace, MAPPING_MODE_MASK, MemoryAccessSnapshot } from './emulator/memory';
 import CPU, { CpuState } from './emulator/cpu_i8080';
 import { getWebviewContent } from './emulatorUI/webviewContent';
@@ -16,6 +16,10 @@ import { KbOperation } from './emulator/keyboard';
 
 // set to true to enable instruction logging to file
 const log_tick_to_file = false;
+
+// Display constants for 4:3 aspect ratio
+const DISPLAY_WIDTH = 342;   // 256 * 4/3 ≈ 342 for 4:3 aspect ratio  
+const DISPLAY_HEIGHT = 256;  // Full height of active area
 
 type SourceLineRef = { file: string; line: number };
 
@@ -211,18 +215,21 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
    * This shows the active area (centered at X=384, Y=168) with proper aspect ratio.
    */
   const cropFrameTo4x3 = (fullFrame: Uint32Array): Uint32Array => {
-    const displayWidth = 342;  // 256 * 4/3 ≈ 342 for 4:3 aspect ratio
-    const displayHeight = 256;
-    const cropOffsetX = 213;   // Center on active area: 384 - 342/2 = 213
-    const cropOffsetY = 40;    // Align with active area top: SCAN_ACTIVE_AREA_TOP = 40
+    // Calculate the center of the active area
+    const activeAreaCenterX = BORDER_LEFT + ACTIVE_AREA_W / 2;
+    const activeAreaCenterY = SCAN_ACTIVE_AREA_TOP + ACTIVE_AREA_H / 2;
     
-    const cropped = new Uint32Array(displayWidth * displayHeight);
+    // Center the crop window on the active area
+    const cropOffsetX = Math.floor(activeAreaCenterX - DISPLAY_WIDTH / 2);
+    const cropOffsetY = Math.floor(activeAreaCenterY - DISPLAY_HEIGHT / 2);
     
-    for (let y = 0; y < displayHeight; y++) {
+    const cropped = new Uint32Array(DISPLAY_WIDTH * DISPLAY_HEIGHT);
+    
+    for (let y = 0; y < DISPLAY_HEIGHT; y++) {
       const srcY = cropOffsetY + y;
       const srcOffset = srcY * FRAME_W + cropOffsetX;
-      const dstOffset = y * displayWidth;
-      cropped.set(fullFrame.subarray(srcOffset, srcOffset + displayWidth), dstOffset);
+      const dstOffset = y * DISPLAY_WIDTH;
+      cropped.set(fullFrame.subarray(srcOffset, srcOffset + DISPLAY_WIDTH), dstOffset);
     }
     
     return cropped;
@@ -239,7 +246,7 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
       try {
         const out = emu.hardware.display.GetFrame();
         const cropped = cropFrameTo4x3(out);
-        panel.webview.postMessage({ type: 'frame', width: 342, height: 256, data: cropped.buffer });
+        panel.webview.postMessage({ type: 'frame', width: DISPLAY_WIDTH, height: DISPLAY_HEIGHT, data: cropped.buffer });
       }
       catch (e) { /* ignore frame conversion errors */ }
     }

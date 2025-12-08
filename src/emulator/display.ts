@@ -33,13 +33,13 @@ const FRAMES_PER_SECOND: number = 50;
 const SCAN_VSYNC: number = 24;
 const SCAN_VBLANK_TOP: number = 16;
 const SCAN_VBLANK_BOTTOM: number = 16;
-const SCAN_ACTIVE_AREA_TOP: number = SCAN_VSYNC + SCAN_VBLANK_TOP;
+export const SCAN_ACTIVE_AREA_TOP: number = SCAN_VSYNC + SCAN_VBLANK_TOP;
 // horizontal screen resolution in MODE_512
-const ACTIVE_AREA_W: number = 512;
+export const ACTIVE_AREA_W: number = 512;
 // vertical screen resolution
-const ACTIVE_AREA_H: number = 256;
+export const ACTIVE_AREA_H: number = 256;
 // horizontal screen resolution in MODE_512
-const BORDER_LEFT: number = 128;
+export const BORDER_LEFT: number = 128;
 // horizontal screen resolution in MODE_512
 const BORDER_RIGHT: number = BORDER_LEFT;
 const BORDER_TOP: number = SCAN_ACTIVE_AREA_TOP;
