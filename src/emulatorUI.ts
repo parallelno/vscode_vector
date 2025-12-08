@@ -206,6 +206,29 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
   };
 
   /**
+   * Crop the full framebuffer to 4:3 aspect ratio.
+   * The full frame is 768×312, we crop to 342×256 (4:3 aspect ratio).
+   * This shows the active area (centered at X=384, Y=168) with proper aspect ratio.
+   */
+  const cropFrameTo4x3 = (fullFrame: Uint32Array): Uint32Array => {
+    const displayWidth = 342;  // 256 * 4/3 ≈ 342 for 4:3 aspect ratio
+    const displayHeight = 256;
+    const cropOffsetX = 213;   // Center on active area: 384 - 342/2 = 213
+    const cropOffsetY = 40;    // Align with active area top: SCAN_ACTIVE_AREA_TOP = 40
+    
+    const cropped = new Uint32Array(displayWidth * displayHeight);
+    
+    for (let y = 0; y < displayHeight; y++) {
+      const srcY = cropOffsetY + y;
+      const srcOffset = srcY * FRAME_W + cropOffsetX;
+      const dstOffset = y * displayWidth;
+      cropped.set(fullFrame.subarray(srcOffset, srcOffset + displayWidth), dstOffset);
+    }
+    
+    return cropped;
+  };
+
+  /**
    * Send the current display frame to the webview.
    * @param forceStats If true, bypasses the throttling mechanism to force an immediate
    *                   hardware stats update. Use this after debug actions (pause, step, break)
@@ -215,7 +238,8 @@ export async function openEmulatorPanel(context: vscode.ExtensionContext, logCha
     if (emu.hardware?.display){
       try {
         const out = emu.hardware.display.GetFrame();
-        panel.webview.postMessage({ type: 'frame', width: FRAME_W, height: FRAME_H, data: out.buffer });
+        const cropped = cropFrameTo4x3(out);
+        panel.webview.postMessage({ type: 'frame', width: 342, height: 256, data: cropped.buffer });
       }
       catch (e) { /* ignore frame conversion errors */ }
     }

@@ -85,7 +85,7 @@ export function getWebviewContent() {
   </div>
   <div class="display-row">
     <div class="display-row__canvas">
-      <canvas id="screen" width="256" height="256"></canvas>
+      <canvas id="screen" width="342" height="256"></canvas>
     </div>
     <div class="hw-stats">
     <div class="hw-stats__group hw-stats__group--narrow">
