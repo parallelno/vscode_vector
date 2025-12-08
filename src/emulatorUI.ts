@@ -17,6 +17,9 @@ import { KbOperation } from './emulator/keyboard';
 // set to true to enable instruction logging to file
 const log_tick_to_file = false;
 
+// Decoration colors
+const UNMAPPED_ADDRESS_COLOR = '#ffcc00';
+
 type SourceLineRef = { file: string; line: number };
 
 let lastBreakpointSource: { programPath: string; debugPath?: string; hardware?: Hardware | null; log?: vscode.OutputChannel } | null = null;
@@ -999,7 +1002,7 @@ function reapplyExecutionHighlight() {
   }
 
   // Determine which decoration type to use based on the saved decoration
-  const decorationType = lastHighlightDecoration.renderOptions?.after?.color === '#ffcc00'
+  const decorationType = lastHighlightDecoration.renderOptions?.after?.color === UNMAPPED_ADDRESS_COLOR
     ? unmappedAddressDecoration
     : pausedLineDecoration;
 
@@ -1012,7 +1015,7 @@ function reapplyExecutionHighlight() {
     editor.setDecorations(decorationType, [lastHighlightDecoration]);
     lastHighlightedEditor = editor;
   } catch (e) {
-    /* ignore reapply errors */
+    /* ignore decoration reapply errors */
   }
 }
 
@@ -1139,7 +1142,7 @@ function highlightSourceAddress(hardware: Hardware | undefined | null, addr?: nu
           renderOptions: {
             after: {
               contentText: `  No source mapping for address ${addrHex}${disasmText}`,
-              color: '#ffcc00',
+              color: UNMAPPED_ADDRESS_COLOR,
               fontStyle: 'italic',
               fontWeight: 'normal'
             }
