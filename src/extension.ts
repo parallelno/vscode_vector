@@ -375,6 +375,8 @@ export function activate(context: vscode.ExtensionContext) {
       viewMode?: 'full' | 'noBorder';
       /** Path to the RAM disk data file for persistence */
       ramDiskDataPath?: string;
+      /** Path to the FDD data file for persistence */
+      fddDataPath?: string;
     };
   };
 
@@ -419,7 +421,7 @@ export function activate(context: vscode.ExtensionContext) {
       const mainPath = mainEntry ? (path.isAbsolute(mainEntry) ? mainEntry : path.resolve(path.dirname(projectPath), mainEntry)) : undefined;
       
       // Parse settings
-      let settings: { speed?: number | 'max'; viewMode?: 'full' | 'noBorder'; ramDiskDataPath?: string } | undefined = undefined;
+      let settings: { speed?: number | 'max'; viewMode?: 'full' | 'noBorder'; ramDiskDataPath?: string; fddDataPath?: string } | undefined = undefined;
       if (data?.settings && typeof data.settings === 'object') {
         let speed: number | 'max' | undefined = undefined;
         if (data.settings.speed === 'max') {
@@ -437,12 +439,22 @@ export function activate(context: vscode.ExtensionContext) {
         if (typeof data.settings.ramDiskDataPath === 'string') {
           const trimmed = data.settings.ramDiskDataPath.trim();
           if (trimmed.length > 0) {
-            ramDiskDataPath = trimmed;
+            // Resolve to absolute path relative to project directory
+            ramDiskDataPath = path.isAbsolute(trimmed) ? trimmed : path.resolve(path.dirname(projectPath), trimmed);
           }
         }
         
-        if (speed !== undefined || viewMode !== undefined || ramDiskDataPath !== undefined) {
-          settings = { speed, viewMode, ramDiskDataPath };
+        let fddDataPath: string | undefined = undefined;
+        if (typeof data.settings.fddDataPath === 'string') {
+          const trimmed = data.settings.fddDataPath.trim();
+          if (trimmed.length > 0) {
+            // Resolve to absolute path relative to project directory
+            fddDataPath = path.isAbsolute(trimmed) ? trimmed : path.resolve(path.dirname(projectPath), trimmed);
+          }
+        }
+        
+        if (speed !== undefined || viewMode !== undefined || ramDiskDataPath !== undefined || fddDataPath !== undefined) {
+          settings = { speed, viewMode, ramDiskDataPath, fddDataPath };
         }
       }
       
@@ -600,7 +612,8 @@ export function activate(context: vscode.ExtensionContext) {
       projectPath: programSelection.project.projectPath,
       initialSpeed: programSelection.project.settings?.speed,
       initialViewMode: programSelection.project.settings?.viewMode,
-      ramDiskDataPath: programSelection.project.settings?.ramDiskDataPath
+      ramDiskDataPath: programSelection.project.settings?.ramDiskDataPath,
+      fddDataPath: programSelection.project.settings?.fddDataPath
     });
     return true;
   }

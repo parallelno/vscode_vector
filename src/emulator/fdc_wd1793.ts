@@ -5,6 +5,9 @@
 // https://github.com/svofski/vector06sdl/blob/master/src/fd1793.h
 // and the C++ implementation from Devector project
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 // ============================================================================
 // FDD Constants (from fdd_consts.h)
 // ============================================================================
@@ -153,8 +156,10 @@ export class Fdc1793 {
     private headerPtr: number = 0;  // Pointer for reading header data
     private readingHeader: boolean = false; // Flag for READ-ADDRESS command
     private disk: FDisk | null = null; // Current disk image
+    private fddDataPath: string = ''; // Path to FDD data file for persistence
 
-    constructor() {
+    constructor(fddDataPath: string = '') {
+        this.fddDataPath = fddDataPath;
         this.disks = [];
         for (let i = 0; i < Fdc1793.DRIVES_MAX; i++) {
             this.disks.push(new FDisk());
@@ -572,6 +577,37 @@ export class Fdc1793 {
     ResetUpdate(driveIdx: number): void {
         const idx = driveIdx % Fdc1793.DRIVES_MAX;
         this.disks[idx].updated = false;
+    }
+
+    /**
+     * Save FDD data to file if it has been updated and fddDataPath is configured.
+     * Similar to SaveRamDiskData in memory.ts
+     */
+    SaveFddData(): void {
+        if (!this.fddDataPath) {
+            return;
+        }
+
+        try {
+            // Find the first mounted and updated disk
+            for (let i = 0; i < Fdc1793.DRIVES_MAX; i++) {
+                const disk = this.disks[i];
+                if (disk.mounted && disk.updated) {
+                    // Create parent directory (mkdirSync with recursive handles existing directories)
+                    const parentDir = path.dirname(this.fddDataPath);
+                    fs.mkdirSync(parentDir, { recursive: true });
+                    // Save the disk data to file
+                    fs.writeFileSync(this.fddDataPath, disk.data);
+                    console.log(`FDD data saved to ${this.fddDataPath} (drive ${i})`);
+                    // Reset the updated flag
+                    disk.updated = false;
+                    // Only save the first updated disk
+                    return;
+                }
+            }
+        } catch (err) {
+            console.error(`Failed to save FDD data to ${this.fddDataPath}:`, err);
+        }
     }
 }
 
