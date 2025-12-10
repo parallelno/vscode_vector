@@ -1,6 +1,11 @@
 import * as path from 'path';
 import { SourceOrigin, WordLiteralResult } from './types';
 
+export function errorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  return String(err);
+}
+
 export function stripInlineComment(line: string): string {
   return line.replace(/\/\/.*$|;.*$/, '');
 }
