@@ -58,7 +58,7 @@ export function preprocessSource(source: string, sourcePath?: string): Preproces
   let expanded: { lines: string[]; origins: SourceOrigin[] };
   try {
     expanded = processContent(source, sourcePath, 0);
-  } catch (err: any) {
+  } catch (err: unknown) {
     return { lines: [], origins: [], errors: [errorMessage(err)] };
   }
 
