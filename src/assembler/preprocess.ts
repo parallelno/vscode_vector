@@ -3,7 +3,7 @@ import * as path from 'path';
 import { SourceOrigin } from './types';
 import { prepareMacros, expandMacroInvocations } from './macro';
 import { expandLoopDirectives } from './loops';
-import { errorMessage } from './utils';
+import { errorMessage, stripInlineComment } from './utils';
 
 const MAX_INCLUDE_DEPTH = 16;
 
@@ -26,7 +26,7 @@ function processContent(
   const srcLines = source.split(/\r?\n/);
   for (let li = 0; li < srcLines.length; li++) {
     const raw = srcLines[li];
-    const trimmed = raw.replace(/\/\/.*$|;.*$/, '').trim();
+    const trimmed = stripInlineComment(raw).trim();
     const includeMatch = trimmed.match(/^\.include\s+["']([^"']+)["']/i);
     if (includeMatch) {
       const inc = includeMatch[1];
@@ -64,7 +64,7 @@ export function preprocessSource(source: string, sourcePath?: string): Preproces
 
   const macroPrep = prepareMacros(expanded.lines, expanded.origins, sourcePath);
   if (macroPrep.errors.length) {
-    return { lines: [], origins: expanded.origins, errors: macroPrep.errors };
+    return { lines: [], origins: macroPrep.origins, errors: macroPrep.errors };
   }
 
   const macroExpanded = expandMacroInvocations(macroPrep.lines, macroPrep.origins, macroPrep.macros, sourcePath);
