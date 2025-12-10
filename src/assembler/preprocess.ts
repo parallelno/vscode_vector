@@ -3,6 +3,7 @@ import * as path from 'path';
 import { SourceOrigin } from './types';
 import { prepareMacros, expandMacroInvocations } from './macro';
 import { expandLoopDirectives } from './loops';
+import { errorMessage } from './utils';
 
 const MAX_INCLUDE_DEPTH = 16;
 
@@ -11,10 +12,6 @@ export type PreprocessResult = {
   origins: SourceOrigin[];
   errors: string[];
 };
-
-function toErrorMessage(err: unknown): string {
-  return err && (err as any).message ? (err as any).message : String(err);
-}
 
 function processContent(
   source: string,
@@ -42,7 +39,7 @@ function processContent(
       try {
         incText = fs.readFileSync(incPath, 'utf8');
       } catch (err) {
-        throw new Error(`Failed to include '${inc}' at ${sourcePath || '<memory>'}:${li + 1} - ${toErrorMessage(err)}`);
+        throw new Error(`Failed to include '${inc}' at ${sourcePath || '<memory>'}:${li + 1} - ${errorMessage(err)}`);
       }
       const nested = processContent(incText, incPath, depth + 1);
       for (let k = 0; k < nested.lines.length; k++) {
@@ -62,7 +59,7 @@ export function preprocessSource(source: string, sourcePath?: string): Preproces
   try {
     expanded = processContent(source, sourcePath, 0);
   } catch (err: any) {
-    return { lines: [], origins: [], errors: [err?.message || String(err)] };
+    return { lines: [], origins: [], errors: [errorMessage(err)] };
   }
 
   const macroPrep = prepareMacros(expanded.lines, expanded.origins, sourcePath);

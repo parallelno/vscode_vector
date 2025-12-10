@@ -1,5 +1,5 @@
 import { ExpressionEvalContext } from './types';
-import { splitTopLevelArgs, parseStringLiteral } from './utils';
+import { splitTopLevelArgs, parseStringLiteral, errorMessage } from './utils';
 import { evaluateConditionExpression } from './expression';
 
 export function evaluateMessageArguments(
@@ -22,7 +22,7 @@ export function evaluateMessageArguments(
         continue;
       }
     } catch (err: any) {
-      errors.push(`Invalid string literal in ${directive} at ${originDesc}: ${err?.message || err}`);
+      errors.push(`Invalid string literal in ${directive} at ${originDesc}: ${errorMessage(err)}`);
       break;
     }
 
@@ -30,7 +30,7 @@ export function evaluateMessageArguments(
       const value = evaluateConditionExpression(part, ctx, true);
       fragments.push(String(value));
     } catch (err: any) {
-      errors.push(`Failed to evaluate ${directive} expression '${part}' at ${originDesc}: ${err?.message || err}`);
+      errors.push(`Failed to evaluate ${directive} expression '${part}' at ${originDesc}: ${errorMessage(err)}`);
       break;
     }
   }
