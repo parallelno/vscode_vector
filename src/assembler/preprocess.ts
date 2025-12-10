@@ -4,18 +4,26 @@ import { SourceOrigin } from './types';
 import { prepareMacros, expandMacroInvocations } from './macro';
 import { expandLoopDirectives } from './loops';
 
+const MAX_INCLUDE_DEPTH = 16;
+
 export type PreprocessResult = {
   lines: string[];
   origins: SourceOrigin[];
   errors: string[];
 };
 
+function toErrorMessage(err: unknown): string {
+  return err && (err as any).message ? (err as any).message : String(err);
+}
+
 function processContent(
   source: string,
   sourcePath?: string,
   depth = 0
 ): { lines: string[]; origins: SourceOrigin[] } {
-  if (depth > 16) throw new Error(`Include recursion too deep (>${16}) when processing ${sourcePath || '<memory>'}`);
+  if (depth > MAX_INCLUDE_DEPTH) {
+    throw new Error(`Include recursion too deep (>${MAX_INCLUDE_DEPTH}) when processing ${sourcePath || '<memory>'}`);
+  }
   const outLines: string[] = [];
   const origins: Array<{ file?: string; line: number }> = [];
   const srcLines = source.split(/\r?\n/);
@@ -34,8 +42,7 @@ function processContent(
       try {
         incText = fs.readFileSync(incPath, 'utf8');
       } catch (err) {
-        const message = err && (err as any).message ? (err as any).message : String(err);
-        throw new Error(`Failed to include '${inc}' at ${sourcePath || '<memory>'}:${li + 1} - ${message}`);
+        throw new Error(`Failed to include '${inc}' at ${sourcePath || '<memory>'}:${li + 1} - ${toErrorMessage(err)}`);
       }
       const nested = processContent(incText, incPath, depth + 1);
       for (let k = 0; k < nested.lines.length; k++) {
