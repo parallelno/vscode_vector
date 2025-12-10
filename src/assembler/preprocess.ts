@@ -18,11 +18,13 @@ function processContent(
   sourcePath?: string,
   depth = 0
 ): { lines: string[]; origins: SourceOrigin[] } {
-  if (depth > MAX_INCLUDE_DEPTH) {
-    throw new Error(`Include recursion too deep (>${MAX_INCLUDE_DEPTH}) when processing ${sourcePath || '<memory>'}`);
-  }
   const outLines: string[] = [];
   const origins: SourceOrigin[] = [];
+  if (depth > MAX_INCLUDE_DEPTH) {
+    const recursionError = new Error(`Include recursion too deep (> ${MAX_INCLUDE_DEPTH}) when processing ${sourcePath || '<memory>'}`) as Error & { origins?: SourceOrigin[] };
+    recursionError.origins = origins;
+    throw recursionError;
+  }
   const srcLines = source.split(/\r?\n/);
   for (let li = 0; li < srcLines.length; li++) {
     const raw = srcLines[li];
@@ -39,7 +41,9 @@ function processContent(
       try {
         incText = fs.readFileSync(incPath, 'utf8');
       } catch (err) {
-        throw new Error(`Failed to include '${inc}' at ${sourcePath || '<memory>'}:${li + 1} - ${errorMessage(err)}`);
+        const includeError = new Error(`Failed to include '${inc}' at ${sourcePath || '<memory>'}:${li + 1} - ${errorMessage(err)}`) as Error & { origins?: SourceOrigin[] };
+        includeError.origins = origins;
+        throw includeError;
       }
       const nested = processContent(incText, incPath, depth + 1);
       for (let k = 0; k < nested.lines.length; k++) {
@@ -59,7 +63,8 @@ export function preprocessSource(source: string, sourcePath?: string): Preproces
   try {
     expanded = processContent(source, sourcePath, 0);
   } catch (err: unknown) {
-    return { lines: [], origins: [], errors: [errorMessage(err)] };
+    const originContext = (err as { origins?: SourceOrigin[] } | undefined)?.origins;
+    return { lines: [], origins: originContext || [], errors: [errorMessage(err)] };
   }
 
   const macroPrep = prepareMacros(expanded.lines, expanded.origins, sourcePath);
