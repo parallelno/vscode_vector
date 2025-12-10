@@ -21,7 +21,7 @@ export function evaluateMessageArguments(
         fragments.push(literal);
         continue;
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       errors.push(`Invalid string literal in ${directive} at ${originDesc}: ${errorMessage(err)}`);
       break;
     }
@@ -29,7 +29,7 @@ export function evaluateMessageArguments(
     try {
       const value = evaluateConditionExpression(part, ctx, true);
       fragments.push(String(value));
-    } catch (err: any) {
+    } catch (err: unknown) {
       errors.push(`Failed to evaluate ${directive} expression '${part}' at ${originDesc}: ${errorMessage(err)}`);
       break;
     }
