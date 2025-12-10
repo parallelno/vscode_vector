@@ -17,69 +17,15 @@ import {
   parseTextLiteralToBytes
 } from './assembler/utils';
 import { evaluateConditionExpression } from './assembler/expression';
-import { prepareMacros, expandMacroInvocations } from './assembler/macro';
-import { expandLoopDirectives } from './assembler/loops';
+import { preprocessSource } from './assembler/preprocess';
+import { evaluateMessageArguments } from './assembler/message';
 
 export function assemble(source: string, sourcePath?: string): AssembleResult {
-  // Expand .include directives and build an origin map so we can report
-  // errors/warnings that reference the original file and line number.
-  function processContent(content: string, file?: string, depth = 0): { lines: string[]; origins: SourceOrigin[] } {
-    if (depth > 16) throw new Error(`Include recursion too deep (>${16}) when processing ${file || '<memory>'}`);
-    const outLines: string[] = [];
-    const origins: Array<{ file?: string; line: number }> = [];
-    const srcLines = content.split(/\r?\n/);
-    for (let li = 0; li < srcLines.length; li++) {
-      const raw = srcLines[li];
-      const trimmed = raw.replace(/\/\/.*$|;.*$/, '').trim();
-      // match .include "filename" or .include 'filename'
-      const m = trimmed.match(/^\.include\s+["']([^"']+)["']/i);
-      if (m) {
-        const inc = m[1];
-        // resolve path
-        let incPath = inc;
-        if (!path.isAbsolute(incPath)) {
-          const baseDir = file ? path.dirname(file) : (sourcePath ? path.dirname(sourcePath) : process.cwd());
-          incPath = path.resolve(baseDir, incPath);
-        }
-        let incText: string;
-        try {
-          incText = fs.readFileSync(incPath, 'utf8');
-        } catch (err) {
-          const em = err && (err as any).message ? (err as any).message : String(err);
-          throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li+1} - ${em}`);
-        }
-        const nested = processContent(incText, incPath, depth + 1);
-        for (let k = 0; k < nested.lines.length; k++) {
-          outLines.push(nested.lines[k]);
-          origins.push(nested.origins[k]);
-        }
-        continue;
-      }
-      outLines.push(raw);
-      origins.push({ file: file || sourcePath, line: li + 1 });
-    }
-    return { lines: outLines, origins };
+  const preprocessed = preprocessSource(source, sourcePath);
+  if (preprocessed.errors.length) {
+    return { success: false, errors: preprocessed.errors, origins: preprocessed.origins };
   }
-
-  let expanded: { lines: string[]; origins: SourceOrigin[] };
-  try {
-    expanded = processContent(source, sourcePath, 0);
-  } catch (err: any) {
-    return { success: false, errors: [err.message] };
-  }
-  const macroPrep = prepareMacros(expanded.lines, expanded.origins, sourcePath);
-  if (macroPrep.errors.length) {
-    return { success: false, errors: macroPrep.errors, origins: expanded.origins };
-  }
-  const macroExpanded = expandMacroInvocations(macroPrep.lines, macroPrep.origins, macroPrep.macros, sourcePath);
-  if (macroExpanded.errors.length) {
-    return { success: false, errors: macroExpanded.errors, origins: macroExpanded.origins };
-  }
-  const loopExpanded = expandLoopDirectives(macroExpanded.lines, macroExpanded.origins, sourcePath);
-  if (loopExpanded.errors.length) {
-    return { success: false, errors: loopExpanded.errors, origins: loopExpanded.origins };
-  }
-  const lines = loopExpanded.lines;
+  const lines = preprocessed.lines;
   const labels = new Map<string, { addr: number; line: number; src?: string }>();
   const consts = new Map<string, number>();
   const variables = new Set<string>(); // Track which identifiers are variables (can be reassigned)
@@ -103,7 +49,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   const printMessages: PrintMessage[] = [];
-  const origins = loopExpanded.origins;
+  const origins = preprocessed.origins;
 
   const ifStack: IfFrame[] = [];
 
@@ -933,35 +879,11 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (printMatch) {
       map[srcLine] = addr;
       const argsText = (printMatch[1] || '').trim();
-      const parts = argsText.length ? splitTopLevelArgs(argsText) : [];
-      const fragments: string[] = [];
       const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-      let failed = false;
-      for (const partRaw of parts) {
-        const part = partRaw.trim();
-        if (!part.length) continue;
-        try {
-          const literal = parseStringLiteral(part);
-          if (literal !== null) {
-            fragments.push(literal);
-            continue;
-          }
-        } catch (err: any) {
-          errors.push(`Invalid string literal in .print at ${originDesc}: ${err?.message || err}`);
-          failed = true;
-          break;
-        }
-        try {
-          const value = evaluateConditionExpression(part, ctx, true);
-          fragments.push(String(value));
-        } catch (err: any) {
-          errors.push(`Failed to evaluate .print expression '${part}' at ${originDesc}: ${err?.message || err}`);
-          failed = true;
-          break;
-        }
-      }
-      if (!failed) {
-        const output = fragments.length ? fragments.join(' ') : '';
+      const { output, errors: directiveErrors } = evaluateMessageArguments('.print', argsText, ctx, originDesc);
+      if (directiveErrors.length) {
+        errors.push(...directiveErrors);
+      } else {
         printMessages.push({ text: output, origin: origins[i], lineIndex: srcLine });
         try {
           console.log(output);
@@ -976,37 +898,13 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (errorMatch) {
       map[srcLine] = addr;
       const argsText = (errorMatch[1] || '').trim();
-      const parts = argsText.length ? splitTopLevelArgs(argsText) : [];
-      const fragments: string[] = [];
       const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-      let failed = false;
-      for (const partRaw of parts) {
-        const part = partRaw.trim();
-        if (!part.length) continue;
-        try {
-          const literal = parseStringLiteral(part);
-          if (literal !== null) {
-            fragments.push(literal);
-            continue;
-          }
-        } catch (err: any) {
-          errors.push(`Invalid string literal in .error at ${originDesc}: ${err?.message || err}`);
-          failed = true;
-          break;
-        }
-        try {
-          const value = evaluateConditionExpression(part, ctx, true);
-          fragments.push(String(value));
-        } catch (err: any) {
-          errors.push(`Failed to evaluate .error expression '${part}' at ${originDesc}: ${err?.message || err}`);
-          failed = true;
-          break;
-        }
+      const { output, errors: directiveErrors } = evaluateMessageArguments('.error', argsText, ctx, originDesc);
+      if (directiveErrors.length) {
+        errors.push(...directiveErrors);
+        continue;
       }
-      if (!failed) {
-        const errorMessage = fragments.length ? fragments.join(' ') : '';
-        errors.push(`.error: ${errorMessage} at ${originDesc}`);
-      }
+      errors.push(`.error: ${output} at ${originDesc}`);
       return { success: false, errors, origins };
     }
 
