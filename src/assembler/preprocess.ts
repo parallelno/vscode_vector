@@ -25,7 +25,7 @@ function processContent(
     throw new Error(`Include recursion too deep (>${MAX_INCLUDE_DEPTH}) when processing ${sourcePath || '<memory>'}`);
   }
   const outLines: string[] = [];
-  const origins: Array<{ file?: string; line: number }> = [];
+  const origins: SourceOrigin[] = [];
   const srcLines = source.split(/\r?\n/);
   for (let li = 0; li < srcLines.length; li++) {
     const raw = srcLines[li];

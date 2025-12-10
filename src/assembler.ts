@@ -902,7 +902,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       const { output, errors: directiveErrors } = evaluateMessageArguments('.error', argsText, ctx, originDesc);
       if (directiveErrors.length) {
         errors.push(...directiveErrors);
-        continue;
+        return { success: false, errors, origins };
       }
       errors.push(`.error: ${output} at ${originDesc}`);
       return { success: false, errors, origins };
