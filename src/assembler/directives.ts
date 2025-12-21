@@ -10,6 +10,7 @@ import {
   parseTextLiteralToBytes
 } from './utils';
 import { evaluateConditionExpression } from './expression';
+import { argsAfterToken } from './common';
 
 export type DirectiveContext = {
   labels: Map<string, { addr: number; line: number; src?: string }>;
@@ -318,9 +319,4 @@ export function handleTextDirective(
   }
   
   return { handled: true, emitted };
-}
-
-function argsAfterToken(lineText: string, token: string | undefined, offset: number | undefined): string {
-  if (!lineText || !token || offset === undefined || offset < 0) return '';
-  return lineText.slice(offset + token.length);
 }

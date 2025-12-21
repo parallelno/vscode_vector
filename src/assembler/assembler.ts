@@ -23,7 +23,7 @@ import { expandLoopDirectives } from './loops';
 import { DEBUG_FILE_SUFFIX } from '../extention/consts';
 import { processIncludes } from './includes';
 import { registerLabel as registerLabelHelper, getScopeKey } from './labels';
-import { tokenizeLineWithOffsets, argsAfterToken, isDirectiveToken, checkLabelOnDirective } from './common';
+import { tokenizeLineWithOffsets, argsAfterToken, isAddressDirective, checkLabelOnDirective } from './common';
 import { handleDB, handleDW, handleDS } from './data';
 import { 
   handleIfDirective, 
@@ -217,7 +217,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     const tokenOffsets = tokenized.offsets;
     if (!tokens.length) continue;
     let pendingDirectiveLabel: string | null = null;
-    const isDirectiveToken = (value: string | undefined) => !!value && /^\.?(org|align)$/i.test(value);
+    const isAddressDirective = (value: string | undefined) => !!value && /^\.?(org|align)$/i.test(value);
 
     // simple constant / EQU handling: "NAME = expr" or "NAME EQU expr"
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
@@ -326,7 +326,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       tokens.shift();
       tokenOffsets.shift();
       const nextToken = tokens.length ? tokens[0] : '';
-      if (isDirectiveToken(nextToken)) {
+      if (isAddressDirective(nextToken)) {
         pendingDirectiveLabel = candidate;
       } else {
         registerLabel(candidate, addr, origins[i], i + 1, scopes[i]);
@@ -334,7 +334,7 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       if (!tokens.length) {
         continue;
       }
-    } else if (tokens.length >= 2 && isDirectiveToken(tokens[1])) {
+    } else if (tokens.length >= 2 && isAddressDirective(tokens[1])) {
       pendingDirectiveLabel = tokens[0];
       tokens.shift();
       tokenOffsets.shift();

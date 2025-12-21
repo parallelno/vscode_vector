@@ -23,7 +23,8 @@ export function argsAfterToken(lineText: string, token: string | undefined, offs
   return lineText.slice(offset + token.length);
 }
 
-export function isDirectiveToken(value: string | undefined): boolean {
+// Check if token is an address-directive (org or align) that requires special label handling
+export function isAddressDirective(value: string | undefined): boolean {
   return !!value && /^\.?(org|align)$/i.test(value);
 }
 
