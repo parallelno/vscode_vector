@@ -1,19 +1,31 @@
-import { SourceOrigin } from './types';
-
 /**
  * Common helper functions used throughout the assembler
  */
 
-export function tokenizeLineWithOffsets(lineText: string): { tokens: string[]; offsets: number[] } {
+// Tokenize a line into tokens and their offsets.
+// It splits the line by whitespace/commas. It ignores empty tokens.
+// All tokens returned are in the upper case.
+export function tokenize(lineText: string)
+: { tokens: string[]; offsets: number[] }
+{
   if (!lineText.length) return { tokens: [], offsets: [] };
-  const tokens = lineText.split(/\s+/);
+
+  // Split by whitespace and commas
+  const rawTokens = lineText.split(/[\s,]+/);
+  const tokens: string[] = [];
   const offsets: number[] = [];
+  // Calculate offsets of each token. Offset is the index in lineText where the token starts.
   let cursor = 0;
-  for (const token of tokens) {
-    const idx = lineText.indexOf(token, cursor);
+  for (const rawToken of rawTokens) {
+    if (rawToken.length === 0) {
+      cursor += 1; // Skip empty tokens, but move cursor forward
+      continue;
+    }
+    const idx = lineText.indexOf(rawToken, cursor);
     const start = idx >= 0 ? idx : cursor;
+    tokens.push(rawToken);
     offsets.push(start);
-    cursor = start + token.length;
+    cursor = start + rawToken.length;
   }
   return { tokens, offsets };
 }

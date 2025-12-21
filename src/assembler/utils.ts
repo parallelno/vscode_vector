@@ -109,7 +109,11 @@ export function parseWordLiteral(v: string): WordLiteralResult {
   return { value: parsed & 0xffff };
 }
 
-export function parseNumberFull(v: string): number | null {
+// Parse a number in various formats: hex (0x or $),
+// decimal, binary (b or %)
+export function parseNumberFull(v: string)
+: number | null
+{
   if (!v) return null;
   const s = v.trim();
   if (/^0x[0-9a-fA-F]+$/.test(s)) return parseInt(s.slice(2), 16);
@@ -120,6 +124,8 @@ export function parseNumberFull(v: string): number | null {
   return null;
 }
 
+// Parse an address token, which can be a number, label, const,
+// or expression
 export function parseAddressToken(
   v: string,
   labels?: Map<string, { addr: number; line: number; src?: string }>,
@@ -270,13 +276,13 @@ export function encodeTextToBytes(str: string, encoding: TextEncodingType, caseT
 export function parseTextLiteralToBytes(part: string, encoding: TextEncodingType, caseType: TextCaseType): { bytes: number[] } | { error: string } {
   const trimmed = part.trim();
   if (!trimmed.length) return { error: 'Empty .text value' };
-  
+
   // Check if it's a string literal
   const strLiteral = parseStringLiteral(trimmed);
   if (strLiteral !== null) {
     return { bytes: encodeTextToBytes(strLiteral, encoding, caseType) };
   }
-  
+
   // Check if it's a single character in quotes (parseStringLiteral handles this)
   // If parseStringLiteral returned null, it's not a valid string/char literal
   return { error: `Invalid .text value '${trimmed}' - expected string or character literal` };

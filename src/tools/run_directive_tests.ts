@@ -643,7 +643,7 @@ function comparePrintMessages(actual: AssembleResult['printMessages'], expected:
     }
 }
 
-function runTestCase(test: DirectiveTestCase): DirectiveTestResult {
+    function runTestCase(test: DirectiveTestCase): DirectiveTestResult {
     const filePath = path.join(directivesDir, test.sourceFile);
     if (!fs.existsSync(filePath)) {
         throw new Error(`Test source not found: ${test.sourceFile}`);

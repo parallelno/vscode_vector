@@ -1,7 +1,7 @@
 import { ExpressionEvalContext } from './types';
-import { 
-  regCodes, 
-  mviOpcodes, 
+import {
+  regCodes,
+  mviOpcodes,
   parseNumberFull,
   parseAddressToken,
   describeOrigin
@@ -39,25 +39,28 @@ export function ensureImmediateRange(
   return true;
 }
 
+// Resolve an address token to a numeric value, using labels, consts,
+// and expression evaluation
 export function resolveAddressToken(
   arg: string,
   lineIndex: number,
   ctx: InstructionContext
-): number | null {
+): number | null
+{
   if (!arg) return null;
   const s = arg.trim();
-  const exprCtx: ExpressionEvalContext = { 
-    labels: ctx.labels, 
-    consts: ctx.consts, 
-    localsIndex: ctx.localsIndex, 
-    scopes: ctx.scopes, 
-    lineIndex 
+  const exprCtx: ExpressionEvalContext = {
+    labels: ctx.labels,
+    consts: ctx.consts,
+    localsIndex: ctx.localsIndex,
+    scopes: ctx.scopes,
+    lineIndex
   };
-  
+
   // simple numeric
   const num = parseNumberFull(s);
   if (num !== null) return num;
-  
+
   // check simple named constants
   if (ctx.consts && ctx.consts.has(s)) return ctx.consts.get(s)!;
 
@@ -68,7 +71,7 @@ export function resolveAddressToken(
     for (let pi = 0; pi < exprParts.length; pi += 2) {
       const tok = exprParts[pi].trim();
       let val: number | null = null;
-      
+
       // numeric
       val = parseNumberFull(tok);
       if (val === null) {
@@ -93,7 +96,7 @@ export function resolveAddressToken(
           val = ctx.consts.get(tok)!;
         }
       }
-      
+
       if (val === null) {
         try {
           val = evaluateConditionExpression(tok, exprCtx, true);
@@ -101,7 +104,7 @@ export function resolveAddressToken(
           val = null;
         }
       }
-      
+
       if (val === null) return null;
       if (acc === null) acc = val;
       else {
@@ -154,10 +157,10 @@ export function encodeMVI(
     ctx.errors.push(`Bad MVI syntax at ${srcLine}`);
     return 0;
   }
-  
+
   const r = m[0].toUpperCase();
   const rawVal = m[1];
-  
+
   let full: number | null = parseNumberFull(rawVal);
   if (full === null) {
     const resolved = resolveAddressToken(rawVal, srcLine, ctx);
@@ -167,15 +170,15 @@ export function encodeMVI(
       if (p !== null) full = p;
     }
   }
-  
+
   // Try evaluating as expression (supports < and > operators)
   if (full === null) {
-    const exprCtx: ExpressionEvalContext = { 
-      labels: ctx.labels, 
-      consts: ctx.consts, 
-      localsIndex: ctx.localsIndex, 
-      scopes: ctx.scopes, 
-      lineIndex: srcLine 
+    const exprCtx: ExpressionEvalContext = {
+      labels: ctx.labels,
+      consts: ctx.consts,
+      localsIndex: ctx.localsIndex,
+      scopes: ctx.scopes,
+      lineIndex: srcLine
     };
     try {
       full = evaluateConditionExpression(rawVal, exprCtx, true);
@@ -183,16 +186,16 @@ export function encodeMVI(
       // Fall through to error below
     }
   }
-  
+
   if (!(r in mviOpcodes) || (full === null)) {
     ctx.errors.push(`Bad MVI operands at ${srcLine}`);
     return 0;
   }
-  
+
   if (!ensureImmediateRange(full, 8, `Immediate ${rawVal}`, 'MVI', srcLine, ctx.errors)) {
     return 0;
   }
-  
+
   out.push(mviOpcodes[r]);
   out.push((full & 0xff));
   return 2;
@@ -210,21 +213,21 @@ export function encodeMOV(
     ctx.errors.push(`Bad MOV syntax at ${srcLine}`);
     return 0;
   }
-  
+
   const d = m[0].toUpperCase();
   const s = m[1].toUpperCase();
-  
+
   if (!(d in regCodes) || !(s in regCodes)) {
     ctx.errors.push(`Bad MOV registers at ${srcLine}`);
     return 0;
   }
-  
+
   // Explicitly reject the invalid MOV M,M form
   if (d === 'M' && s === 'M') {
     ctx.errors.push(`Invalid MOV M,M at ${srcLine}`);
     return 0;
   }
-  
+
   const opcode = 0x40 + (regCodes[d] << 3) + regCodes[s];
   out.push(opcode & 0xff);
   return 1;
@@ -242,34 +245,34 @@ export function encodeLXI(
     ctx.errors.push(`Bad LXI syntax at ${srcLine}`);
     return 0;
   }
-  
+
   const rp = parts[0].toUpperCase();
   const val = parts[1];
-  
+
   let opcode = -1;
   if (rp === 'B') opcode = 0x01;
   if (rp === 'D') opcode = 0x11;
   if (rp === 'H') opcode = 0x21;
   if (rp === 'SP') opcode = 0x31;
-  
+
   if (opcode < 0) {
     ctx.errors.push(`Bad LXI register pair at ${srcLine}`);
     return 0;
   }
-  
+
   let target: number | null = parseNumberFull(val);
   if (target === null) {
     const resolvedVal = resolveAddressToken(val, srcLine, ctx);
     if (resolvedVal !== null) target = resolvedVal;
   }
-  
+
   if (target === null) {
-    const exprCtx: ExpressionEvalContext = { 
-      labels: ctx.labels, 
-      consts: ctx.consts, 
-      localsIndex: ctx.localsIndex, 
-      scopes: ctx.scopes, 
-      lineIndex: srcLine 
+    const exprCtx: ExpressionEvalContext = {
+      labels: ctx.labels,
+      consts: ctx.consts,
+      localsIndex: ctx.localsIndex,
+      scopes: ctx.scopes,
+      lineIndex: srcLine
     };
     try {
       target = evaluateConditionExpression(val, exprCtx, true);
@@ -278,16 +281,16 @@ export function encodeLXI(
       return 0;
     }
   }
-  
+
   if (target === null) {
     ctx.errors.push(`Bad LXI value '${val}' at ${srcLine}`);
     return 0;
   }
-  
+
   if (!ensureImmediateRange(target, 16, `Immediate ${val}`, 'LXI', srcLine, ctx.errors)) {
     return 0;
   }
-  
+
   out.push(opcode & 0xff);
   out.push(target & 0xff);
   out.push((target >> 8) & 0xff);
@@ -304,7 +307,7 @@ export function encodeThreeByteAddress(
   const arg = tokens.slice(1).join(' ').trim();
   let target = 0;
   const num = parseNumberFull(arg);
-  
+
   if (num !== null) {
     target = num;
   } else {
@@ -315,11 +318,11 @@ export function encodeThreeByteAddress(
       target = 0;
     }
   }
-  
+
   if (!ensureImmediateRange(target, 16, `Address ${arg}`, tokens[0].toUpperCase(), srcLine, ctx.errors)) {
     return 0;
   }
-  
+
   out.push(opcode & 0xff);
   out.push(target & 0xff);
   out.push((target >> 8) & 0xff);
@@ -335,14 +338,14 @@ export function encodeImmediateOp(
 ): number {
   const valTok = tokens.slice(1).join(' ').trim();
   let full: number | null = parseNumberFull(valTok);
-  
+
   if (full === null) {
-    const exprCtx: ExpressionEvalContext = { 
-      labels: ctx.labels, 
-      consts: ctx.consts, 
-      localsIndex: ctx.localsIndex, 
-      scopes: ctx.scopes, 
-      lineIndex: srcLine 
+    const exprCtx: ExpressionEvalContext = {
+      labels: ctx.labels,
+      consts: ctx.consts,
+      localsIndex: ctx.localsIndex,
+      scopes: ctx.scopes,
+      lineIndex: srcLine
     };
     try {
       full = evaluateConditionExpression(valTok, exprCtx, true);
@@ -351,16 +354,16 @@ export function encodeImmediateOp(
       return 0;
     }
   }
-  
+
   if (full === null) {
     ctx.errors.push(`Bad immediate '${valTok}' at ${srcLine}`);
     return 0;
   }
-  
+
   if (!ensureImmediateRange(full, 8, `Immediate ${valTok}`, tokens[0].toUpperCase(), srcLine, ctx.errors)) {
     return 0;
   }
-  
+
   out.push(opcode & 0xff);
   out.push(full & 0xff);
   return 2;

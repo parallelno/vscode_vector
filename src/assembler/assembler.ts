@@ -19,7 +19,7 @@ import { prepareMacros, expandMacroInvocations } from './macro';
 import { expandLoopDirectives } from './loops';
 import { processIncludes } from './includes';
 import { registerLabel as registerLabelHelper, getScopeKey } from './labels';
-import { tokenizeLineWithOffsets, argsAfterToken, isAddressDirective, checkLabelOnDirective } from './common';
+import { isAddressDirective, checkLabelOnDirective, tokenize } from './common';
 import { handleDB, handleDW, handleDS, DataContext } from './data';
 import {
   handleIfDirective,
@@ -42,6 +42,10 @@ import {
 } from './instructions';
 import { AssemblyEvalState, evaluateExpressionValue, processVariableAssignment } from './pass_helpers';
 import { createAssembleAndWrite } from './assemble_write';
+import { AlignDirectiveEntry, handleAlignFirstPass, handleAlignSecondPass } from './align';
+import { handleOrgFirstPass, handleOrgSecondPass } from './org';
+import { INSTR_SIZES } from './first_pass_instr';
+import { INSTR_OPCODES, instructionEncoding } from './second_pass_instr';
 
 export function assemble(
   source: string,
@@ -79,7 +83,7 @@ export function assemble(
   // global numeric id counters per local name to ensure exported keys are unique
   const globalLocalCounters = new Map<string, number>();
   const scopes: string[] = new Array(lines.length);
-  const alignDirectives: Array<{ value: number }> = new Array(lines.length);
+  const alignDirectives: Array<AlignDirectiveEntry | undefined> = new Array(lines.length);
   let directiveCounter = 0;
 
   // Initialize the current address counter to 0
@@ -124,9 +128,6 @@ export function assemble(
                         sourcePath);
   }
 
-  // Helper to tokenize with offsets - using imported function
-  const tokenize = tokenizeLineWithOffsets;
-
   // Helper to create scope key
   function makeScopeKey(orig?: SourceOrigin): string {
     return getScopeKey(orig, sourcePath, directiveCounter);
@@ -145,6 +146,7 @@ export function assemble(
     const line = stripInlineComment(raw).trim();
     if (!line) continue;
 
+    // Update directive counter and scope key when file changes
     if (i > 0) {
       const prev = origins[i - 1];
       const curr = origins[i];
@@ -154,6 +156,7 @@ export function assemble(
         directiveCounter++;
       }
     }
+
     scopes[i] = makeScopeKey(origins[i]);
     const originDesc = describeOrigin(origins[i], i + 1, sourcePath);
 
@@ -340,7 +343,7 @@ export function assemble(
       continue;
     }
 
-
+    // Handle label definitions
     if (tokens[0].endsWith(':')) {
       const candidate = tokens[0].slice(0, -1);
       tokens.shift();
@@ -388,116 +391,58 @@ export function assemble(
     }
 
     if (op === '.ORG' || op === 'ORG') {
-      // .org addr
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]);
-      const aTok = rest.trim().split(/\s+/)[0];
-      const org = origins[i];
-      let val: number | null = null;
-      const num = parseNumberFull(aTok);
-      if (num !== null) val = num & 0xffff;
-      else if (aTok && aTok[0] === '@') {
-        // try to resolve local label in current scope
-        const scopeKey = makeScopeKey(org);
-        const fileMap = localsIndex.get(scopeKey);
-        if (fileMap) {
-          const arr = fileMap.get(aTok.slice(1));
-          if (arr && arr.length) {
-            // pick first definition (definitions earlier in file would be recorded)
-            const key = arr[0].key;
-            val = labels.get(key)!.addr & 0xffff;
-          }
-        }
-      } else if (labels.has(aTok)) {
-        val = labels.get(aTok)!.addr & 0xffff;
-      }
-      if (val === null) { errors.push(`Bad ORG address '${aTok}' at ${i + 1}`); continue; }
-      addr = val;
-      // .org defines a new (narrower) scope region for subsequent labels
+      const result = handleOrgFirstPass({
+        line,
+        tokens,
+        tokenOffsets,
+        lineIndex: i + 1,
+        origin: origins[i],
+        sourcePath,
+        scopes,
+        localsIndex,
+        labels,
+        pendingDirectiveLabel,
+        makeScopeKey,
+        registerLabel,
+        errors,
+        addr,
+        originDesc
+      });
       directiveCounter++;
-      if (pendingDirectiveLabel) {
-        const org = origins[i];
-        const newScope = makeScopeKey(org);
-        const fallbackLine = org && typeof org.line === 'number' ? org.line : (i + 1);
-        registerLabel(pendingDirectiveLabel, addr, org, fallbackLine, newScope);
-        pendingDirectiveLabel = null;
-      }
+      addr = result.addr;
+      pendingDirectiveLabel = result.pendingDirectiveLabel;
       continue;
     }
 
     if (op === '.ALIGN' || op === 'ALIGN') {
-      const exprText = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
-      if (!exprText.length) {
-        errors.push(`Missing value for .align at ${originDesc}`);
-        continue;
-      }
-      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: i + 1 };
-      let alignment = 0;
-      try {
-        alignment = evaluateConditionExpression(exprText, ctx, true);
-      } catch (err: any) {
-        errors.push(`Failed to evaluate .align at ${originDesc}: ${err?.message || err}`);
-        continue;
-      }
-      if (alignment <= 0) {
-        errors.push(`.align value must be positive at ${originDesc}`);
-        continue;
-      }
-      if ((alignment & (alignment - 1)) !== 0) {
-        errors.push(`.align value must be a power of two at ${originDesc}`);
-        continue;
-      }
-      const remainder = addr % alignment;
-      const alignedAddr = remainder === 0 ? addr : addr + (alignment - remainder);
-      if (alignedAddr > 0x10000) {
-        errors.push(`.align would move address beyond 0x10000 at ${originDesc}`);
-        continue;
-      }
-      alignDirectives[i] = { value: alignment };
-      if (pendingDirectiveLabel) {
-        const origin = origins[i];
-        const fallbackLine = origin && typeof origin.line === 'number' ? origin.line : (i + 1);
-        registerLabel(pendingDirectiveLabel, alignedAddr, origin, fallbackLine, scopes[i]);
-        pendingDirectiveLabel = null;
-      }
-      addr = alignedAddr;
+      const result = handleAlignFirstPass({
+        line,
+        tokens,
+        tokenOffsets,
+        lineIndex: i + 1,
+        directiveIndex: i,
+        origin: origins[i],
+        originDesc,
+        sourcePath,
+        labels,
+        consts,
+        localsIndex,
+        scopes,
+        alignDirectives,
+        pendingDirectiveLabel,
+        makeScopeKey,
+        registerLabel,
+        errors,
+        addr
+      });
+      addr = result.addr;
+      pendingDirectiveLabel = result.pendingDirectiveLabel;
       continue;
     }
 
-    const instrSizes: Record<string, number> = {
-      'NOP': 1,
-      'LXI': 3,
-      'STAX': 1, 'LDAX': 1,
-      'SHLD': 3, 'LHLD': 3,
-      'STA': 3, 'LDA': 3,
-      'INX': 1, 'DCX': 1, 'INR': 1, 'DCR': 1,
-      'MVI': 2,
-      'RLC': 1, 'RAL': 1, 'DAA': 1, 'STC': 1,
-      'DAD': 1,
-      'RRC': 1, 'RAR': 1, 'CMA': 1, 'CMC': 1,
-      'MOV': 1,
-      'HLT': 1,
-      'ADD': 1, 'ADC': 1,
-      'SUB': 1, 'SBB': 1,
-      'ANA': 1, 'XRA': 1,
-      'ORA': 1, 'CMP': 1,
-      'RNZ': 1, 'RNC': 1, 'RPO': 1, 'RP': 1,
-      'POP': 1, 'PUSH': 1,
-      'JNZ': 3, 'JNC': 3, 'JPO': 3, 'JP': 3,
-      'JMP': 3, 'OUT': 2, 'XTHL': 1, 'DI': 1,
-      'CNZ': 3, 'CNC': 3, 'CPO': 3, 'CP': 3,
-      'ADI': 2, 'SUI': 2, 'ANI': 2, 'ORI': 2,
-      'RST': 1,
-      'RZ': 1, 'RC': 1, 'RPE': 1, 'RM': 1,
-      'RET': 1, 'PCHL': 1, 'SPHL': 1,
-      'JZ': 3, 'JC': 3, 'JPE': 3, 'JM': 3,
-      'IN': 2, 'XCHG': 1, 'EI': 1,
-      'CZ': 3, 'CC': 3, 'CPE': 3, 'CM': 3,
-      'CALL': 3,
-      'ACI': 2, 'SBI': 2, 'XRI': 2, 'CPI': 2,
-    }
-
-    if (instrSizes.hasOwnProperty(op)) {
-      addr += instrSizes[op];
+    // Instruction size lookup
+    if (INSTR_SIZES.hasOwnProperty(op)) {
+      addr += INSTR_SIZES[op];
       continue;
     }
 
@@ -505,6 +450,7 @@ export function assemble(
     errors.push(`Unknown or unsupported opcode '${op}' at line ${i + 1}`);
   }
 
+  // Check for any unclosed .if directives and report errors
   if (ifStack.length) {
     for (let idx = ifStack.length - 1; idx >= 0; idx--) {
       const frame = ifStack[idx];
@@ -513,7 +459,6 @@ export function assemble(
   }
 
   if (errors.length) return { success: false, errors, origins };
-
 
 
 
@@ -706,26 +651,27 @@ export function assemble(
     }
 
     if (op === '.ORG' || op === 'ORG') {
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]);
-      const aTok = rest.trim().split(/\s+/)[0];
-      const val = parseAddressToken(aTok, labels, consts);
-      if (val === null) { errors.push(`Bad ${op} address '${aTok}' at ${srcLine}`); continue; }
-      addr = val;
-      // label for this ORG (if present) was already registered in first pass; nothing to emit
-      continue;
+      const result = handleOrgSecondPass({
+        line,
+        tokens,
+        tokenOffsets,
+        labels,
+        consts,
+        errors,
+        addr,
+        lineIndex: srcLine,
+        origins,
+        sourcePath,
+        map
+      });
+      addr = result.addr;
+      if (result.handled) continue;
     }
 
     if (op === '.ALIGN' || op === 'ALIGN') {
-      const directive = alignDirectives[i];
-      if (!directive) { continue; }
-      const alignment = directive.value;
-      if (alignment <= 0) { continue; }
-      const remainder = addr % alignment;
-      if (remainder === 0) { continue; }
-      const gap = alignment - remainder;
-      for (let k = 0; k < gap; k++) out.push(0);
-      addr += gap;
-      continue;
+      const result = handleAlignSecondPass({ directive: alignDirectives[i], addr, out });
+      addr = result.addr;
+      if (result.handled) continue;
     }
 
     if (op === '.ENCODING'){
@@ -750,223 +696,12 @@ export function assemble(
       continue;
     }
 
-    if (op === 'LDAX' || op === 'STAX') {
-      const reg = tokens[1].toUpperCase();
-      let opcode = -1;
-      if (op === 'LDAX') {
-        if (reg === 'B') opcode = 0x0A;
-        if (reg === 'D') opcode = 0x1A;
-      } else {
-        if (reg === 'B') opcode = 0x02;
-        if (reg === 'D') opcode = 0x12;
-      }
-      if (opcode < 0) { errors.push(`Bad ${op} register '${reg}' at ${srcLine}`); continue; }
-      out.push(opcode & 0xff);
-      addr += 1;
-      continue;
-    }
-
-    if (op === 'INX' || op === 'DCX') {
-      const rp = tokens[1].toUpperCase();
-      const isInx = op === 'INX';
-      let opcode = -1;
-      if (rp === 'B') opcode = isInx ? 0x03 : 0x0B;
-      if (rp === 'D') opcode = isInx ? 0x13 : 0x1B;
-      if (rp === 'H') opcode = isInx ? 0x23 : 0x2B;
-      if (rp === 'SP') opcode = isInx ? 0x33 : 0x3B;
-      if (opcode < 0) { errors.push(`Bad ${op} RP '${rp}' at ${srcLine}`); continue; }
-      out.push(opcode & 0xff);
-      addr += 1;
-      continue;
-    }
-
-    if (op === 'LHLD' || op === 'SHLD') {
-      const opcode = op === 'LHLD' ? 0x2A : 0x22;
-      const emitted = encodeThreeByteAddress(tokens, srcLine, opcode, instrCtx, out);
+    // Instruction encoding
+    if (INSTR_OPCODES.hasOwnProperty(op) === true) {
+      const emitted = instructionEncoding(tokens, srcLine, instrCtx, out);
       addr += emitted;
       continue;
     }
-
-    if (op === 'XCHG') { out.push(0xEB); addr += 1; continue; }
-    if (op === 'PCHL') { out.push(0xE9); addr += 1; continue; }
-    if (op === 'SPHL') { out.push(0xF9); addr += 1; continue; }
-    if (op === 'XTHL') { out.push(0xE3); addr += 1; continue; }
-
-    if (op === 'MVI') {
-      const emitted = encodeMVI(line, srcLine, instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-
-    if (op === 'MOV') {
-      const emitted = encodeMOV(tokens, srcLine, instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-
-    const threeByteMap: Record<string, number> = {
-      'LDA': 0x3A,
-      'STA': 0x32,
-      'JMP': 0xC3,
-      'JZ': 0xCA,
-      'JNZ': 0xC2,
-      'CALL': 0xCD
-    };
-    if (op in threeByteMap) {
-      const emitted = encodeThreeByteAddress(tokens, srcLine, threeByteMap[op], instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-
-    if (op === 'LXI') {
-      const emitted = encodeLXI(line, srcLine, instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-
-    const regOpMap: Record<string, number> = {
-      'ADD': 0x80,
-      'ADC': 0x88,
-      'SUB': 0x90,
-      'SBB': 0x98
-    };
-    if (op in regOpMap) {
-      const emitted = encodeRegisterOp(tokens, srcLine, regOpMap[op], instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-
-    if (op === 'INR' || op === 'DCR') {
-      // INR r or DCR r
-      const r = tokens[1].toUpperCase();
-      if (!(r in regCodes)) { errors.push(`Bad ${op} reg at ${srcLine}`); continue; }
-      const base = op === 'INR' ? 0x04 : 0x05;
-      const opcode = base + (regCodes[r] << 3);
-      out.push(opcode & 0xff);
-      addr += 1;
-      continue;
-    }
-
-    const logicRegMap: Record<string, number> = {
-      'ANA': 0xA0,
-      'XRA': 0xA8,
-      'ORA': 0xB0,
-      'CMP': 0xB8
-    };
-    if (op in logicRegMap) {
-      const emitted = encodeRegisterOp(tokens, srcLine, logicRegMap[op], instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-
-    const immArithMap: Record<string, number> = { 'ADI': 0xC6, 'ACI': 0xCE, 'SUI': 0xD6, 'SBI': 0xDE };
-    if (op in immArithMap) {
-      const emitted = encodeImmediateOp(tokens, srcLine, immArithMap[op], instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-
-    const immLogicMap: Record<string, number> = { 'ANI': 0xE6, 'XRI': 0xEE, 'ORI': 0xF6, 'CPI': 0xFE };
-    if (op in immLogicMap) {
-      const emitted = encodeImmediateOp(tokens, srcLine, immLogicMap[op], instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-
-    // DAD RP
-    if (op === 'DAD') {
-      const rp = tokens[1].toUpperCase();
-      let opcode = -1;
-      if (rp === 'B') opcode = 0x09;
-      if (rp === 'D') opcode = 0x19;
-      if (rp === 'H') opcode = 0x29;
-      if (rp === 'SP') opcode = 0x39;
-      if (opcode < 0) { errors.push(`Bad DAD RP '${rp}' at ${srcLine}`); continue; }
-      out.push(opcode & 0xff);
-      addr += 1;
-      continue;
-    }
-
-    // Rotates
-    if (op === 'RLC') { out.push(0x07); addr += 1; continue; }
-    if (op === 'RRC') { out.push(0x0F); addr += 1; continue; }
-    if (op === 'RAL') { out.push(0x17); addr += 1; continue; }
-    if (op === 'RAR') { out.push(0x1F); addr += 1; continue; }
-
-    // EI/DI
-    if (op === 'EI') { out.push(0xFB); addr += 1; continue; }
-    if (op === 'DI') { out.push(0xF3); addr += 1; continue; }
-
-    // PUSH/POP
-    if (op === 'PUSH') {
-      const rp = tokens[1].toUpperCase();
-      let opcode = -1;
-      if (rp === 'B') opcode = 0xC5;
-      if (rp === 'D') opcode = 0xD5;
-      if (rp === 'H') opcode = 0xE5;
-      if (rp === 'PSW' || rp === 'PSW,' ) opcode = 0xF5;
-      if (opcode < 0) { errors.push(`Bad PUSH RP '${rp}' at ${srcLine}`); continue; }
-      out.push(opcode & 0xff); addr += 1; continue;
-    }
-
-    if (op === 'POP') {
-      const rp = tokens[1].toUpperCase();
-      let opcode = -1;
-      if (rp === 'B') opcode = 0xC1;
-      if (rp === 'D') opcode = 0xD1;
-      if (rp === 'H') opcode = 0xE1;
-      if (rp === 'PSW' || rp === 'PSW,') opcode = 0xF1;
-      if (opcode < 0) { errors.push(`Bad POP RP '${rp}' at ${srcLine}`); continue; }
-      out.push(opcode & 0xff); addr += 1; continue;
-    }
-
-    // IN/OUT
-    if (op === 'IN') {
-      const emitted = encodeImmediateOp(tokens, srcLine, 0xDB, instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-    if (op === 'OUT') {
-      const emitted = encodeImmediateOp(tokens, srcLine, 0xD3, instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-
-    // RST n
-    if (op === 'RST') {
-      const n = parseInt(tokens[1]);
-      if (isNaN(n) || n < 0 || n > 7) { errors.push(`Bad RST vector '${tokens[1]}' at ${srcLine}`); continue; }
-      out.push((0xC7 + (n << 3)) & 0xff); addr += 1; continue;
-    }
-
-    // Conditional jumps and calls
-    const jmpMap: Record<string, number> = { 'JNZ': 0xC2, 'JZ': 0xCA, 'JNC': 0xD2, 'JC': 0xDA, 'JPO': 0xE2, 'JPE': 0xEA, 'JP': 0xF2, 'JM': 0xFA };
-    const callMap: Record<string, number> = { 'CNZ': 0xC4, 'CZ': 0xCC, 'CNC': 0xD4, 'CC': 0xDC, 'CPO': 0xE4, 'CPE': 0xEC, 'CP': 0xF4, 'CM': 0xFC };
-    const retMap: Record<string, number> = { 'RNZ': 0xC0, 'RZ': 0xC8, 'RNC': 0xD0, 'RC': 0xD8, 'RPO': 0xE0, 'RPE': 0xE8, 'RP': 0xF0, 'RM': 0xF8 };
-
-    if (op in jmpMap) {
-      const emitted = encodeThreeByteAddress(tokens, srcLine, jmpMap[op], instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-
-    if (op in callMap) {
-      const emitted = encodeThreeByteAddress(tokens, srcLine, callMap[op], instrCtx, out);
-      addr += emitted;
-      continue;
-    }
-
-    if (op in retMap) { out.push(retMap[op]); addr += 1; continue; }
-
-    // DAA, STC, CMC
-    if (op === 'DAA') { out.push(0x27); addr += 1; continue; }
-    if (op === 'STC') { out.push(0x37); addr += 1; continue; }
-    if (op === 'CMC') { out.push(0x3F); addr += 1; continue; }
-
-    if (op === 'RET') { out.push(0xC9); addr += 1; continue; }
-
-    if (op === 'HLT') { out.push(0x76); addr += 1; continue; }
-    if (op === 'NOP') { out.push(0x00); addr += 1; continue; }
 
     errors.push(`Unhandled opcode '${op}' at ${srcLine}`);
   }
