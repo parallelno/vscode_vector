@@ -3,18 +3,10 @@ import * as path from 'path';
 import { AssembleResult, AssembleWriteResult, ExpressionEvalContext, IfFrame, LocalLabelScopeIndex, PrintMessage, SourceOrigin } from './types';
 import {
   stripInlineComment,
-  splitTopLevelArgs,
   parseNumberFull,
   parseAddressToken,
-  parseWordLiteral,
-  parseStringLiteral,
   regCodes,
-  mviOpcodes,
-  toByte,
-  describeOrigin,
-  TextEncodingType,
-  TextCaseType,
-  parseTextLiteralToBytes
+  describeOrigin
 } from './utils';
 
 import { evaluateConditionExpression } from './expression';
@@ -24,19 +16,17 @@ import { DEBUG_FILE_SUFFIX } from '../extention/consts';
 import { processIncludes } from './includes';
 import { registerLabel as registerLabelHelper, getScopeKey } from './labels';
 import { tokenizeLineWithOffsets, argsAfterToken, isAddressDirective, checkLabelOnDirective } from './common';
-import { handleDB, handleDW, handleDS } from './data';
-import { 
-  handleIfDirective, 
-  handleEndifDirective, 
-  handlePrintDirective, 
+import { handleDB, handleDW, handleDS, DataContext } from './data';
+import {
+  handleIfDirective,
+  handleEndifDirective,
+  handlePrintDirective,
   handleErrorDirective,
   handleEncodingDirective,
   handleTextDirective,
-  DirectiveContext 
+  DirectiveContext
 } from './directives';
 import {
-  formatSignedHex,
-  ensureImmediateRange,
   resolveAddressToken as resolveAddressTokenInstr,
   encodeMVI,
   encodeMOV,
@@ -86,9 +76,26 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
   const ifStack: IfFrame[] = [];
 
-  // Text encoding state for .encoding and .text directives
-  let textEncoding: TextEncodingType = 'ascii';
-  let textCase: TextCaseType = 'mixed';
+  // Directive and data helpers share these contexts to mutate shared state
+  const directiveCtx: DirectiveContext = {
+    labels,
+    consts,
+    variables,
+    errors,
+    warnings,
+    printMessages,
+    textEncoding: 'ascii',
+    textCase: 'mixed',
+    localsIndex,
+    scopes
+  };
+  const dataCtx: DataContext = {
+    labels,
+    consts,
+    localsIndex,
+    scopes,
+    errors
+  };
 
   // Helper to register a label using the imported function
   function registerLabel(name: string, address: number, origin: SourceOrigin | undefined, fallbackLine: number, scopeKey: string) {
@@ -161,12 +168,12 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     // Handle .endif directive
-    if (handleEndifDirective(line, origins[i], i + 1, sourcePath, ifStack, { labels, consts, variables, errors, warnings, printMessages, textEncoding, textCase, localsIndex, scopes })) {
+    if (handleEndifDirective(line, origins[i], i + 1, sourcePath, ifStack, directiveCtx)) {
       continue;
     }
 
     // Handle .if directive
-    if (handleIfDirective(line, origins[i], i + 1, sourcePath, ifStack, { labels, consts, variables, errors, warnings, printMessages, textEncoding, textCase, localsIndex, scopes })) {
+    if (handleIfDirective(line, origins[i], i + 1, sourcePath, ifStack, directiveCtx)) {
       continue;
     }
 
@@ -343,99 +350,27 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     const op = tokens[0].toUpperCase();
 
     if (op === 'DB' || op === '.BYTE') {
-      // DB value [,value]
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
-      const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
-      for (const p of parts) {
-          addr += 1;
-      }
+      addr += handleDB(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx);
       continue;
     }
 
     if (op === 'DW' || op === '.WORD') {
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
-      if (!rest.length) {
-        errors.push(`Missing value for ${op} at ${originDesc}`);
-        continue;
-      }
-      const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
-      if (!parts.length) {
-        errors.push(`Missing value for ${op} at ${originDesc}`);
-        continue;
-      }
-      for (const part of parts) {
-        const parsed = parseWordLiteral(part);
-        if ('error' in parsed) {
-          errors.push(`${parsed.error} at ${originDesc}`);
-        }
-        addr += 2;
-      }
+      addr += handleDW(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx);
       continue;
     }
 
     if (op === 'DS') {
-      // DS count  (reserve bytes)
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
-      const n = parseInt(rest);
-      if (isNaN(n) || n < 0) { errors.push(`Bad DS count '${rest}' at ${i + 1}`); continue; }
-      addr += n;
+      addr += handleDS(line, tokens, tokenOffsets, i + 1, dataCtx);
       continue;
     }
 
-    if (op === '.ENCODING') {
-      // .encoding "type", "case"
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
-      const args = splitTopLevelArgs(rest);
-      if (args.length < 1) {
-        errors.push(`Missing encoding type for .encoding at ${originDesc}`);
-        continue;
-      }
-      const typeArg = parseStringLiteral(args[0]);
-      if (typeArg === null) {
-        errors.push(`Invalid encoding type '${args[0]}' for .encoding at ${originDesc} - expected string literal`);
-        continue;
-      }
-      const typeLower = typeArg.toLowerCase();
-      if (typeLower !== 'ascii' && typeLower !== 'screencodecommodore') {
-        errors.push(`Unknown encoding type '${typeArg}' for .encoding at ${originDesc} - expected 'ascii' or 'screencodecommodore'`);
-        continue;
-      }
-      textEncoding = typeLower as TextEncodingType;
-      // Parse optional case argument
-      if (args.length >= 2) {
-        const caseArg = parseStringLiteral(args[1]);
-        if (caseArg === null) {
-          errors.push(`Invalid case '${args[1]}' for .encoding at ${originDesc} - expected string literal`);
-          continue;
-        }
-        const caseLower = caseArg.toLowerCase();
-        if (caseLower !== 'mixed' && caseLower !== 'lower' && caseLower !== 'upper') {
-          errors.push(`Unknown case '${caseArg}' for .encoding at ${originDesc} - expected 'mixed', 'lower', or 'upper'`);
-          continue;
-        }
-        textCase = caseLower as TextCaseType;
-      } else {
-        textCase = 'mixed';  // Default case when not provided
-      }
+    if (handleEncodingDirective(line, origins[i], i + 1, sourcePath, directiveCtx, tokenOffsets, tokens)) {
       continue;
     }
 
-    if (op === '.TEXT') {
-      // .text "string", 'c', ...
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
-      if (!rest.length) {
-        errors.push(`Missing value for .text at ${originDesc}`);
-        continue;
-      }
-      const parts = splitTopLevelArgs(rest);
-      for (const part of parts) {
-        const parsed = parseTextLiteralToBytes(part, textEncoding, textCase);
-        if ('error' in parsed) {
-          errors.push(`${parsed.error} at ${originDesc}`);
-        } else {
-          addr += parsed.bytes.length;
-        }
-      }
+    const textFirstPass = handleTextDirective(line, origins[i], i + 1, sourcePath, directiveCtx, tokenOffsets, tokens);
+    if (textFirstPass.handled) {
+      if (textFirstPass.emitted) addr += textFirstPass.emitted;
       continue;
     }
 
@@ -612,107 +547,23 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
   // Second pass: generate bytes and source-line map
   addr = 0;
-  // Reset text encoding state for second pass
-  textEncoding = 'ascii';
-  textCase = 'mixed';
   const out: number[] = [];
   const map: Record<number, number> = {};
   const dataLineSpans: Array<{ start: number; byteLength: number; unitBytes: number } | undefined> = new Array(lines.length);
-
-  // Resolve an address token in second pass: numeric, local (@) or global label
-  function resolveAddressToken(arg: string, lineIndex: number): number | null {
-    if (!arg) return null;
-    const s = arg.trim();
-    const exprCtx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex };
-    // simple numeric
-    const num = parseNumberFull(s);
-    if (num !== null) return num;
-    // check simple named constants (e.g. TEMP_BYTE = 0x00)
-    if (consts && consts.has(s)) return consts.get(s)!;
-
-    // support simple expressions like "base + 15" where base may be a
-    // numeric, a global label, or a local label (@name). RHS must be numeric.
-    const em = s.match(/^(.+?)\s*([+-])\s*(0x[0-9a-fA-F]+|\$[0-9a-fA-F]+|[0-9]+)$/);
-    if (em) {
-      // simple two-term expression fallback (handled by chained evaluator below too)
-    }
-
-    // support chained arithmetic like "a + b - 1" where any token may be a
-    // numeric, a global label, or a local label (@name). Evaluate left-to-right.
-    const exprParts = s.split(/\s*([+-])\s*/);
-    if (exprParts.length > 1) {
-      let acc: number | null = null;
-      for (let pi = 0; pi < exprParts.length; pi += 2) {
-        const tok = exprParts[pi].trim();
-        let val: number | null = null;
-        // numeric
-        val = parseNumberFull(tok);
-        if (val === null) {
-          if (tok[0] === '@') {
-            const scopeKey = scopes[lineIndex - 1];
-            const fileMap = localsIndex.get(scopeKey);
-            if (!fileMap) return null;
-            const arr = fileMap.get(tok.slice(1));
-            if (!arr || !arr.length) return null;
-            let chosen = arr[0];
-            for (const entry of arr) {
-              if ((entry.line || 0) <= lineIndex) chosen = entry;
-              else break;
-            }
-            const key = chosen.key;
-            if (labels.has(key)) val = labels.get(key)!.addr;
-            else val = null;
-          } else if (labels.has(tok)) {
-            val = labels.get(tok)!.addr;
-          } else if (consts && consts.has(tok)) {
-            val = consts.get(tok)!;
-          }
-        }
-        if (val === null) {
-          try {
-            val = evaluateConditionExpression(tok, exprCtx, true);
-          } catch (err) {
-            val = null;
-          }
-        }
-        if (val === null) return null;
-        if (acc === null) acc = val;
-        else {
-          const op = exprParts[pi - 1];
-          acc = op === '+' ? (acc + val) : (acc - val);
-        }
-      }
-      return acc!;
-    }
-
-    // local label resolution based on the scope recorded during first pass
-    if (s[0] === '@') {
-      const scopeKey = scopes[lineIndex - 1];
-      const fileMap = localsIndex.get(scopeKey);
-      if (!fileMap) return null;
-      const arr = fileMap.get(s.slice(1));
-      if (!arr || !arr.length) return null;
-      let chosen = arr[0];
-      for (const entry of arr) {
-        if ((entry.line || 0) <= lineIndex) chosen = entry;
-        else break;
-      }
-      const key = chosen.key;
-      if (labels.has(key)) return labels.get(key)!.addr;
-      return null;
-    }
-
-    if (labels.has(s)) return labels.get(s)!.addr;
-
-    // final fallback: evaluate full expression (supports unary < and >)
-    try {
-      const value = evaluateConditionExpression(s, exprCtx, true);
-      return value;
-    } catch (err) {
-      // swallow so caller can emit a contextual error
-    }
-    return null;
-  }
+  const directiveCtxSecond: DirectiveContext = {
+    labels,
+    consts,
+    variables,
+    errors,
+    warnings,
+    printMessages,
+    textEncoding: 'ascii',
+    textCase: 'mixed',
+    localsIndex,
+    scopes
+  };
+  const dataCtxSecond: DataContext = { labels, consts, localsIndex, scopes, errors };
+  const instrCtx: InstructionContext = { labels, consts, localsIndex, scopes, errors };
 
   const ifStackSecond: IfFrame[] = [];
 
@@ -815,84 +666,13 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     const blockActive = ifStackSecond.length === 0 ? true : ifStackSecond[ifStackSecond.length - 1].effective;
     if (!blockActive) continue;
 
-    const printMatch = line.match(/^\.print\b(.*)$/i);
-    if (printMatch) {
+    if (handlePrintDirective(line, origins[i], srcLine, sourcePath, directiveCtxSecond)) {
       map[srcLine] = addr;
-      const argsText = (printMatch[1] || '').trim();
-      const parts = argsText.length ? splitTopLevelArgs(argsText) : [];
-      const fragments: string[] = [];
-      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-      let failed = false;
-      for (const partRaw of parts) {
-        const part = partRaw.trim();
-        if (!part.length) continue;
-        try {
-          const literal = parseStringLiteral(part);
-          if (literal !== null) {
-            fragments.push(literal);
-            continue;
-          }
-        } catch (err: any) {
-          errors.push(`Invalid string literal in .print at ${originDesc}: ${err?.message || err}`);
-          failed = true;
-          break;
-        }
-        try {
-          const value = evaluateConditionExpression(part, ctx, true);
-          fragments.push(String(value));
-        } catch (err: any) {
-          errors.push(`Failed to evaluate .print expression '${part}' at ${originDesc}: ${err?.message || err}`);
-          failed = true;
-          break;
-        }
-      }
-      if (!failed) {
-        const output = fragments.length ? fragments.join(' ') : '';
-        printMessages.push({ text: output, origin: origins[i], lineIndex: srcLine });
-        try {
-          console.log(output);
-        } catch (err) {
-          // ignore console output errors
-        }
-      }
       continue;
     }
 
-    const errorMatch = line.match(/^\.error\b(.*)$/i);
-    if (errorMatch) {
+    if (handleErrorDirective(line, origins[i], srcLine, sourcePath, directiveCtxSecond)) {
       map[srcLine] = addr;
-      const argsText = (errorMatch[1] || '').trim();
-      const parts = argsText.length ? splitTopLevelArgs(argsText) : [];
-      const fragments: string[] = [];
-      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-      let failed = false;
-      for (const partRaw of parts) {
-        const part = partRaw.trim();
-        if (!part.length) continue;
-        try {
-          const literal = parseStringLiteral(part);
-          if (literal !== null) {
-            fragments.push(literal);
-            continue;
-          }
-        } catch (err: any) {
-          errors.push(`Invalid string literal in .error at ${originDesc}: ${err?.message || err}`);
-          failed = true;
-          break;
-        }
-        try {
-          const value = evaluateConditionExpression(part, ctx, true);
-          fragments.push(String(value));
-        } catch (err: any) {
-          errors.push(`Failed to evaluate .error expression '${part}' at ${originDesc}: ${err?.message || err}`);
-          failed = true;
-          break;
-        }
-      }
-      if (!failed) {
-        const errorMessage = fragments.length ? fragments.join(' ') : '';
-        errors.push(`.error: ${errorMessage} at ${originDesc}`);
-      }
       return { success: false, errors, origins };
     }
 
@@ -907,14 +687,11 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     const tokens = tokenizedSecond.tokens;
     const tokenOffsets = tokenizedSecond.offsets;
     if (!tokens.length) continue;
-    let labelHere: string | null = null;
     if (tokens[0].endsWith(':')) {
-      labelHere = tokens[0].slice(0, -1);
       tokens.shift();
       tokenOffsets.shift();
       if (!tokens.length) { map[srcLine] = addr; continue; }
     } else if (tokens.length >= 2 && /^\.?org$/i.test(tokens[1])) {
-      labelHere = tokens[0];
       tokens.shift();
       tokenOffsets.shift();
     }
@@ -949,59 +726,26 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     const op = tokens[0].toUpperCase();
 
     if (op === 'DB' || op === '.BYTE') {
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
-      const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
-      let emitted = 0;
-      for (const p of parts) {
-        let val = toByte(p);
-        // If toByte fails, try evaluating as an expression (supports < and > operators)
-        if (val === null) {
-          const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-          try {
-            val = evaluateConditionExpression(p, ctx, true);
-          } catch (err: any) {
-            errors.push(`Bad ${op} value '${p}' at ${srcLine}: ${err?.message || err}`);
-            val = 0;
-          }
-        }
-        out.push(val & 0xff);
-        addr++;
-        emitted++;
-      }
+      const emitted = handleDB(line, tokens, tokenOffsets, srcLine, origins[i], sourcePath, dataCtxSecond, out);
       if (emitted > 0) {
         dataLineSpans[i] = { start: lineStartAddr, byteLength: emitted, unitBytes: 1 };
       }
+      addr += emitted;
       continue;
     }
 
     if (op === 'DW' || op === '.WORD') {
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
-      if (!rest.length) {
-        errors.push(`Missing value for ${op} at ${originDesc}`);
-        continue;
-      }
-      const parts = rest.split(',').map(p => p.trim()).filter(p => p.length > 0);
-      if (!parts.length) {
-        errors.push(`Missing value for ${op} at ${originDesc}`);
-        continue;
-      }
-      let emitted = 0;
-      for (const part of parts) {
-        const parsed = parseWordLiteral(part);
-        let value = 0;
-        if ('error' in parsed) {
-          errors.push(`${parsed.error} at ${originDesc}`);
-        } else {
-          value = parsed.value & 0xffff;
-        }
-        out.push(value & 0xff);
-        out.push((value >> 8) & 0xff);
-        addr += 2;
-        emitted += 2;
-      }
+      const emitted = handleDW(line, tokens, tokenOffsets, srcLine, origins[i], sourcePath, dataCtxSecond, out);
       if (emitted > 0) {
         dataLineSpans[i] = { start: lineStartAddr, byteLength: emitted, unitBytes: 2 };
       }
+      addr += emitted;
+      continue;
+    }
+
+    if (op === 'DS') {
+      const emitted = handleDS(line, tokens, tokenOffsets, srcLine, dataCtxSecond);
+      addr += emitted;
       continue;
     }
 
@@ -1028,54 +772,24 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       continue;
     }
 
-    if (op === 'DS') {
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
-      const n = parseInt(rest);
-      if (isNaN(n) || n < 0) { errors.push(`Bad DS count '${rest}' at ${srcLine}`); continue; }
-      // reserve: just advance addr (no bytes emitted)
-      addr += n;
+    if (handleEncodingDirective(line, origins[i], srcLine, sourcePath, directiveCtxSecond, tokenOffsets, tokens)) {
       continue;
     }
 
-    if (op === '.ENCODING') {
-      // .encoding "type", "case" - update encoding state
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
-      const args = splitTopLevelArgs(rest);
-      if (args.length < 1) continue;  // Error already reported in first pass
-      const typeArg = parseStringLiteral(args[0]);
-      if (typeArg === null) continue;
-      const typeLower = typeArg.toLowerCase();
-      if (typeLower === 'ascii' || typeLower === 'screencodecommodore') {
-        textEncoding = typeLower as TextEncodingType;
-      }
-      if (args.length >= 2) {
-        const caseArg = parseStringLiteral(args[1]);
-        if (caseArg !== null) {
-          const caseLower = caseArg.toLowerCase();
-          if (caseLower === 'mixed' || caseLower === 'lower' || caseLower === 'upper') {
-            textCase = caseLower as TextCaseType;
-          }
-        }
-      } else {
-        textCase = 'mixed';
-      }
-      continue;
-    }
-
-    if (op === '.TEXT') {
-      // .text "string", 'c', ... - emit bytes
-      const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
-      if (!rest.length) continue;  // Error already reported in first pass
-      const parts = splitTopLevelArgs(rest);
-      for (const part of parts) {
-        const parsed = parseTextLiteralToBytes(part, textEncoding, textCase);
-        if ('bytes' in parsed) {
-          for (const b of parsed.bytes) {
-            out.push(b);
-            addr++;
-          }
-        }
-      }
+    const textAddrRef = { value: addr };
+    const textSecondPass = handleTextDirective(
+      line,
+      origins[i],
+      srcLine,
+      sourcePath,
+      directiveCtxSecond,
+      tokenOffsets,
+      tokens,
+      out,
+      textAddrRef
+    );
+    if (textSecondPass.handled) {
+      addr = textAddrRef.value;
       continue;
     }
 
@@ -1110,22 +824,9 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     }
 
     if (op === 'LHLD' || op === 'SHLD') {
-      const arg = tokens.slice(1).join(' ').trim();
-      let target = 0;
-      const num = parseNumberFull(arg);
-      if (num !== null) {
-        target = num;
-      } else {
-        const resolvedVal = resolveAddressToken(arg, srcLine);
-        if (resolvedVal !== null) target = resolvedVal;
-        else { errors.push(`Unknown label or address '${arg}' at ${srcLine}`); target = 0; }
-      }
-      if (!ensureImmediateRange(target, 16, `Address ${arg}`, op, srcLine, errors)) continue;
       const opcode = op === 'LHLD' ? 0x2A : 0x22;
-      out.push(opcode & 0xff);
-      out.push(target & 0xff);
-      out.push((target >> 8) & 0xff);
-      addr += 3;
+      const emitted = encodeThreeByteAddress(tokens, srcLine, opcode, instrCtx, out);
+      addr += emitted;
       continue;
     }
 
@@ -1135,152 +836,47 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     if (op === 'XTHL') { out.push(0xE3); addr += 1; continue; }
 
     if (op === 'MVI') {
-      // MVI R,byte
-      const args = line.slice(3).trim();
-      const m = args.split(',').map(s => s.trim());
-      if (m.length !== 2) { errors.push(`Bad MVI syntax at ${srcLine}`); continue; }
-      const r = m[0].toUpperCase();
-      const rawVal = m[1];
-      // Allow numeric literals, constants, labels or simple expressions for the immediate
-      let full: number | null = parseNumberFull(rawVal);
-      if (full === null) {
-        const resolved = resolveAddressToken(rawVal, srcLine);
-        if (resolved !== null) full = resolved;
-        else {
-          // fallback to parseAddressToken which can evaluate simple const/label expressions
-          const p = parseAddressToken(rawVal, labels, consts);
-          if (p !== null) full = p;
-        }
-      }
-      // If still null, try evaluating as expression (supports < and > operators)
-      if (full === null) {
-        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-        try {
-          full = evaluateConditionExpression(rawVal, ctx, true);
-        } catch (err: any) {
-          // Fall through to error below
-        }
-      }
-      if (!(r in mviOpcodes) || (full === null)) { errors.push(`Bad MVI operands at ${srcLine}`); continue; }
-      if (!ensureImmediateRange(full, 8, `Immediate ${rawVal}`, 'MVI', srcLine, errors)) continue;
-      out.push(mviOpcodes[r]);
-      out.push((full & 0xff));
-      addr += 2;
+      const emitted = encodeMVI(line, srcLine, instrCtx, out);
+      addr += emitted;
       continue;
     }
 
     if (op === 'MOV') {
-      // MOV D,S
-      const args = tokens.slice(1).join(' ');
-      const m = args.split(',').map(s => s.trim());
-      if (m.length !== 2) { errors.push(`Bad MOV syntax at ${srcLine}`); continue; }
-      const d = m[0].toUpperCase();
-      const s = m[1].toUpperCase();
-      if (!(d in regCodes) || !(s in regCodes)) { errors.push(`Bad MOV registers at ${srcLine}`); continue; }
-      // Explicitly reject the invalid MOV M,M form which would otherwise
-      // encode to 0x76 (HLT) due to the MOV bit-pattern. Treat as an
-      // assembler error instead of silently emitting HLT.
-      if (d === 'M' && s === 'M') { errors.push(`Invalid MOV M,M at ${srcLine}`); continue; }
-      const opcode = 0x40 + (regCodes[d] << 3) + regCodes[s];
-      out.push(opcode & 0xff);
-      addr += 1;
+      const emitted = encodeMOV(tokens, srcLine, instrCtx, out);
+      addr += emitted;
       continue;
     }
 
-    if (op === 'LDA' || op === 'STA' || op === 'JMP' || op === 'JZ' || op === 'JNZ' || op === 'CALL') {
-      const arg = tokens.slice(1).join(' ').trim();
-      let target = 0;
-      const num = parseNumberFull(arg);
-      if (num !== null) {
-        target = num;
-      } else {
-        const resolvedVal = resolveAddressToken(arg, srcLine);
-        if (resolvedVal !== null) target = resolvedVal;
-        else { errors.push(`Unknown label or address '${arg}' at ${srcLine}`); target = 0; }
-      }
-      if (!ensureImmediateRange(target, 16, `Address ${arg}`, op, srcLine, errors)) continue;
-      let opcode = 0;
-      if (op === 'LDA') opcode = 0x3A;
-      if (op === 'STA') opcode = 0x32;
-      if (op === 'JMP') opcode = 0xC3;
-      if (op === 'JZ') opcode = 0xCA;
-      if (op === 'JNZ') opcode = 0xC2;
-      if (op === 'CALL') opcode = 0xCD;
-      out.push(opcode & 0xff);
-      // little endian address
-      out.push(target & 0xff);
-      out.push((target >> 8) & 0xff);
-      addr += 3;
+    const threeByteMap: Record<string, number> = {
+      'LDA': 0x3A,
+      'STA': 0x32,
+      'JMP': 0xC3,
+      'JZ': 0xCA,
+      'JNZ': 0xC2,
+      'CALL': 0xCD
+    };
+    if (op in threeByteMap) {
+      const emitted = encodeThreeByteAddress(tokens, srcLine, threeByteMap[op], instrCtx, out);
+      addr += emitted;
       continue;
     }
 
     if (op === 'LXI') {
-      // LXI RP, d16  (e.g., LXI B,0x1234)
-      const args = line.slice(3).trim();
-      const parts = args.split(',').map(s => s.trim());
-      if (parts.length !== 2) { errors.push(`Bad LXI syntax at ${srcLine}`); continue; }
-      const rp = parts[0].toUpperCase();
-      const val = parts[1];
-      let opcode = -1;
-      if (rp === 'B') opcode = 0x01;
-      if (rp === 'D') opcode = 0x11;
-      if (rp === 'H') opcode = 0x21;
-      if (rp === 'SP') opcode = 0x31;
-      if (opcode < 0) { errors.push(`Bad LXI register pair at ${srcLine}`); continue; }
-      let target: number | null = parseNumberFull(val);
-      if (target === null) {
-        const resolvedVal = resolveAddressToken(val, srcLine);
-        if (resolvedVal !== null) target = resolvedVal;
-      }
-      if (target === null) {
-        const exprResult = evaluateExpressionValue(val, srcLine, `Bad LXI value '${val}'`);
-        if (exprResult.error) {
-          errors.push(`${exprResult.error} at ${srcLine}`);
-          continue;
-        }
-        target = exprResult.value;
-      }
-      if (target === null) {
-        errors.push(`Bad LXI value '${val}' at ${srcLine}`);
-        continue;
-      }
-      if (!ensureImmediateRange(target, 16, `Immediate ${val}`, 'LXI', srcLine, errors)) continue;
-      out.push(opcode & 0xff);
-      out.push(target & 0xff);
-      out.push((target >> 8) & 0xff);
-      addr += 3;
+      const emitted = encodeLXI(line, srcLine, instrCtx, out);
+      addr += emitted;
       continue;
     }
 
-    if (op === 'ADD') {
-      // ADD r
-      const r = tokens[1].toUpperCase();
-      if (!(r in regCodes)) { errors.push(`Bad ADD reg at ${srcLine}`); continue; }
-      const opcode = 0x80 + regCodes[r];
-      out.push(opcode & 0xff);
-      addr += 1;
+    const regOpMap: Record<string, number> = {
+      'ADD': 0x80,
+      'ADC': 0x88,
+      'SUB': 0x90,
+      'SBB': 0x98
+    };
+    if (op in regOpMap) {
+      const emitted = encodeRegisterOp(tokens, srcLine, regOpMap[op], instrCtx, out);
+      addr += emitted;
       continue;
-    }
-
-    if (op === 'ADC') {
-      const r = tokens[1].toUpperCase();
-      if (!(r in regCodes)) { errors.push(`Bad ADC reg at ${srcLine}`); continue; }
-      out.push((0x88 + regCodes[r]) & 0xff);
-      addr += 1; continue;
-    }
-
-    if (op === 'SUB') {
-      const r = tokens[1].toUpperCase();
-      if (!(r in regCodes)) { errors.push(`Bad SUB reg at ${srcLine}`); continue; }
-      out.push((0x90 + regCodes[r]) & 0xff);
-      addr += 1; continue;
-    }
-
-    if (op === 'SBB') {
-      const r = tokens[1].toUpperCase();
-      if (!(r in regCodes)) { errors.push(`Bad SBB reg at ${srcLine}`); continue; }
-      out.push((0x98 + regCodes[r]) & 0xff);
-      addr += 1; continue;
     }
 
     if (op === 'INR' || op === 'DCR') {
@@ -1294,70 +890,30 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
       continue;
     }
 
-    // ANA/ORA/XRA/CMP (register forms)
-    if (op === 'ANA' || op === 'XRA' || op === 'ORA' || op === 'CMP') {
-      const r = tokens[1].toUpperCase();
-      if (!(r in regCodes)) { errors.push(`Bad ${op} reg at ${srcLine}`); continue; }
-      let base = 0;
-      if (op === 'ANA') base = 0xA0;
-      if (op === 'XRA') base = 0xA8;
-      if (op === 'ORA') base = 0xB0;
-      if (op === 'CMP') base = 0xB8;
-      out.push((base + regCodes[r]) & 0xff);
-      addr += 1;
+    const logicRegMap: Record<string, number> = {
+      'ANA': 0xA0,
+      'XRA': 0xA8,
+      'ORA': 0xB0,
+      'CMP': 0xB8
+    };
+    if (op in logicRegMap) {
+      const emitted = encodeRegisterOp(tokens, srcLine, logicRegMap[op], instrCtx, out);
+      addr += emitted;
       continue;
     }
 
-    // ADI/ACI/SUI/SBI immediate
-    if (op === 'ADI' || op === 'ACI' || op === 'SUI' || op === 'SBI') {
-      const valTok = tokens.slice(1).join(' ').trim();
-      let full: number | null = parseNumberFull(valTok);
-      // If parseNumberFull fails, try evaluating as expression (supports < and > operators)
-      if (full === null) {
-        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-        try {
-          full = evaluateConditionExpression(valTok, ctx, true);
-        } catch (err: any) {
-          errors.push(`Bad immediate '${valTok}' at ${srcLine}: ${err?.message || err}`);
-          continue;
-        }
-      }
-      if (full === null) { errors.push(`Bad immediate '${valTok}' at ${srcLine}`); continue; }
-      if (!ensureImmediateRange(full, 8, `Immediate ${valTok}`, op, srcLine, errors)) continue;
-      let opcode = 0;
-      if (op === 'ADI') opcode = 0xC6;
-      if (op === 'ACI') opcode = 0xCE;
-      if (op === 'SUI') opcode = 0xD6;
-      if (op === 'SBI') opcode = 0xDE;
-      out.push(opcode & 0xff);
-      out.push(full & 0xff);
-      addr += 2; continue;
+    const immArithMap: Record<string, number> = { 'ADI': 0xC6, 'ACI': 0xCE, 'SUI': 0xD6, 'SBI': 0xDE };
+    if (op in immArithMap) {
+      const emitted = encodeImmediateOp(tokens, srcLine, immArithMap[op], instrCtx, out);
+      addr += emitted;
+      continue;
     }
 
-    // ANI/XRI/ORI/CPI immediate
-    if (op === 'ANI' || op === 'XRI' || op === 'ORI' || op === 'CPI') {
-      const valTok = tokens.slice(1).join(' ').trim();
-      let full: number | null = parseNumberFull(valTok);
-      // If parseNumberFull fails, try evaluating as expression (supports < and > operators)
-      if (full === null) {
-        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-        try {
-          full = evaluateConditionExpression(valTok, ctx, true);
-        } catch (err: any) {
-          errors.push(`Bad immediate '${valTok}' at ${srcLine}: ${err?.message || err}`);
-          continue;
-        }
-      }
-      if (full === null) { errors.push(`Bad immediate '${valTok}' at ${srcLine}`); continue; }
-      if (!ensureImmediateRange(full, 8, `Immediate ${valTok}`, op, srcLine, errors)) continue;
-      let opcode = 0;
-      if (op === 'ANI') opcode = 0xE6;
-      if (op === 'XRI') opcode = 0xEE;
-      if (op === 'ORI') opcode = 0xF6;
-      if (op === 'CPI') opcode = 0xFE;
-      out.push(opcode & 0xff);
-      out.push(full & 0xff);
-      addr += 2; continue;
+    const immLogicMap: Record<string, number> = { 'ANI': 0xE6, 'XRI': 0xEE, 'ORI': 0xF6, 'CPI': 0xFE };
+    if (op in immLogicMap) {
+      const emitted = encodeImmediateOp(tokens, srcLine, immLogicMap[op], instrCtx, out);
+      addr += emitted;
+      continue;
     }
 
     // DAD RP
@@ -1409,38 +965,14 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
 
     // IN/OUT
     if (op === 'IN') {
-      const tok = tokens.slice(1).join(' ').trim();
-      let full: number | null = parseNumberFull(tok);
-      // If parseNumberFull fails, try evaluating as expression (supports < and > operators)
-      if (full === null) {
-        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-        try {
-          full = evaluateConditionExpression(tok, ctx, true);
-        } catch (err: any) {
-          errors.push(`Bad IN port '${tok}' at ${srcLine}: ${err?.message || err}`);
-          continue;
-        }
-      }
-      if (full === null) { errors.push(`Bad IN port '${tok}' at ${srcLine}`); continue; }
-      if (!ensureImmediateRange(full, 8, `IN port ${tok}`, 'IN', srcLine, errors)) continue;
-      out.push(0xDB); out.push(full & 0xff); addr += 2; continue;
+      const emitted = encodeImmediateOp(tokens, srcLine, 0xDB, instrCtx, out);
+      addr += emitted;
+      continue;
     }
     if (op === 'OUT') {
-      const tok = tokens.slice(1).join(' ').trim();
-      let full: number | null = parseNumberFull(tok);
-      // If parseNumberFull fails, try evaluating as expression (supports < and > operators)
-      if (full === null) {
-        const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
-        try {
-          full = evaluateConditionExpression(tok, ctx, true);
-        } catch (err: any) {
-          errors.push(`Bad OUT port '${tok}' at ${srcLine}: ${err?.message || err}`);
-          continue;
-        }
-      }
-      if (full === null) { errors.push(`Bad OUT port '${tok}' at ${srcLine}`); continue; }
-      if (!ensureImmediateRange(full, 8, `OUT port ${tok}`, 'OUT', srcLine, errors)) continue;
-      out.push(0xD3); out.push(full & 0xff); addr += 2; continue;
+      const emitted = encodeImmediateOp(tokens, srcLine, 0xD3, instrCtx, out);
+      addr += emitted;
+      continue;
     }
 
     // RST n
@@ -1456,33 +988,15 @@ export function assemble(source: string, sourcePath?: string): AssembleResult {
     const retMap: Record<string, number> = { 'RNZ': 0xC0, 'RZ': 0xC8, 'RNC': 0xD0, 'RC': 0xD8, 'RPO': 0xE0, 'RPE': 0xE8, 'RP': 0xF0, 'RM': 0xF8 };
 
     if (op in jmpMap) {
-      const arg = tokens.slice(1).join(' ').trim();
-      let target = 0;
-      const num = parseNumberFull(arg);
-      if (num !== null) {
-        target = num;
-      } else {
-        const resolvedVal = resolveAddressToken(arg, srcLine);
-        if (resolvedVal !== null) target = resolvedVal;
-        else { errors.push(`Unknown label or address '${arg}' at ${srcLine}`); target = 0; }
-      }
-      if (!ensureImmediateRange(target, 16, `Address ${arg}`, op, srcLine, errors)) continue;
-      out.push(jmpMap[op]); out.push(target & 0xff); out.push((target >> 8) & 0xff); addr += 3; continue;
+      const emitted = encodeThreeByteAddress(tokens, srcLine, jmpMap[op], instrCtx, out);
+      addr += emitted;
+      continue;
     }
 
     if (op in callMap) {
-      const arg = tokens.slice(1).join(' ').trim();
-      let target = 0;
-      const num = parseNumberFull(arg);
-      if (num !== null) {
-        target = num;
-      } else {
-        const resolvedVal = resolveAddressToken(arg, srcLine);
-        if (resolvedVal !== null) target = resolvedVal;
-        else { errors.push(`Unknown label or address '${arg}' at ${srcLine}`); target = 0; }
-      }
-      if (!ensureImmediateRange(target, 16, `Address ${arg}`, op, srcLine, errors)) continue;
-      out.push(callMap[op]); out.push(target & 0xff); out.push((target >> 8) & 0xff); addr += 3; continue;
+      const emitted = encodeThreeByteAddress(tokens, srcLine, callMap[op], instrCtx, out);
+      addr += emitted;
+      continue;
     }
 
     if (op in retMap) { out.push(retMap[op]); addr += 1; continue; }

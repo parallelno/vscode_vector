@@ -41,9 +41,9 @@ export function activate(context: vscode.ExtensionContext)
 
 
   // Toggle breakpoint command: toggles a SourceBreakpoint at the current cursor line
-  const toggleBp = vscode.commands.registerCommand(
-    ext_consts.EXTENTION_NAME + '.toggleBreakpoint', () => toggleBreakpoint());
-  context.subscriptions.push(toggleBp);
+  // const toggleBp = vscode.commands.registerCommand(
+  //   ext_consts.EXTENTION_NAME + '.toggleBreakpoint', () => toggleBreakpoint());
+  // context.subscriptions.push(toggleBp);
 
 ////////////////////////////////////////////////////////////////////////////////
 //
