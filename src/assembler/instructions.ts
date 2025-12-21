@@ -73,7 +73,7 @@ export function resolveAddressToken(
       val = parseNumberFull(tok);
       if (val === null) {
         if (tok[0] === '@') {
-          if (lineIndex <= 0 || lineIndex > ctx.scopes.length) return null;
+          if (lineIndex <= 0 || lineIndex - 1 >= ctx.scopes.length) return null;
           const scopeKey = ctx.scopes[lineIndex - 1];
           const fileMap = ctx.localsIndex.get(scopeKey);
           if (!fileMap) return null;
@@ -114,7 +114,7 @@ export function resolveAddressToken(
 
   // local label resolution
   if (s[0] === '@') {
-    if (lineIndex <= 0 || lineIndex > ctx.scopes.length) return null;
+    if (lineIndex <= 0 || lineIndex - 1 >= ctx.scopes.length) return null;
     const scopeKey = ctx.scopes[lineIndex - 1];
     const fileMap = ctx.localsIndex.get(scopeKey);
     if (!fileMap) return null;
