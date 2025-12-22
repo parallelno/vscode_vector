@@ -5,7 +5,7 @@
 
 .org 0x100
 start:
-			lxi h, @tetet
+			call test
 			mvi a, 0x55 + 1
 			VAR1 .var 1;
 			mvi a, VAR1
@@ -28,6 +28,7 @@ start:
 
 	  		hlt
 	  		call set_palette
+			ora a
 
 loop:
 @tetet:
@@ -92,3 +93,7 @@ palette:
 
 temp_data:
 			.byte 0xFF
+
+test:
+			mvi a, 0x42
+			ret

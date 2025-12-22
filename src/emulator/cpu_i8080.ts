@@ -1,4 +1,3 @@
-import memory from './memory';
 import Memory, { AddrSpace } from './memory';
 
 // consts
@@ -184,7 +183,7 @@ export class CpuState{
   }
 }
 
-export default class CPU
+export class CPU
 {
   memory?: Memory;
   private _state: CpuState = new CpuState();
@@ -426,7 +425,7 @@ export default class CPU
     4, 8, 2, 8, 0, 8, 8, 7, 4, 8, 2, 8, 0, 8, 8, 7,
   ];
 
-  GetInstrType(opcode: number): number
+  static GetInstrType(opcode: number): number
   {
 	  return CPU.INSTR_TYPES[opcode];
   }

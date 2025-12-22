@@ -363,13 +363,17 @@ export async function openEmulatorPanel(
         sendFrameToWebview(true);
         printDebugState('Step into:', emu.hardware, devectorOutput, panel);
         break;
+
       case 'stepOver':
         emu.hardware.Request(HardwareReq.STOP);
-        // TODO: implement proper step over by setting a temporary breakpoint after the CALL/RET
-        emu.hardware?.Request(HardwareReq.EXECUTE_INSTR);
-        sendFrameToWebview(true);
-        printDebugState('Step over (NOT IMPLEMENTED):', emu.hardware, devectorOutput, panel);
+        const addr = emu.hardware.Request(HardwareReq.GET_STEP_OVER_ADDR)['data'];
+        emu.hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr });
+        printDebugState('Step over:', emu.hardware, devectorOutput, panel);
+        emu.hardware.Request(HardwareReq.RUN);
+        emitToolbarState(true);
+        tick();
         break;
+
       case 'stepOut':
         emu.hardware.Request(HardwareReq.STOP);
         // TODO: implement proper step out
@@ -839,9 +843,9 @@ function loadBreakpointsFromToken(
   }
 
   for (const [addr, meta] of desired) {
-    try { hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr }); } catch (e) {}
+    hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr });
     if (meta.enabled === false) {
-      try { hardware.Request(HardwareReq.DEBUG_BREAKPOINT_DISABLE, { addr }); } catch (e) {}
+      hardware.Request(HardwareReq.DEBUG_BREAKPOINT_DISABLE, { addr });
     }
   }
 

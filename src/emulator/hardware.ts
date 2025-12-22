@@ -1,5 +1,5 @@
 import { HardwareReq } from './hardware_reqs';
-import CPU, { CpuState } from './cpu_i8080';
+import * as CpuI8080 from './cpu_i8080';
 import Memory, { MEMORY_GLOBAL_LEN, MEMORY_MAIN_LEN, AddrSpace } from './memory';
 import IO from './io';
 import { KbOperation, Keyboard } from './keyboard';
@@ -41,7 +41,7 @@ export class Hardware
   status: Status = Status.STOP;
   execSpeed: ExecSpeed = ExecSpeed.NORMAL; // execution speed
 
-  private _cpu?: CPU;
+  private _cpu?: CpuI8080.CPU;
   private _memory?: Memory;
   private _keyboard?: Keyboard;
   private _io?: IO;
@@ -73,7 +73,7 @@ export class Hardware
     this._audio = new Audio(this._timer, this._ayWrapper);
     this._fdc = new Fdc1793();
     this._io = new IO(this._keyboard, this._memory, this._timer, this._ay, this._fdc);
-    this._cpu = new CPU(
+    this._cpu = new CpuI8080.CPU(
       this._memory, this._io.PortIn.bind(this._io), this._io.PortOut.bind(this._io));
     this._display = new Display(this._memory, this._io);
 
@@ -198,7 +198,7 @@ export class Hardware
 
     case HardwareReq.GET_IO_PALETTE:
     {
-      out = {"data": this._io?.GetPalette()};;
+      out = {"data": this._io?.GetPalette()};
       break;
     }
     case HardwareReq.GET_IO_PORTS:
@@ -259,13 +259,13 @@ export class Hardware
       break;
     }
     case HardwareReq.GET_CPU_STATE:
-      out = {"data": this._cpu?.state.clone() || new CpuState()};
+      out = {"data": this._cpu?.state.clone() || new CpuI8080.CpuState()};
       break;
 
     case HardwareReq.GET_INSTR:{
       const addr: number = data["addr"] as number;
       const opcode: number = this._memory.GetByte(addr, AddrSpace.RAM);
-      const instr_len = CPU.GetInstrLen(opcode);
+      const instr_len = CpuI8080.CPU.GetInstrLen(opcode);
       const bytes: number[] = [opcode];
       if (instr_len > 1)
         bytes.push(this._memory.GetByte(addr + 1, AddrSpace.RAM));
@@ -358,13 +358,11 @@ export class Hardware
         {"data", m_fdc.GetFddImage(dataJ["driveIdx"])},
         };
       break;
-
+*/
     case HardwareReq.GET_STEP_OVER_ADDR:
-      out = {
-        {"data", GetStepOverAddr()},
-        };
+      out = {"data": this.GetStepOverAddr()};
       break;
-
+/*
     case HardwareReq.GET_IO_PORTS_IN_DATA:
     {
       auto portsData = m_io.GetPortsInData();
@@ -682,53 +680,51 @@ export class Hardware
       };
     } while (this._display?.frameNum === frameNum);
   }
-/*
-  GetStepOverAddr()
-  -> const Addr
+
+  GetStepOverAddr(): number
   {
-    auto pc = m_cpu.GetPC();
-    auto sp = m_cpu.GetSP();
-    auto opcode = m_memory.GetByte(pc);
+    const pc = this._cpu?.pc ?? 0;
+    const sp = this._cpu?.sp ?? 0;
+    const opcode = this._memory?.GetByte(pc) ?? 0;
 
-    auto im_addr = m_memory.GetByte(pc + 2) << 8 | m_memory.GetByte(pc + 1);
-    auto next_pc = pc + CpuI8080::GetInstrLen(opcode);
+    const im_addr = (this._memory?.GetByte(pc + 2) ?? 0) << 8 | (this._memory?.GetByte(pc + 1) ?? 0);
+    const next_pc = pc + CpuI8080.CPU.GetInstrLen(opcode);
 
-    switch (CpuI8080::GetInstrType(opcode))
+    switch (CpuI8080.CPU.GetInstrType(opcode))
     {
-    case CpuI8080::OPTYPE_JMP:
+    case CpuI8080.OPTYPE_JMP:
       return im_addr;
-    case CpuI8080::OPTYPE_RET:
-      return m_memory.GetByte(sp + 1, AddrSpace.STACK) << 8 | m_memory.GetByte(sp, AddrSpace.STACK);
-    case CpuI8080::OPTYPE_PCH:
-      return m_cpu.GetHL();
-    case CpuI8080::OPTYPE_RST:
-      return opcode - CpuI8080::OPCODE_RST0;
+    case CpuI8080.OPTYPE_RET:
+      return (this._memory?.GetByte((sp ?? 0) + 1, AddrSpace.STACK) ?? 0) << 8 | (this._memory?.GetByte(sp ?? 0, AddrSpace.STACK) ?? 0);
+    case CpuI8080.OPTYPE_PCH:
+      return this._cpu?.hl.word ?? 0;
+    case CpuI8080.OPTYPE_RST:
+      return opcode - CpuI8080.OPCODE_RST0;
     default:
       switch (opcode)
       {
-      case CpuI8080::OPCODE_JNZ:
-        return m_cpu.GetFlagZ() ? next_pc : im_addr;
-      case CpuI8080::OPCODE_JZ:
-        return m_cpu.GetFlagZ() ? im_addr : next_pc;
-      case CpuI8080::OPCODE_JNC:
-        return m_cpu.GetFlagC() ? next_pc : im_addr;
-      case CpuI8080::OPCODE_JC:
-        return m_cpu.GetFlagC() ? im_addr : next_pc;
-      case CpuI8080::OPCODE_JPO:
-        return m_cpu.GetFlagP() ? next_pc : im_addr;
-      case CpuI8080::OPCODE_JPE:
-        return m_cpu.GetFlagP() ? im_addr : next_pc;
-      case CpuI8080::OPCODE_JP:
-        return m_cpu.GetFlagS() ? next_pc : im_addr;
-      case CpuI8080::OPCODE_JM:
-        return m_cpu.GetFlagS() ? im_addr : next_pc;
+      case CpuI8080.OPCODE_JNZ:
+        return this._cpu?.flagZ ? next_pc : im_addr;
+      case CpuI8080.OPCODE_JZ:
+        return this._cpu?.flagZ ? im_addr : next_pc;
+      case CpuI8080.OPCODE_JNC:
+        return this._cpu?.flagC ? next_pc : im_addr;
+      case CpuI8080.OPCODE_JC:
+        return this._cpu?.flagC ? im_addr : next_pc;
+      case CpuI8080.OPCODE_JPO:
+        return this._cpu?.flagP ? next_pc : im_addr;
+      case CpuI8080.OPCODE_JPE:
+        return this._cpu?.flagP ? im_addr : next_pc;
+      case CpuI8080.OPCODE_JP:
+        return this._cpu?.flagS ? next_pc : im_addr;
+      case CpuI8080.OPCODE_JM:
+        return this._cpu?.flagS ? im_addr : next_pc;
       default:
         break;
       }
     }
     return next_pc;
   }
-    */
 
   AttachDebugFuncs(debugFunc: DebugFunc , debugReqHandlingFunc: DebugReqHandlingFunc)
   {

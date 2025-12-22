@@ -1,17 +1,15 @@
-import CPU, { CpuState } from "../emulator/cpu_i8080";
-import { FRAME_W } from "../emulator/display";
+import * as CpuI8080 from "../emulator/cpu_i8080";
 import { Hardware } from "../emulator/hardware";
 import { HardwareReq } from "../emulator/hardware_reqs";
-import { AddrSpace, MemDebug } from "../emulator/memory";
 
 
 // helper: read cpu/memory state and return a compact debug object
 export function getDebugState(hardware: Hardware)
 : { global_addr: number,
-    state: CpuState,
+    state: CpuI8080.CpuState,
     instr_bytes: number[]}
 {
-  const state: CpuState = hardware?.Request(HardwareReq.GET_CPU_STATE)["data"] ?? new CpuState();
+  const state: CpuI8080.CpuState = hardware?.Request(HardwareReq.GET_CPU_STATE)["data"] ?? new CpuI8080.CpuState();
   //const mem_debug_state = hardware?.Request(HardwareReq.GET_MEM_DEBUG_STATE)["data"] ?? new MemDebug();
   const global_addr = hardware?.Request(HardwareReq.GET_GLOBAL_ADDR_RAM, {'addr': state.regs.pc.word})["data"] ?? 0;
   const instr_bytes = hardware?.Request(HardwareReq.GET_INSTR)["data"] ?? [0];
