@@ -1,0 +1,21 @@
+{
+  "name": "VSC Devector",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:20",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ]
+    }
+  },
+  "postCreateCommand": "npm install",
+  "remoteUser": "node",
+  "remoteEnv": {
+    // is required to start extension in within WSL docker
+    "DOCKER_HOST": "unix:///var/run/docker.sock"
+  }
+}

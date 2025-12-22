@@ -8,9 +8,6 @@ yarn-error.log*
 out/
 *.tsbuildinfo
 
-# VS Code workspace settings
-.vscode/
-
 # OS files
 .DS_Store
 Thumbs.db
