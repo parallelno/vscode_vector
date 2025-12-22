@@ -9,20 +9,14 @@ import { AddrSpace, MemDebug } from "../emulator/memory";
 export function getDebugState(hardware: Hardware)
 : { global_addr: number,
     state: CpuState,
-    opcode: number,
-    byte1: number,
-    byte2: number,
-    instr_len: number }
+    instr_bytes: number[]}
 {
   const state: CpuState = hardware?.Request(HardwareReq.GET_CPU_STATE)["data"] ?? new CpuState();
-  const mem_debug_state = hardware?.Request(HardwareReq.GET_MEM_DEBUG_STATE)["data"] ?? new MemDebug();
-  const global_addr = mem_debug_state.instrGlobalAddr;
-  const opcode = mem_debug_state.instr[0] ?? 0;
-  const byte1 = mem_debug_state.instr[1] ?? 0;
-  const byte2 = mem_debug_state.instr[2] ?? 0;
-  const instr_len = CPU.GetInstrLen(opcode);
+  //const mem_debug_state = hardware?.Request(HardwareReq.GET_MEM_DEBUG_STATE)["data"] ?? new MemDebug();
+  const global_addr = hardware?.Request(HardwareReq.GET_GLOBAL_ADDR_RAM, {'addr': state.regs.pc.word})["data"] ?? 0;
+  const instr_bytes = hardware?.Request(HardwareReq.GET_INSTR)["data"] ?? [0];
 
-  return { global_addr, state, opcode, byte1, byte2, instr_len};
+  return { global_addr, state, instr_bytes};
 }
 
 // helper: format a single debug line from hardware state
@@ -33,12 +27,12 @@ export function getDebugLine(hardware: Hardware)
     const cc = s.state.cc;
 
     const addrHex = s.global_addr.toString(16).toUpperCase().padStart(6, '0');
-    const opHex = s.opcode.toString(16).toUpperCase().padStart(2, '0');
-    const byteHex1 = s.instr_len > 1 ?
-                    s.byte1.toString(16).toUpperCase().padStart(2, '0') :
+    const opHex = s.instr_bytes[0].toString(16).toUpperCase().padStart(2, '0');
+    const byteHex1 = s.instr_bytes.length > 1 ?
+                    s.instr_bytes[1].toString(16).toUpperCase().padStart(2, '0') :
                     '  ';
-    const byteHex2 = s.instr_len > 2 ?
-                    s.byte2.toString(16).toUpperCase().padStart(2, '0') :
+    const byteHex2 = s.instr_bytes.length > 2 ?
+                    s.instr_bytes[2].toString(16).toUpperCase().padStart(2, '0') :
                     '  ';
 
     const display_data = hardware.Request(HardwareReq.GET_DISPLAY_DATA);
