@@ -44,7 +44,7 @@ export async function resolveDebugConfiguration(
     if (config.run) {
       await openEmulatorPanel(context, devectorOutput, selected);
     }
-    return undefined;
+    return config;
   }
   return config;
 }

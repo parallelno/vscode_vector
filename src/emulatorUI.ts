@@ -58,7 +58,17 @@ let dataReadDecoration: vscode.TextEditorDecorationType | null = null;
 let dataWriteDecoration: vscode.TextEditorDecorationType | null = null;
 let lastDataAccessLog: MemoryAccessLog | null = null;
 
-let currentPanelController: { pause: () => void; resume: () => void; stepFrame: () => void; } | null = null;
+export type DebugAction = 'pause' | 'run' | 'stepOver' | 'stepInto' | 'stepOut' | 'stepFrame' | 'step256' | 'restart';
+type ToolbarListener = (isRunning: boolean) => void;
+
+const toolbarListeners = new Set<ToolbarListener>();
+
+let currentPanelController: {
+  pause: () => void;
+  resume: () => void;
+  stepFrame: () => void;
+  performDebugAction: (action: DebugAction) => void;
+} | null = null;
 
 // View modes for display rendering
 type ViewMode = 'full' | 'noBorder';
@@ -325,6 +335,11 @@ export async function openEmulatorPanel(
   const emitToolbarState = (isRunning: boolean) => {
     currentToolbarIsRunning = isRunning;
     postToolbarState(isRunning);
+    for (const listener of toolbarListeners) {
+      try { listener(isRunning); } catch (err) {
+        console.error('Emulator toolbar listener failed', err);
+      }
+    }
     if (isRunning) {
       clearHighlightedSourceLine();
       clearDataLineHighlights();
@@ -343,10 +358,10 @@ export async function openEmulatorPanel(
     postToolbarState(currentToolbarIsRunning);
   };
 
-  const handleDebugAction = (action?: string) => {
+  const handleDebugAction = (action?: DebugAction) => {
     if (!action || !emu.hardware) return;
     switch (action) {
-      case 'pause':
+    case 'pause':
         emu.hardware.Request(HardwareReq.STOP);
         sendFrameToWebview(true);
         printDebugState('Pause:', emu.hardware, devectorOutput, panel);
@@ -411,28 +426,10 @@ export async function openEmulatorPanel(
   };
 
   currentPanelController = {
-    pause: () => {
-      emu.hardware?.Request(HardwareReq.STOP);
-      sendFrameToWebview(true);
-      printDebugState('Pause:', emu.hardware!, devectorOutput, panel);
-      emitToolbarState(false);
-    },
-    resume: () => {
-      let running = emu.hardware?.Request(HardwareReq.IS_RUNNING)['isRunning'] ?? false;
-      if (!running) {
-        emu.hardware?.Request(HardwareReq.RUN);
-        emitToolbarState(true);
-        tick();
-      }
-    },
-    stepFrame: () => {
-      if (!emu.hardware) return;
-      emu.hardware.Request(HardwareReq.STOP);
-      emu.hardware.Request(HardwareReq.EXECUTE_FRAME_NO_BREAKS);
-      sendFrameToWebview(true);
-      printDebugState('Run frame:', emu.hardware, devectorOutput, panel);
-      emitToolbarState(false);
-    }
+    pause: () => { handleDebugAction('pause'); },
+    resume: () => { handleDebugAction('run'); },
+    stepFrame: () => { handleDebugAction('stepFrame'); },
+    performDebugAction: (action: DebugAction) => { handleDebugAction(action); }
   };
 
   updateMemoryDumpFromHardware(panel, emu.hardware, 'pc');
@@ -593,6 +590,22 @@ export function stepFramePanel() {
   } else {
     vscode.window.showWarningMessage('Emulator panel not open');
   }
+}
+
+export function performEmulatorDebugAction(action: DebugAction): boolean {
+  if (currentPanelController) {
+    currentPanelController.performDebugAction(action);
+    return true;
+  }
+  vscode.window.showWarningMessage('Emulator panel not open');
+  return false;
+}
+
+export function onEmulatorToolbarStateChange(listener: (isRunning: boolean) => void): vscode.Disposable {
+  toolbarListeners.add(listener);
+  return {
+    dispose: () => toolbarListeners.delete(listener)
+  };
 }
 
 export type HoverSymbolInfo = { value: number; kind: 'label' | 'const' | 'line' };
