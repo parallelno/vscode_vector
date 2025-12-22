@@ -150,7 +150,15 @@ export function createAssembleAndWrite(assemble: AssembleFn) {
           if (!originFile) continue;
           const base = path.basename(originFile).toLowerCase();
           if (!tokens.lineAddresses[base]) tokens.lineAddresses[base] = {};
-          tokens.lineAddresses[base][origin.line] = '0x' + (addrVal & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+          const addrHex = '0x' + (addrVal & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+          const existing = tokens.lineAddresses[base][origin.line];
+          if (Array.isArray(existing)) {
+            if (!existing.includes(addrHex)) existing.push(addrHex);
+          } else if (existing !== undefined) {
+            if (existing !== addrHex) tokens.lineAddresses[base][origin.line] = [existing, addrHex];
+          } else {
+            tokens.lineAddresses[base][origin.line] = [addrHex];
+          }
         }
       }
       if (res.dataLineSpans && res.origins) {

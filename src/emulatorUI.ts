@@ -33,7 +33,7 @@ type SymbolMeta = { value: number; kind: 'label' | 'const' };
 type SymbolCache = {
   byName: Map<string, SymbolMeta>;
   byLowerCase: Map<string, SymbolMeta>;
-  lineAddresses: Map<string, Map<number, number>>;
+  lineAddresses: Map<string, Map<number, number[]>>;
   filePaths: Map<string, string>;
 };
 
@@ -734,7 +734,8 @@ export function resolveEmulatorHoverSymbol(identifier: string, location?: { file
   if (location?.filePath && location.line !== undefined) {
     const fileKey = normalizeFileKey(location.filePath);
     const perLine = fileKey ? lastSymbolCache.lineAddresses.get(fileKey) : undefined;
-    const addr = perLine?.get(location.line);
+    const addrs = perLine?.get(location.line);
+    const addr = addrs && addrs.length ? addrs[0] : undefined;
     if (addr !== undefined) {
       return { value: addr, kind: 'line' };
     }
@@ -876,11 +877,11 @@ function collectBreakpointAddresses(tokens: any): Map<number, BreakpointMeta> {
       const normalizedFileKey = typeof fileKeyRaw === 'string' ? fileKeyRaw.toLowerCase() : undefined;
       if (!normalizedFileKey) continue;
       for (const [lineKey, addrRaw] of Object.entries(entries as Record<string, any>)) {
-        const addr = parseAddressLike(addrRaw);
-        if (addr === undefined) continue;
         const lineNum = Number(lineKey);
         if (!Number.isFinite(lineNum)) continue;
-        lineAddrByFileLine.set(formatFileLineKey(normalizedFileKey, lineNum), addr);
+        const addresses = coerceAddressList(addrRaw);
+        if (!addresses.length) continue;
+        lineAddrByFileLine.set(formatFileLineKey(normalizedFileKey, lineNum), addresses[0]);
       }
     }
   }
@@ -954,6 +955,22 @@ function resolveTokenFileReference(tokenPath: string | undefined, fileKey: strin
   return path.normalize(path.resolve(baseDir, fileKey));
 }
 
+function coerceAddressList(value: any): number[] {
+  const result: number[] = [];
+  const push = (raw: any) => {
+    const parsed = parseAddressLike(raw);
+    if (parsed === undefined) return;
+    const normalized = parsed & 0xffff;
+    if (!result.includes(normalized)) result.push(normalized);
+  };
+  if (Array.isArray(value)) {
+    for (const entry of value) push(entry);
+  } else {
+    push(value);
+  }
+  return result;
+}
+
 function clearSymbolMetadataCache() {
   lastSymbolCache = null;
   dataLineSpanCache = null;
@@ -1007,7 +1024,7 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
     }
   }
 
-  const lineAddresses = new Map<string, Map<number, number>>();
+  const lineAddresses = new Map<string, Map<number, number[]>>();
   const dataLines: DataLineCache = new Map();
   const addressLookup = new Map<number, DataAddressEntry>();
   if (tokens.lineAddresses && typeof tokens.lineAddresses === 'object') {
@@ -1017,13 +1034,20 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
       if (!normalizedKey) continue;
       const resolvedPath = resolveTokenFileReference(tokenPath, fileKeyRaw);
       if (resolvedPath) registerFilePath(normalizedKey, resolvedPath);
-      const perLine = new Map<number, number>();
+      const perLine = new Map<number, number[]>();
       for (const [lineKey, addrRaw] of Object.entries(entries as Record<string, any>)) {
-        const addr = parseAddressLike(addrRaw);
-        if (addr === undefined) continue;
         const lineNum = Number(lineKey);
         if (!Number.isFinite(lineNum)) continue;
-        perLine.set(lineNum, addr & 0xffff);
+        const addresses = coerceAddressList(addrRaw);
+        if (!addresses.length) continue;
+        let existing = perLine.get(lineNum);
+        if (!existing) {
+          perLine.set(lineNum, [...addresses]);
+        } else {
+          for (const addr of addresses) {
+            if (!existing.includes(addr)) existing.push(addr);
+          }
+        }
       }
       if (perLine.size) {
         lineAddresses.set(normalizedKey, perLine);
@@ -1186,9 +1210,12 @@ function resolvePreferredHighlightLine(filePath: string, addr: number, doc?: vsc
   if (!perLine || perLine.size === 0) return undefined;
   const normalizedAddr = addr & 0xffff;
   const candidates: number[] = [];
-  for (const [lineNumber, lineAddr] of perLine.entries()) {
-    if ((lineAddr & 0xffff) === normalizedAddr) {
-      candidates.push(lineNumber);
+  for (const [lineNumber, lineAddrs] of perLine.entries()) {
+    for (const lineAddr of lineAddrs) {
+      if ((lineAddr & 0xffff) === normalizedAddr) {
+        candidates.push(lineNumber);
+        break;
+      }
     }
   }
   if (!candidates.length) return undefined;
@@ -1578,17 +1605,19 @@ function buildAddressToSourceMap(tokens: any, tokenPath: string): Map<number, So
     if (!perLine || typeof perLine !== 'object') continue;
     const resolvedPath = path.isAbsolute(fileKey) ? path.normalize(fileKey) : path.resolve(baseDir, fileKey);
     for (const [lineKey, addrRaw] of Object.entries(perLine)) {
-      const addr = parseAddressLike(addrRaw);
-      if (addr === undefined) continue;
       const lineNum = Number(lineKey);
       if (!Number.isFinite(lineNum)) continue;
-      const normalizedAddr = addr & 0xffff;
-      const existing = map.get(normalizedAddr);
-      // Prefer lines with higher line numbers for the same address within the same file,
-      // since actual code lines come after labels that share the same address.
-      // Across different files, keep the first occurrence.
-      if (!existing || (existing.file === resolvedPath && lineNum > existing.line)) {
-        map.set(normalizedAddr, { file: resolvedPath, line: lineNum });
+      const addresses = coerceAddressList(addrRaw);
+      if (!addresses.length) continue;
+      for (const addr of addresses) {
+        const normalizedAddr = addr & 0xffff;
+        const existing = map.get(normalizedAddr);
+        // Prefer lines with higher line numbers for the same address within the same file,
+        // since actual code lines come after labels that share the same address.
+        // Across different files, keep the first occurrence.
+        if (!existing || (existing.file === resolvedPath && lineNum > existing.line)) {
+          map.set(normalizedAddr, { file: resolvedPath, line: lineNum });
+        }
       }
     }
   }

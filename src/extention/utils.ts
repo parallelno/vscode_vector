@@ -282,11 +282,22 @@ function lookupLineAddress(
   const base = path.basename(filePath).toLowerCase();
   const perFile = tokens.lineAddresses[base];
   if (!perFile) return undefined;
-  const keyDirect = perFile[line];
-  if (typeof keyDirect === 'string' && keyDirect) return keyDirect;
-  const keyString = perFile[String(line)];
-  if (typeof keyString === 'string' && keyString) return keyString;
-  return undefined;
+  const pick = (value: any): string | undefined => {
+    if (typeof value === 'string' && value) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return '0x' + (value & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+    }
+    if (Array.isArray(value) && value.length) {
+      const fromString = value.find(v => typeof v === 'string' && v) as string | undefined;
+      if (fromString) return fromString;
+      const fromNumber = value.find(v => typeof v === 'number' && Number.isFinite(v)) as number | undefined;
+      if (fromNumber !== undefined) {
+        return '0x' + (fromNumber & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+      }
+    }
+    return undefined;
+  };
+  return pick(perFile[line]) ?? pick(perFile[String(line)]);
 };
 
 export function attachAddressFromTokens(

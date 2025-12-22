@@ -43,6 +43,7 @@ end:
 
 
 .macro Fill(byte, address, len=0xff, halts=true, lp=5)
+		@ttt:
 			lxi h, address
 			lxi b, len
 			mvi a, byte
