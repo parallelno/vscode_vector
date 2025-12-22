@@ -28,6 +28,7 @@ export type AssembleResult = {
   printMessages?: PrintMessage[];
   labels?: Record<string, { addr: number; line: number; src?: string }>;
   consts?: Record<string, number>;
+  constOrigins?: Record<string, { line: number; src?: string }>;
   dataLineSpans?: Record<number, { start: number; byteLength: number; unitBytes: number }>;
   origins?: SourceOrigin[];
 };

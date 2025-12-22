@@ -29,7 +29,8 @@ let lastBreakpointSource: {
   log?: vscode.OutputChannel } | null = null;
 
 let lastAddressSourceMap: Map<number, SourceLineRef> | null = null;
-type SymbolMeta = { value: number; kind: 'label' | 'const' };
+type SymbolSource = { fileKey: string; line: number };
+type SymbolMeta = { value: number; kind: 'label' | 'const'; source?: SymbolSource };
 type SymbolCache = {
   byName: Map<string, SymbolMeta>;
   byLowerCase: Map<string, SymbolMeta>;
@@ -743,6 +744,15 @@ export function resolveEmulatorHoverSymbol(identifier: string, location?: { file
   return undefined;
 }
 
+export function resolveSymbolDefinition(identifier: string): { filePath: string; line: number } | undefined {
+  if (!lastSymbolCache) return undefined;
+  const token = (identifier || '').trim();
+  if (!token) return undefined;
+  const symbol = lastSymbolCache.byName.get(token) || lastSymbolCache.byLowerCase.get(token.toLowerCase());
+  if (!symbol) return undefined;
+  return resolveSymbolSource(symbol, lastSymbolCache.filePaths);
+}
+
 export function isEmulatorPanelPaused(): boolean {
   return !!currentPanelController && !currentToolbarIsRunning;
 }
@@ -990,6 +1000,47 @@ function clearSymbolMetadataCache() {
   dataAddressLookup = null;
 }
 
+function loadSymbolCacheFromDebugFile(tokenPath: string): boolean {
+  try {
+    const text = fs.readFileSync(tokenPath, 'utf8');
+    const tokens = JSON.parse(text);
+    cacheSymbolMetadata(tokens, tokenPath);
+    return !!lastSymbolCache;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Best-effort lazy load: look for a debug file next to the source document.
+export async function ensureSymbolCacheForDocument(documentPath?: string): Promise<boolean> {
+  if (lastSymbolCache) return true;
+  if (!documentPath) return false;
+  const dir = path.dirname(documentPath);
+  const base = path.basename(documentPath, path.extname(documentPath));
+  const candidate = path.join(dir, base + DEBUG_FILE_SUFFIX);
+  if (fs.existsSync(candidate)) {
+    if (loadSymbolCacheFromDebugFile(candidate)) return true;
+  }
+  // fallback: first *.debug.json in the same folder
+  try {
+    const entries = fs.readdirSync(dir, 'utf8');
+    const debugFiles = entries.filter(f => f.toLowerCase().endsWith(DEBUG_FILE_SUFFIX));
+    debugFiles.sort();
+    for (const f of debugFiles) {
+      const full = path.join(dir, f);
+      if (loadSymbolCacheFromDebugFile(full)) return true;
+    }
+  } catch (_) {}
+  return !!lastSymbolCache;
+}
+
+function resolveSymbolSource(symbol: SymbolMeta, filePaths: Map<string, string>): { filePath: string; line: number } | undefined {
+  if (!symbol || !symbol.source) return undefined;
+  const pathResolved = filePaths.get(symbol.source.fileKey);
+  if (!pathResolved) return undefined;
+  return { filePath: pathResolved, line: symbol.source.line };
+}
+
 function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
   if (!tokens || typeof tokens !== 'object') {
     clearSymbolMetadataCache();
@@ -1015,12 +1066,20 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
       const info: any = rawInfo;
       const addr = parseAddressLike(info?.addr ?? info?.address);
       if (addr === undefined) continue;
-      registerSymbol(labelName, { value: addr, kind: 'label' });
+      const srcKey = normalizeFileKey(info?.src);
+      const lineNum = typeof info?.line === 'number' ? info.line : undefined;
+      const source: SymbolSource | undefined = (srcKey && lineNum) ? { fileKey: srcKey, line: lineNum } : undefined;
+      if (srcKey && info?.src) {
+        const resolvedPath = resolveTokenFileReference(tokenPath, info.src);
+        if (resolvedPath) registerFilePath(srcKey, resolvedPath);
+      }
+      registerSymbol(labelName, { value: addr, kind: 'label', source });
     }
   }
   if (tokens.consts && typeof tokens.consts === 'object') {
     for (const [constName, rawValue] of Object.entries(tokens.consts as Record<string, any>)) {
       let resolved: number | undefined;
+      let source: SymbolSource | undefined;
       if (rawValue && typeof rawValue === 'object') {
         if (typeof rawValue.value === 'number' && Number.isFinite(rawValue.value)) {
           resolved = rawValue.value;
@@ -1029,11 +1088,20 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
         } else {
           resolved = parseAddressLike(rawValue.value);
         }
+        const srcKey = normalizeFileKey(rawValue.src);
+        const lineNum = typeof rawValue.line === 'number' ? rawValue.line : undefined;
+        if (srcKey && lineNum) {
+          source = { fileKey: srcKey, line: lineNum };
+          if (rawValue.src) {
+            const resolvedPath = resolveTokenFileReference(tokenPath, rawValue.src);
+            if (resolvedPath) registerFilePath(srcKey, resolvedPath);
+          }
+        }
       } else {
         resolved = parseAddressLike(rawValue);
       }
       if (resolved === undefined) continue;
-      registerSymbol(constName, { value: resolved, kind: 'const' });
+      registerSymbol(constName, { value: resolved, kind: 'const', source });
     }
   }
 

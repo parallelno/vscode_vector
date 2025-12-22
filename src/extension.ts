@@ -4,6 +4,7 @@ import * as ext_utils from './extention/utils';
 import * as ext_prg from './extention/project';
 import * as ext_consts from './extention/consts';
 import { provideDefinition } from './extention/provider_include';
+import { provideSymbolDefinition } from './extention/provider_symbol_definition';
 import { createProject } from './extention/cmd_create_project';
 import { compileProject } from './extention/cmd_compile_project';
 import { toggleBreakpointFromArg } from './extention/cmd_toggle_bp';
@@ -114,6 +115,11 @@ export function activate(context: vscode.ExtensionContext)
   const asmDefinitionProvider = vscode.languages.registerDefinitionProvider(
       { language: 'asm' }, { provideDefinition });
   context.subscriptions.push(asmDefinitionProvider);
+
+    // Definition provider for labels/consts using emulator debug metadata
+    const asmSymbolDefinitionProvider = vscode.languages.registerDefinitionProvider(
+      { language: 'asm' }, { provideDefinition: provideSymbolDefinition });
+    context.subscriptions.push(asmSymbolDefinitionProvider);
 
 
 

@@ -76,6 +76,7 @@ export function assemble(
   const lines = loopExpanded.lines;
   const labels = new Map<string, { addr: number; line: number; src?: string }>();
   const consts = new Map<string, number>();
+  const constOrigins = new Map<string, { line: number; src?: string }>();
   // Track which identifiers are variables (can be reassigned)
   const variables = new Set<string>();
   // localsIndex: scopeKey -> (localName -> array of { key, line }) ordered by appearance
@@ -231,6 +232,7 @@ export function assemble(
         errors.push(`Bad initial value '${rhs}' for .var ${name} at ${i + 1}`);
       } else {
         consts.set(name, val);
+        constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
         variables.add(name); // Mark this identifier as a variable
       }
       continue;
@@ -272,6 +274,7 @@ export function assemble(
           errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
         } else {
           consts.set(name, val);
+          constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
         }
       }
       continue;
@@ -305,6 +308,7 @@ export function assemble(
           errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
         } else {
           consts.set(name, val);
+          constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
         }
       }
       continue;
@@ -338,6 +342,7 @@ export function assemble(
           errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
         } else {
           consts.set(name, val);
+          constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
         }
       }
       continue;
@@ -720,6 +725,8 @@ export function assemble(
   for (const [k, v] of labels) labelsOut[k] = { addr: v.addr, line: v.line, src: v.src };
   const constsOut: Record<string, number> = {};
   for (const [k, v] of consts) constsOut[k] = v;
+  const constOriginsOut: Record<string, { line: number; src?: string }> = {};
+  for (const [k, v] of constOrigins) constOriginsOut[k] = v;
   const dataSpanOut: Record<number, { start: number; byteLength: number; unitBytes: number }> = {};
   for (let idx = 0; idx < dataLineSpans.length; idx++) {
     const span = dataLineSpans[idx];
@@ -733,6 +740,7 @@ export function assemble(
     map,
     labels: labelsOut,
     consts: constsOut,
+    constOrigins: constOriginsOut,
     dataLineSpans: dataSpanOut,
     warnings,
     printMessages,

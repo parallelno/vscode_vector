@@ -131,11 +131,15 @@ export function createAssembleAndWrite(assemble: AssembleFn) {
         }
       }
       if (res.consts) {
+        const originInfo = res.constOrigins || {};
         for (const [name, value] of Object.entries(res.consts)) {
           const normalized = ((value % 0x10000) + 0x10000) % 0x10000;
+          const origin = originInfo[name];
           tokens.consts[name] = {
             value,
-            hex: '0x' + normalized.toString(16).toUpperCase().padStart(4, '0')
+            hex: '0x' + normalized.toString(16).toUpperCase().padStart(4, '0'),
+            line: origin?.line,
+            src: origin?.src ? path.basename(origin.src) : (sourcePath ? path.basename(sourcePath) : undefined)
           };
         }
       }

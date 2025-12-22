@@ -5,7 +5,7 @@
 
 .org 0x100
 start:
-			lxi h, start
+			lxi h, @tetet
 			mvi a, 0x55 + 1
 			VAR1 .var 1;
 			mvi a, VAR1
@@ -30,6 +30,7 @@ start:
 	  		call set_palette
 
 loop:
+@tetet:
 			Fill(0xFF, 0x80FF, 0x80, true, 3)
 
 			Fill(0x80, 0x80FF, 0x80 + $7F)
