@@ -148,6 +148,7 @@ const tests: DirectiveTestCase[] = [
         name: '.incbin loads entire binary file',
         sourceFile: 'incbin_basic.asm',
         expect: {
+            // test_data.bin contains 16 sequential bytes: 0x11, 0x22, ..., 0xFF, 0x00
             bytes: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00]
         }
     },
@@ -155,6 +156,7 @@ const tests: DirectiveTestCase[] = [
         name: '.incbin loads portion of binary file with offset and length',
         sourceFile: 'incbin_offset_length.asm',
         expect: {
+            // Loads 8 bytes from offset 4 (0x55 through 0xCC)
             bytes: [0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC]
         }
     },
@@ -170,6 +172,7 @@ const tests: DirectiveTestCase[] = [
         name: '.incbin handles hex notation for offset and length',
         sourceFile: 'incbin_hex_format.asm',
         expect: {
+            // Loads 4 bytes from offset $08 (0x99 through 0xCC), followed by marker byte 0xFF
             bytes: [0x99, 0xAA, 0xBB, 0xCC, 0xFF],
             labels: {
                 after_incbin: 0x2004
