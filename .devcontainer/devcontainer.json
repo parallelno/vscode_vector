@@ -15,7 +15,7 @@
   "postCreateCommand": "npm install",
   "remoteUser": "node",
   "remoteEnv": {
-    // is required to start extension in within WSL docker
-    "DOCKER_HOST": "unix:///var/run/docker.sock"
+    // Uncomment line below if there are issues with starting devcontainer within WSL running docker
+    // "DOCKER_HOST": "unix:///var/run/docker.sock"
   }
 }
