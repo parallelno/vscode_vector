@@ -68,16 +68,26 @@
       },
       {
         "command": "devector.runProject",
-        "title": "Devector: Run Project"
+        "title": "Devector: Run Project (F5)"
       }
     ],
-    "keybindings": [
-      {
-        "key": "f9",
-        "command": "devector.toggleBreakpoint",
-        "when": "editorTextFocus && !editorReadonly && editorLangId == asm"
-      }
-    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "devector.createProject",
+          "group": "navigation@9"
+        },
+        {
+          "command": "devector.compileProject",
+          "group": "navigation@9"
+        },
+        {
+          "command": "devector.runProject",
+          "group": "navigation@9"
+        }
+
+      ]
+    },
     "debuggers": [
       {
         "type": "devector",
@@ -101,15 +111,5 @@
         ]
       }
     ]
-    ,
-    "menus": {
-      "editor/context": [
-        {
-          "command": "devector.toggleBreakpoint",
-          "group": "navigation",
-          "when": "editorLangId == asm"
-        }
-      ]
-    }
   }
 }
