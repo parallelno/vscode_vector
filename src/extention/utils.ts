@@ -27,7 +27,7 @@ export function readTemplateMainAsm(
 export function initLaunchConfiguration(
   logChannel: vscode.OutputChannel,
   workspaceRoot: string,
-  project: ext_types.ProjectInfo1,
+  project: ext_types.ProjectInfo,
   opts: { configName: string; extraProps?: Record<string, any> } = {configName: ext_consts.VS_CODE_LAUNCH_RUN})
   : boolean
 {

@@ -5,17 +5,17 @@ import * as ext_consts from './consts';
 import * as ext_utils from './utils';
 
 // Project file structure
-export class ProjectInfo1 {
+export class ProjectInfo {
   /** Project name. Used as the base name for output ROM files */
   name: string = 'NewProject';
   /** Path to the main assembly source file */
-  asmPath?: string = undefined;
+  asmPath: string | undefined = undefined;
   /** Path to the output debug file (tokens, breakpoints, etc source metadata) */
   debugPath: string | undefined = undefined;
   /** Path to the output ROM file */
   romPath: string | undefined = undefined;
   /** Path to the FDD data file for persistence */
-  fddPath?: string = undefined;
+  fddPath: string | undefined = undefined;
   /** Project settings */
   settings: ProjectSettings = new ProjectSettings();
   /** project absolute path. this setting is not stored to project file */
@@ -25,7 +25,7 @@ export class ProjectInfo1 {
   error: string = '';
 
 
-  constructor(input: string | Partial<ProjectInfo1>) {
+  constructor(input: string | Partial<ProjectInfo>) {
     if (typeof input === 'string') {
       if (!input ||
         !path.isAbsolute(input)) {
@@ -81,9 +81,9 @@ export class ProjectInfo1 {
 
   static async createFromFile(
     projectAbsolutePath: string)
-    : Promise<ProjectInfo1>  {
+    : Promise<ProjectInfo>  {
 
-    let project = new ProjectInfo1(projectAbsolutePath);
+    let project = new ProjectInfo(projectAbsolutePath);
     if (project.error){
       return project;
     }
@@ -108,25 +108,25 @@ export class ProjectInfo1 {
     return this.fddPath || this.romPath || '';
   }
 
-  init_asm_path(): ProjectInfo1 {
+  init_asm_path(): ProjectInfo {
     if (!this.asmPath){
       this.asmPath = ext_consts.MAIN_ASM;
     }
     return this;
   }
-  init_debug_path(): ProjectInfo1 {
+  init_debug_path(): ProjectInfo {
     if (!this.debugPath){
       this.debugPath = path.basename(this.name) + ext_consts.DEBUG_FILE_SUFFIX;
     }
     return this;
   }
-  init_rom_path(): ProjectInfo1 {
+  init_rom_path(): ProjectInfo {
     if (!this.romPath){
       this.romPath = path.basename(this.name) + ext_consts.EXT_ROM;
     }
     return this;
   }
-  init_ram_disk_path(): ProjectInfo1 {
+  init_ram_disk_path(): ProjectInfo {
     if (!this.settings.ramDiskPath){
       this.settings.ramDiskPath = path.basename(this.name) + ext_consts.RAM_DISK_FILE_SUFFIX;
     }

@@ -40,18 +40,6 @@ export function activate(context: vscode.ExtensionContext)
   context.subscriptions.push(
     vscode.debug.registerDebugConfigurationProvider(ext_consts.EXTENTION_NAME, dbgProvider));
 
-
-  // Toggle breakpoint command: toggles a SourceBreakpoint at the current cursor line
-  // const toggleBp = vscode.commands.registerCommand(
-  //   ext_consts.EXTENTION_NAME + '.toggleBreakpoint', () => toggleBreakpoint());
-  // context.subscriptions.push(toggleBp);
-
-////////////////////////////////////////////////////////////////////////////////
-//
-// ANYTHING BELOW UNCHECKED YET
-//
-////////////////////////////////////////////////////////////////////////////////
-
   // TODO: It was designed to run an arbitrary ROM. check if helpful.
   // const runDisposable = vscode.commands.registerCommand(
   //   ext_consts.EXTENTION_NAME + '.run',() => openEmulatorPanel(context, devectorOutput));
@@ -101,6 +89,12 @@ export function activate(context: vscode.ExtensionContext)
       // ignore failures to register (some core commands may not be overrideable)
     }
   }
+
+////////////////////////////////////////////////////////////////////////////////
+//
+// ANYTHING BELOW UNCHECKED YET
+//
+////////////////////////////////////////////////////////////////////////////////
 
 
   // Hover provider for asm files to show emulator symbol info when paused

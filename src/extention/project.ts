@@ -12,14 +12,14 @@ import { collectIncludeFiles } from '../assembler/includes';
 export async function loadAllProjects(
 	devectorOutput: vscode.OutputChannel,
 	workspaceRoot: string, opts: { silent?: boolean } = {})
-	: Promise<ext_types.ProjectInfo1[]>
+	: Promise<ext_types.ProjectInfo[]>
 {
 	const paths = findAllProjectPaths(workspaceRoot);
 
-  let projects: ext_types.ProjectInfo1[] = [];
+  let projects: ext_types.ProjectInfo[] = [];
 
 	for (const path of paths) {
-		const project = await ext_types.ProjectInfo1.createFromFile(path);
+		const project = await ext_types.ProjectInfo.createFromFile(path);
 		if (project) projects.push(project);
 	}
 	return projects;
@@ -50,7 +50,7 @@ function findAllProjectPaths(workspaceRoot: string)
 
 export async function pickProject(
   devectorOutput: vscode.OutputChannel)
-: Promise<ext_types.ProjectInfo1 | undefined>
+: Promise<ext_types.ProjectInfo | undefined>
 {
   if (!vscode.workspace.workspaceFolders || !vscode.workspace.workspaceFolders.length) {
     devectorOutput.appendLine('Devector: No workspace folder is open. Cannot find project.');
@@ -86,7 +86,7 @@ export async function pickProject(
 
 export async function ensureRomReady(
   devectorOutput: vscode.OutputChannel,
-  project: ext_types.ProjectInfo1,
+  project: ext_types.ProjectInfo,
   options: { compile?: boolean } = {})
 : Promise<boolean>
 {
@@ -116,7 +116,7 @@ export async function ensureRomReady(
 
 export async function compileProjectFile(
   devectorOutput: vscode.OutputChannel,
-  project: ext_types.ProjectInfo1,
+  project: ext_types.ProjectInfo,
   options: { silent?: boolean; reason?: string } = {})
 	: Promise<boolean>
 {

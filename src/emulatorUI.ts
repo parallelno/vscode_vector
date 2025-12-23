@@ -11,7 +11,7 @@ import { handleMemoryDumpControlMessage, resetMemoryDumpState, updateMemoryDumpF
 import { disposeHardwareStatsTracking, resetHardwareStatsTracking, tryCollectHardwareStats } from './emulatorUI/hardwareStats';
 import { parseAddressLike } from './emulatorUI/utils';
 import { MemoryAccessLog } from './emulator/debugger';
-import { ProjectInfo1 } from './extention/project_info';
+import { ProjectInfo } from './extention/project_info';
 import { DEBUG_FILE_SUFFIX } from './extention/consts';
 import * as ext_consts from './extention/consts';
 import * as consts from './emulatorUI/consts';
@@ -67,7 +67,7 @@ let currentViewMode: ViewMode = 'noBorder';
 export async function openEmulatorPanel(
   context: vscode.ExtensionContext,
   logChannel?: vscode.OutputChannel,
-  project?: ProjectInfo1)
+  project?: ProjectInfo)
 {
   if (!project) {
     // No project provided, open a file picker for ROM/FDD files
@@ -81,7 +81,7 @@ export async function openEmulatorPanel(
     }
     const romUri = uris[0];
 
-    project = new ProjectInfo1({
+    project = new ProjectInfo({
       name: path.basename(romUri.fsPath, path.extname(romUri.fsPath)),
       romPath: romUri.fsPath
     });

@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import { ROM_LOAD_ADDR } from './emulator/memory';
 import Debugger from './emulator/debugger';
 import { FdcDiskImage, FDD_SIZE } from './emulator/fdc_wd1793';
-import { ProjectInfo1 } from './extention/project_info';
+import { ProjectInfo } from './extention/project_info';
 import * as type from './emulator/type';
 
 
@@ -17,13 +17,13 @@ export class Emulator {
 
   private _hardware?: Hardware;
   private _debugger?: Debugger;
-  private _project?: ProjectInfo1 = undefined;
+  private _project?: ProjectInfo = undefined;
 
   result: type.EmulatorResult = new type.EmulatorResult();
 
 
   constructor(
-    extensionPath: string, project: ProjectInfo1)
+    extensionPath: string, project: ProjectInfo)
   {
     this._project = project;
     this.result.add(this.HardwareInit(extensionPath));

@@ -27,7 +27,7 @@ export async function createProject(
 	const safeName = ext_utils.sanitizeFileName(name, ext_consts.TEMPLATE_PROJECT_NAME);
 	const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
 	const absoluteProjectPath = path.join(workspaceRoot, safeName + ext_consts.PROJECT_FILE_SUFFIX);
-	let project = new ext_types.ProjectInfo1(absoluteProjectPath);
+	let project = new ext_types.ProjectInfo(absoluteProjectPath);
 	if (project.error) {
 		ext_utils.logOutput(
 			devectorOutput,
