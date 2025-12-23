@@ -37,7 +37,7 @@ export function processIncludes(
       const inc = m[1];
       // resolve path
       let incPath = inc;
-      let incText: string | undefined;
+      let incText: string;
       
       if (!path.isAbsolute(incPath)) {
         // First try: resolve relative to the current file
@@ -74,10 +74,6 @@ export function processIncludes(
           const em = err && (err as any).message ? (err as any).message : String(err);
           throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li+1} - ${em}`);
         }
-      }
-      
-      if (!incText) {
-        throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li+1} - file could not be read`);
       }
 
       const nested = processIncludes(incText, incPath, sourcePath, depth + 1);
@@ -117,7 +113,7 @@ export function collectIncludeFiles(
 
     const inc = m[1];
     let incPath = inc;
-    let incText: string | undefined;
+    let incText: string;
     
     if (!path.isAbsolute(incPath)) {
       // First try: resolve relative to the current file
@@ -154,10 +150,6 @@ export function collectIncludeFiles(
         const em = err && (err as any).message ? (err as any).message : String(err);
         throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li + 1} - ${em}`);
       }
-    }
-    
-    if (!incText) {
-      throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li + 1} - file could not be read`);
     }
 
     collected.add(incPath);

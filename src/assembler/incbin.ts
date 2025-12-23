@@ -56,7 +56,7 @@ function parseIncbinParams(
 
   // Resolve the file path
   let filePath = filename;
-  let fileData: Buffer | undefined;
+  let fileData: Buffer;
   
   if (!path.isAbsolute(filePath)) {
     // First try: resolve relative to the current file (from origin)
@@ -97,11 +97,6 @@ function parseIncbinParams(
       ctx.errors.push(`Failed to read binary file '${filename}' for .incbin at ${originDesc} - ${em}`);
       return null;
     }
-  }
-  
-  if (!fileData) {
-    ctx.errors.push(`Failed to read binary file '${filename}' for .incbin at ${originDesc} - file could not be read`);
-    return null;
   }
 
   // Parse optional offset and length
