@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as ext_prg from './project';
-import { openEmulatorPanel } from '../emulatorUI';
+import * as ext_consts from './consts';
 
 
 export async function runProject(
@@ -10,11 +10,16 @@ export async function runProject(
 {
 	const selected = await ext_prg.pickProject(devectorOutput);
 	if (!selected) return;
-	
-	const ready = await ext_prg.ensureRomReady(devectorOutput, selected, { compile: false });
-	if (!ready) return;
-	
-	await openEmulatorPanel(context, devectorOutput, selected);
+
+	// Mirror the standard launch config so the VS Code debug toolbar shows.
+	await vscode.debug.startDebugging(undefined, {
+		type: ext_consts.EXTENTION_NAME,
+		request: 'launch',
+		name: ext_consts.VS_CODE_LAUNCH_RUN,
+		run: true,
+		compile: false,
+		projectPath: selected.absolute_path
+	});
 }
 
 ////////////////////////////////////////////////////////////////////////////////

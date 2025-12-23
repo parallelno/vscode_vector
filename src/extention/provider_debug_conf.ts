@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as ext_prg from './project';
 import * as ext_consts from './consts';
 import { openEmulatorPanel } from '../emulatorUI';
+import { ProjectInfo } from './project_info';
 
 export function provideDebugConfigurations(
   folder: vscode.WorkspaceFolder | undefined,
@@ -26,7 +28,19 @@ export async function resolveDebugConfiguration(
 {
 
   if (config){
-    let selected = await ext_prg.pickProject(devectorOutput);
+    let selected: ProjectInfo | undefined;
+
+    const maybePath = typeof config.projectPath === 'string' ? config.projectPath : undefined;
+    if (maybePath && fs.existsSync(maybePath) && path.isAbsolute(maybePath)) {
+      const loaded = await ProjectInfo.createFromFile(maybePath);
+      if (!loaded.error) {
+        selected = loaded;
+      }
+    }
+
+    if (!selected) {
+      selected = await ext_prg.pickProject(devectorOutput);
+    }
     if (!selected) return undefined;
 
     const ready = await ext_prg.ensureRomReady(
@@ -44,6 +58,8 @@ export async function resolveDebugConfiguration(
     if (config.run) {
       await openEmulatorPanel(context, devectorOutput, selected);
     }
+    // propagate selected project path so downstream consumers keep consistency
+    config.projectPath = selected.absolute_path;
     return config;
   }
   return config;
