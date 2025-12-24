@@ -30,6 +30,7 @@ import {
   handleTextDirective,
   DirectiveContext
 } from './directives';
+import { handleIncbinFirstPass, handleIncbinSecondPass, IncbinContext } from './incbin';
 import {
   resolveAddressToken as resolveAddressTokenInstr,
   encodeMVI,
@@ -110,6 +111,13 @@ export function assemble(
     scopes
   };
   const dataCtx: DataContext = {
+    labels,
+    consts,
+    localsIndex,
+    scopes,
+    errors
+  };
+  const incbinCtx: IncbinContext = {
     labels,
     consts,
     localsIndex,
@@ -395,6 +403,11 @@ export function assemble(
       continue;
     }
 
+    if (op === '.INCBIN') {
+      addr += handleIncbinFirstPass(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, incbinCtx);
+      continue;
+    }
+
     if (op === '.ORG' || op === 'ORG') {
       const result = handleOrgFirstPass({
         line,
@@ -491,6 +504,7 @@ export function assemble(
     scopes
   };
   const dataCtxSecond: DataContext = { labels, consts, localsIndex, scopes, errors };
+  const incbinCtxSecond: IncbinContext = { labels, consts, localsIndex, scopes, errors };
   const instrCtx: InstructionContext = { labels, consts, localsIndex, scopes, errors };
 
   const ifStackSecond: IfFrame[] = [];
@@ -698,6 +712,12 @@ export function assemble(
         out,
         textAddrRef
       );
+      continue;
+    }
+
+    if (op === '.INCBIN') {
+      const emitted = handleIncbinSecondPass(line, tokens, tokenOffsets, srcLine, origins[i], sourcePath, incbinCtxSecond, out);
+      addr += emitted;
       continue;
     }
 

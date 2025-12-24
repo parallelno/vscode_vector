@@ -37,17 +37,43 @@ export function processIncludes(
       const inc = m[1];
       // resolve path
       let incPath = inc;
-      if (!path.isAbsolute(incPath)) {
-        const baseDir = file ? path.dirname(file) : (sourcePath ? path.dirname(sourcePath) : process.cwd());
-        incPath = path.resolve(baseDir, incPath);
-      }
-
       let incText: string;
-      try {
-        incText = fs.readFileSync(incPath, 'utf8');
-      } catch (err) {
-        const em = err && (err as any).message ? (err as any).message : String(err);
-        throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li+1} - ${em}`);
+      
+      if (!path.isAbsolute(incPath)) {
+        // First try: resolve relative to the current file
+        const currentFileDir = file ? path.dirname(file) : (sourcePath ? path.dirname(sourcePath) : process.cwd());
+        const firstAttempt = path.resolve(currentFileDir, incPath);
+        
+        try {
+          incText = fs.readFileSync(firstAttempt, 'utf8');
+          incPath = firstAttempt;
+        } catch (err) {
+          // Second try: resolve relative to the project root (sourcePath directory)
+          if (sourcePath && file && path.dirname(file) !== path.dirname(sourcePath)) {
+            const projectRoot = path.dirname(sourcePath);
+            const secondAttempt = path.resolve(projectRoot, incPath);
+            try {
+              incText = fs.readFileSync(secondAttempt, 'utf8');
+              incPath = secondAttempt;
+            } catch (err2) {
+              // Both attempts failed, throw error with info about both attempts
+              const em = err && (err as any).message ? (err as any).message : String(err);
+              throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li+1} - ${em}`);
+            }
+          } else {
+            // No project root to try, throw the original error
+            const em = err && (err as any).message ? (err as any).message : String(err);
+            throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li+1} - ${em}`);
+          }
+        }
+      } else {
+        // Absolute path - just read it
+        try {
+          incText = fs.readFileSync(incPath, 'utf8');
+        } catch (err) {
+          const em = err && (err as any).message ? (err as any).message : String(err);
+          throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li+1} - ${em}`);
+        }
       }
 
       const nested = processIncludes(incText, incPath, sourcePath, depth + 1);
@@ -87,20 +113,46 @@ export function collectIncludeFiles(
 
     const inc = m[1];
     let incPath = inc;
+    let incText: string;
+    
     if (!path.isAbsolute(incPath)) {
-      const baseDir = file ? path.dirname(file) : (sourcePath ? path.dirname(sourcePath) : process.cwd());
-      incPath = path.resolve(baseDir, incPath);
+      // First try: resolve relative to the current file
+      const currentFileDir = file ? path.dirname(file) : (sourcePath ? path.dirname(sourcePath) : process.cwd());
+      const firstAttempt = path.resolve(currentFileDir, incPath);
+      
+      try {
+        incText = fs.readFileSync(firstAttempt, 'utf8');
+        incPath = firstAttempt;
+      } catch (err) {
+        // Second try: resolve relative to the project root (sourcePath directory)
+        if (sourcePath && file && path.dirname(file) !== path.dirname(sourcePath)) {
+          const projectRoot = path.dirname(sourcePath);
+          const secondAttempt = path.resolve(projectRoot, incPath);
+          try {
+            incText = fs.readFileSync(secondAttempt, 'utf8');
+            incPath = secondAttempt;
+          } catch (err2) {
+            // Both attempts failed, throw error
+            const em = err && (err as any).message ? (err as any).message : String(err);
+            throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li + 1} - ${em}`);
+          }
+        } else {
+          // No project root to try, throw the original error
+          const em = err && (err as any).message ? (err as any).message : String(err);
+          throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li + 1} - ${em}`);
+        }
+      }
+    } else {
+      // Absolute path - just read it
+      try {
+        incText = fs.readFileSync(incPath, 'utf8');
+      } catch (err) {
+        const em = err && (err as any).message ? (err as any).message : String(err);
+        throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li + 1} - ${em}`);
+      }
     }
 
     collected.add(incPath);
-
-    let incText: string;
-    try {
-      incText = fs.readFileSync(incPath, 'utf8');
-    } catch (err) {
-      const em = err && (err as any).message ? (err as any).message : String(err);
-      throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li + 1} - ${em}`);
-    }
 
     collectIncludeFiles(incText, incPath, sourcePath, depth + 1, collected);
   }

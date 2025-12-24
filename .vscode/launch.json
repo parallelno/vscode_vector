@@ -2,12 +2,6 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run i8080 (sample)",
-      "type": "i8080",
-      "request": "launch",
-      "program": "${file}"
-    },
-    {
       "name": "Launch Extension",
       "type": "extensionHost",
       "request": "launch",

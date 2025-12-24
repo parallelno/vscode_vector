@@ -145,6 +145,70 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
+        name: '.incbin loads entire binary file',
+        sourceFile: 'incbin_basic.asm',
+        expect: {
+            // test_data.bin contains 16 sequential bytes: 0x11, 0x22, ..., 0xFF, 0x00
+            bytes: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00]
+        }
+    },
+    {
+        name: '.incbin loads portion of binary file with offset and length',
+        sourceFile: 'incbin_offset_length.asm',
+        expect: {
+            // Loads 8 bytes from offset 4 (0x55 through 0xCC)
+            bytes: [0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC]
+        }
+    },
+    {
+        name: '.incbin surfaces missing files with error',
+        sourceFile: 'incbin_missing.asm',
+        expect: {
+            success: false,
+            errorsContains: ["Failed to read binary file 'does_not_exist.bin'"]
+        }
+    },
+    {
+        name: '.incbin handles hex notation for offset and length',
+        sourceFile: 'incbin_hex_format.asm',
+        expect: {
+            // Loads 4 bytes from offset $08 (0x99 through 0xCC), followed by marker byte 0xFF
+            bytes: [0x99, 0xAA, 0xBB, 0xCC, 0xFF],
+            labels: {
+                after_incbin: 0x2004
+            }
+        }
+    },
+    {
+        name: '.incbin comprehensive test with multiple use cases',
+        sourceFile: 'incbin_comprehensive.asm',
+        expect: {
+            // First block: full file (16 bytes)
+            // Second block at $8000: 8 bytes from offset 4 (0x55..0xCC)
+            // Third block at $9000: 6 bytes from offset 10 (0xBB..0x00)
+            // Final marker: 0xFF
+            bytes: [
+                // Full file at $1000
+                0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00,
+                // 8 bytes from offset 4 at $8000
+                0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC,
+                // 6 bytes from offset 10 at $9000
+                0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00,
+                // Final marker
+                0xFF
+            ],
+            labels: {
+                music_start: 0x1000,
+                music_end: 0x1010,
+                graphics_start: 0x8000,
+                graphics_end: 0x8008,
+                remaining_start: 0x9000,
+                remaining_end: 0x9006,
+                end_marker: 0x9006
+            }
+        }
+    },
+    {
         name: '.print accumulates formatted output',
         sourceFile: 'print_basic.asm',
         expect: {
@@ -532,6 +596,32 @@ const tests: DirectiveTestCase[] = [
                 Var2: 200
             },
             noWarnings: true
+        }
+    },
+    {
+        name: '.include falls back to project root when relative path fails',
+        sourceFile: 'include_with_fallback.asm',
+        expect: {
+            bytes: [0x44, 0x77, 0x88],
+            labels: {
+                child_label: 0x0100,
+                after_subdir: 0x0101,
+                final_label: 0x0102
+            }
+        }
+    },
+    {
+        name: '.incbin falls back to project root when relative path fails',
+        sourceFile: 'incbin_with_fallback.asm',
+        expect: {
+            // First 4 bytes from test_data.bin (0x11, 0x22, 0x33, 0x44)
+            // Then 0x99 from incbin_from_subdir.asm
+            // Then 0xAA from incbin_with_fallback.asm
+            bytes: [0x11, 0x22, 0x33, 0x44, 0x99, 0xAA],
+            labels: {
+                after_bin: 0x0304,
+                final_marker: 0x0305
+            }
         }
     }
 ];
