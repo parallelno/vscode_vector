@@ -56,19 +56,47 @@ function parseIncbinParams(
 
   // Resolve the file path
   let filePath = filename;
-  if (!path.isAbsolute(filePath)) {
-    const baseDir = sourcePath ? path.dirname(sourcePath) : process.cwd();
-    filePath = path.resolve(baseDir, filePath);
-  }
-
-  // Read the file
   let fileData: Buffer;
-  try {
-    fileData = fs.readFileSync(filePath);
-  } catch (err) {
-    const em = err && (err as any).message ? (err as any).message : String(err);
-    ctx.errors.push(`Failed to read binary file '${filename}' for .incbin at ${originDesc} - ${em}`);
-    return null;
+  
+  if (!path.isAbsolute(filePath)) {
+    // First try: resolve relative to the current file (from origin)
+    const currentFile = origin?.file;
+    const currentFileDir = currentFile ? path.dirname(currentFile) : (sourcePath ? path.dirname(sourcePath) : process.cwd());
+    const firstAttempt = path.resolve(currentFileDir, filePath);
+    
+    try {
+      fileData = fs.readFileSync(firstAttempt);
+      filePath = firstAttempt;
+    } catch (err) {
+      // Second try: resolve relative to the project root (sourcePath directory)
+      if (sourcePath && currentFile && path.dirname(currentFile) !== path.dirname(sourcePath)) {
+        const projectRoot = path.dirname(sourcePath);
+        const secondAttempt = path.resolve(projectRoot, filePath);
+        try {
+          fileData = fs.readFileSync(secondAttempt);
+          filePath = secondAttempt;
+        } catch (err2) {
+          // Both attempts failed
+          const em = err && (err as any).message ? (err as any).message : String(err);
+          ctx.errors.push(`Failed to read binary file '${filename}' for .incbin at ${originDesc} - ${em}`);
+          return null;
+        }
+      } else {
+        // No project root to try, use the original error
+        const em = err && (err as any).message ? (err as any).message : String(err);
+        ctx.errors.push(`Failed to read binary file '${filename}' for .incbin at ${originDesc} - ${em}`);
+        return null;
+      }
+    }
+  } else {
+    // Absolute path - just read it
+    try {
+      fileData = fs.readFileSync(filePath);
+    } catch (err) {
+      const em = err && (err as any).message ? (err as any).message : String(err);
+      ctx.errors.push(`Failed to read binary file '${filename}' for .incbin at ${originDesc} - ${em}`);
+      return null;
+    }
   }
 
   // Parse optional offset and length

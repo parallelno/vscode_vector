@@ -597,6 +597,32 @@ const tests: DirectiveTestCase[] = [
             },
             noWarnings: true
         }
+    },
+    {
+        name: '.include falls back to project root when relative path fails',
+        sourceFile: 'include_with_fallback.asm',
+        expect: {
+            bytes: [0x44, 0x77, 0x88],
+            labels: {
+                child_label: 0x0100,
+                after_subdir: 0x0101,
+                final_label: 0x0102
+            }
+        }
+    },
+    {
+        name: '.incbin falls back to project root when relative path fails',
+        sourceFile: 'incbin_with_fallback.asm',
+        expect: {
+            // First 4 bytes from test_data.bin (0x11, 0x22, 0x33, 0x44)
+            // Then 0x99 from incbin_from_subdir.asm
+            // Then 0xAA from incbin_with_fallback.asm
+            bytes: [0x11, 0x22, 0x33, 0x44, 0x99, 0xAA],
+            labels: {
+                after_bin: 0x0304,
+                final_marker: 0x0305
+            }
+        }
     }
 ];
 
