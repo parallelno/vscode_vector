@@ -459,8 +459,9 @@ export function assemble(
       continue;
     }
 
-    // unknown -> error
-    errors.push(`Unknown or unsupported opcode '${op}' at line ${i + 1}`);
+    // unknown -> error with source context
+    const sourceLine = (lines[i] || '').trim();
+    errors.push(`Unknown or unsupported opcode '${op}' at ${describeOrigin(origins[i], i + 1, sourcePath)}: ${sourceLine}`);
   }
 
   // Check for any unclosed .if directives and report errors
