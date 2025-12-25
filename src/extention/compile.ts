@@ -21,13 +21,13 @@ export async function updateBreakpointsInDebugFile(
   if (!fs.existsSync(debugPath)) return false;
 
   try {
-    const includedFiles = ext_utils.findIncludedFiles(srcPath, contents);
+    const includedFiles = new Set<string>(Array.from(ext_utils.findIncludedFiles(srcPath, contents)));
     const tokenText = fs.readFileSync(debugPath, 'utf8');
     const tokens = JSON.parse(tokenText);
     tokens.breakpoints = {};
     
     const basenameToPaths = new Map<string, Set<string>>();
-    for (const f of includedFiles) {
+    for (const f of Array.from(includedFiles)) {
       const b = path.basename(f);
       let s = basenameToPaths.get(b);
       if (!s) { s = new Set(); basenameToPaths.set(b, s); }
