@@ -73,6 +73,13 @@ export function assemble(
   const labels = new Map<string, { addr: number; line: number; src?: string }>();
   const consts = new Map<string, number>();
   const constOrigins = new Map<string, { line: number; src?: string }>();
+  const pendingConsts: Array<{
+    name: string;
+    rhs: string;
+    line: number;
+    origin: SourceOrigin | undefined;
+    originDesc: string;
+    lastError?: string }> = [];
   // Track which identifiers are variables (can be reassigned)
   const variables = new Set<string>();
   // localsIndex: scopeKey -> (localName -> array of { key, line }) ordered by appearance
@@ -121,6 +128,51 @@ export function assemble(
   };
 
   const evalState: AssemblyEvalState = { labels, consts, localsIndex, scopes };
+
+  function tryEvaluateConstant(rhs: string, lineIndex: number): { value: number | null; error?: string } {
+    let val: number | null = parseNumberFull(rhs);
+    if (val === null) {
+      if (consts.has(rhs)) val = consts.get(rhs)!;
+      else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
+    }
+
+    if (val === null) {
+      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex };
+      try {
+        val = evaluateExpression(rhs, ctx, true);
+      } catch (err: any) {
+        return { value: null, error: err?.message || String(err) };
+      }
+    }
+
+    return { value: val };
+  }
+
+  function resolvePendingConstants(): void {
+    let madeProgress = true;
+    while (pendingConsts.length && madeProgress) {
+      madeProgress = false;
+      for (let idx = pendingConsts.length - 1; idx >= 0; idx--) {
+        const pending = pendingConsts[idx];
+        const result = tryEvaluateConstant(pending.rhs, pending.line);
+        if (result.value !== null) {
+          consts.set(pending.name, result.value);
+          constOrigins.set(pending.name, { line: pending.line, src: pending.origin?.file || sourcePath });
+          pendingConsts.splice(idx, 1);
+          madeProgress = true;
+        } else {
+          pending.lastError = result.error;
+        }
+      }
+    }
+
+    if (pendingConsts.length) {
+      for (const pending of pendingConsts) {
+        const detail = pending.lastError ? `: ${pending.lastError}` : '';
+        errors.push(`Failed to resolve constant '${pending.name}' at ${pending.originDesc}${detail} (expression: ${pending.rhs})`);
+      }
+    }
+  }
 
   // Helper to register a label using the imported function
   function registerLabel(
@@ -255,30 +307,19 @@ export function assemble(
         continue;
       }
       const rhs = tokens.slice(2).join(' ').trim();
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
+
+      // Disallow reassignment before attempting resolution
+      if (consts.has(name) && !variables.has(name)) {
+        errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
+        continue;
       }
-      // If still null, try evaluating as expression
-      if (val === null) {
-        const result = evaluateExpressionValue(rhs, i + 1, `Bad constant value '${rhs}' for ${name}`, evalState);
-        val = result.value;
-        if (result.error) {
-          errors.push(result.error);
-          val = null;
-        }
-      }
-      if (val === null) {
-        errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
+
+      const result = tryEvaluateConstant(rhs, i + 1);
+      if (result.value !== null) {
+        consts.set(name, result.value);
+        constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
       } else {
-        // Check if this is a reassignment attempt
-        if (consts.has(name) && !variables.has(name)) {
-          errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
-        } else {
-          consts.set(name, val);
-          constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
-        }
+        pendingConsts.push({ name, rhs, line: i + 1, origin: origins[i], originDesc });
       }
       continue;
     }
@@ -289,30 +330,19 @@ export function assemble(
       if (variables.has(name)) {
         continue;
       }
+
+      if (consts.has(name) && !variables.has(name)) {
+        errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
+        continue;
+      }
+
       const rhs = assignMatch[2].trim();
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
-      }
-      // If still null, try evaluating as expression
-      if (val === null) {
-        const result = evaluateExpressionValue(rhs, i + 1, `Bad constant value '${rhs}' for ${name}`, evalState);
-        val = result.value;
-        if (result.error) {
-          errors.push(result.error);
-          val = null;
-        }
-      }
-      if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
-      else {
-        // Check if this is a reassignment attempt
-        if (consts.has(name) && !variables.has(name)) {
-          errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
-        } else {
-          consts.set(name, val);
-          constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
-        }
+      const result = tryEvaluateConstant(rhs, i + 1);
+      if (result.value !== null) {
+        consts.set(name, result.value);
+        constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
+      } else {
+        pendingConsts.push({ name, rhs, line: i + 1, origin: origins[i], originDesc });
       }
       continue;
     }
@@ -323,30 +353,19 @@ export function assemble(
       if (variables.has(name)) {
         continue;
       }
+
+      if (consts.has(name) && !variables.has(name)) {
+        errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
+        continue;
+      }
+
       const rhs = equMatch[2].trim();
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
-      }
-      // If still null, try evaluating as expression
-      if (val === null) {
-        const result = evaluateExpressionValue(rhs, i + 1, `Bad constant value '${rhs}' for ${name}`, evalState);
-        val = result.value;
-        if (result.error) {
-          errors.push(result.error);
-          val = null;
-        }
-      }
-      if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
-      else {
-        // Check if this is a reassignment attempt
-        if (consts.has(name) && !variables.has(name)) {
-          errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
-        } else {
-          consts.set(name, val);
-          constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
-        }
+      const result = tryEvaluateConstant(rhs, i + 1);
+      if (result.value !== null) {
+        consts.set(name, result.value);
+        constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
+      } else {
+        pendingConsts.push({ name, rhs, line: i + 1, origin: origins[i], originDesc });
       }
       continue;
     }
@@ -477,6 +496,9 @@ export function assemble(
       errors.push(`Missing .endif for .if at ${describeOrigin(frame.origin, frame.lineIndex, sourcePath)}`);
     }
   }
+
+  // Resolve any constants that referenced yet-to-be-defined symbols during the first pass
+  resolvePendingConstants();
 
   if (errors.length) return { success: false, errors, origins };
 

@@ -320,6 +320,16 @@ MAX_SIZE = 100
 
 Typical use cases include guardrails for configuration constants, macro argument validation, and short-circuiting builds when a derived value falls outside a legal range.
 
+- `Name = Expr` / `Name EQU Expr`: defines an immutable constant. Both plain and label-style forms are accepted (e.g., `CONST:` followed by `= expr`). The assembler defers evaluating these expressions until after the first pass, so forward references work: you can refer to constants or labels that appear later in the file. If a constant cannot be resolved once all symbols are known, the error points to the exact definition and expression. Reassigning a constant with a different value still triggers an error; use `.var` if you need mutability.
+
+```
+OS_FILENAME_LEN_MAX = BASENAME_LEN + BYTE_LEN + EXT_LEN + WORD_LEN
+BASENAME_LEN = 8
+BYTE_LEN = 1
+EXT_LEN = 3
+WORD_LEN = 2
+```
+
 - `.var Name value`: declares a mutable variable whose value can be reassigned later in the file (or inside macros). Unlike `=` or `EQU`, `.var` establishes an initial value but can be updated with either direct assignments (`Counter = Counter - 1`) or a subsequent `EQU`. The symbol participates in all expression contexts just like any other constant.
 
 ```

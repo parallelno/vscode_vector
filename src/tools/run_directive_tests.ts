@@ -258,6 +258,20 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
+        name: 'Constants allow forward references',
+        sourceFile: 'const_forward.asm',
+        expect: {
+            bytes: [0x0E],
+            consts: {
+                BASENAME_LEN: 8,
+                BYTE_LEN: 1,
+                EXT_LEN: 3,
+                WORD_LEN: 2,
+                OS_FILENAME_LEN_MAX: 14
+            }
+        }
+    },
+    {
         name: 'Local labels resolve within their scope',
         sourceFile: 'local_labels.asm',
         expect: {
