@@ -133,3 +133,68 @@ export function handleDS(
 
   return n;
 }
+
+export function handleStorage(
+  line: string,
+  tokens: string[],
+  tokenOffsets: number[],
+  srcLine: number,
+  origin: SourceOrigin | undefined,
+  sourcePath: string | undefined,
+  ctx: DataContext,
+  out?: number[]
+): { size: number; filled: boolean } {
+  const originDesc = describeOrigin(origin, srcLine, sourcePath);
+  const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
+  if (!rest.length) {
+    ctx.errors.push(`Missing value for .storage at ${originDesc}`);
+    return { size: 0, filled: false };
+  }
+
+  const parts = splitTopLevelArgs(rest);
+  if (!parts.length || !parts[0].trim()) {
+    ctx.errors.push(`Missing value for .storage at ${originDesc}`);
+    return { size: 0, filled: false };
+  }
+
+  const exprCtx: ExpressionEvalContext = {
+    labels: ctx.labels,
+    consts: ctx.consts,
+    localsIndex: ctx.localsIndex,
+    scopes: ctx.scopes,
+    lineIndex: srcLine
+  };
+
+  let size = 0;
+  try {
+    size = evaluateExpression(parts[0], exprCtx, true);
+    if (!Number.isFinite(size) || size < 0) {
+      throw new Error('size must be a non-negative number');
+    }
+  } catch (err: any) {
+    ctx.errors.push(`Bad .storage size '${parts[0]}' at ${originDesc}: ${err?.message || err}`);
+    return { size: 0, filled: false };
+  }
+
+  let filler: number | undefined;
+  if (parts.length > 1 && parts[1].trim().length) {
+    const fillerText = parts[1].trim();
+    let val = toByte(fillerText);
+    if (val === null) {
+      try {
+        val = evaluateExpression(fillerText, exprCtx, true) & 0xff;
+      } catch (err: any) {
+        ctx.errors.push(`Bad .storage filler '${fillerText}' at ${originDesc}: ${err?.message || err}`);
+      }
+    }
+    if (val !== null) filler = val & 0xff;
+  }
+
+  if (out && filler !== undefined && size > 0) {
+    for (let i = 0; i < size; i++) {
+      out.push(filler);
+    }
+  }
+
+  return { size, filled: filler !== undefined };
+}

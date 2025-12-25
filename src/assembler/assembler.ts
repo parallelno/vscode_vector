@@ -18,7 +18,7 @@ import { expandLoopDirectives } from './loops';
 import { processIncludes } from './includes';
 import { registerLabel as registerLabelHelper, getScopeKey } from './labels';
 import { isAddressDirective, checkLabelOnDirective, tokenize } from './common';
-import { handleDB, handleDW, handleDS, DataContext } from './data';
+import { handleDB, handleDW, handleDS, handleStorage, DataContext } from './data';
 import {
   handleIfDirective,
   handleEndifDirective,
@@ -388,6 +388,12 @@ export function assemble(
       continue;
     }
 
+    if (op === '.STORAGE' || op === 'STORAGE') {
+      const { size } = handleStorage(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx);
+      addr += size;
+      continue;
+    }
+
     if (op === '.ENCODING'){
       handleEncodingDirective(line, origins[i], i + 1, sourcePath, directiveCtx, tokenOffsets, tokens)
       continue;
@@ -662,6 +668,15 @@ export function assemble(
     if (op === 'DS') {
       const emitted = handleDS(line, tokens, tokenOffsets, srcLine, dataCtxSecond);
       addr += emitted;
+      continue;
+    }
+
+    if (op === '.STORAGE' || op === 'STORAGE') {
+      const { size, filled } = handleStorage(line, tokens, tokenOffsets, srcLine, origins[i], sourcePath, dataCtxSecond, out);
+      if (filled && size > 0) {
+        dataLineSpans[i] = { start: lineStartAddr, byteLength: size, unitBytes: 1 };
+      }
+      addr += size;
       continue;
     }
 

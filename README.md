@@ -159,7 +159,7 @@ The assembler supports two comment styles:
      that spans multiple lines
      and is ignored by the assembler */
   mvi a, 0x10
-  
+
   mvi b, 0x20  /* inline multi-line comment */
   ```
 
@@ -337,6 +337,15 @@ db Counter              ; Emits: 0x05
 ```
 
 - `.align value`: pad the output with zero bytes until the program counter reaches the next multiple of `value`, then resume emitting instructions. The argument can be any expression understood by the `.if` evaluator, must be positive, and has to be a power of two (1, 2, 4, 8, ...). If the current address is already aligned no padding is emitted. Example:
+
+- `.storage Length[, Filler]`: reserves `Length` bytes of address space. If `Filler` is provided, the assembler emits that byte `Length` times into the output. If omitted, the bytes are uninitialized in the binary (the PC advances but nothing is written), which is useful for reserving runtime buffers outside the saved ROM image. `Length` and `Filler` both accept full expressions. Example:
+
+```
+.org 0x200
+buffer:   .storage 16          ; advances PC by 16, writes nothing
+table:    .storage 4, 0x7E     ; emits 0x7E 0x7E 0x7E 0x7E
+after:    db 0xAA              ; assembled after the reserved space
+```
 
 ```
 .org $100

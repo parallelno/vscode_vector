@@ -228,6 +228,19 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
+        name: '.storage reserves space and optionally fills it',
+        sourceFile: 'storage_basic.asm',
+        expect: {
+            bytes: [0x7E, 0x7E, 0x7E, 0xAA],
+            labels: {
+                uninit: 0x0010,
+                after_uninit: 0x0014,
+                init: 0x0014,
+                after_init: 0x0017
+            }
+        }
+    },
+    {
         name: 'Literal formats and expressions evaluate correctly',
         sourceFile: 'literal_expression.asm',
         expect: {
