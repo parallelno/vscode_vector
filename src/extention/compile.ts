@@ -6,6 +6,76 @@ import * as ext_utils from './utils';
 import { DEBUG_FILE_SUFFIX } from './consts';
 
 
+/**
+ * Updates the debug file with current breakpoints without recompiling the assembly source.
+ * This is used when only breakpoints changed but the assembly source files remain unchanged.
+ */
+export async function updateBreakpointsInDebugFile(
+  devectorOutput: vscode.OutputChannel,
+  srcPath: string,
+  contents: string,
+  debugPath: string)
+  : Promise<boolean>
+{
+  if (!srcPath || !debugPath) return false;
+  if (!fs.existsSync(debugPath)) return false;
+
+  try {
+    const includedFiles = new Set<string>(Array.from(ext_utils.findIncludedFiles(srcPath, contents)));
+    const tokenText = fs.readFileSync(debugPath, 'utf8');
+    const tokens = JSON.parse(tokenText);
+    tokens.breakpoints = {};
+    
+    const basenameToPaths = new Map<string, Set<string>>();
+    for (const f of Array.from(includedFiles)) {
+      const b = path.basename(f);
+      let s = basenameToPaths.get(b);
+      if (!s) { s = new Set(); basenameToPaths.set(b, s); }
+      s.add(path.resolve(f));
+    }
+
+    const allBps = vscode.debug.breakpoints;
+    for (const bp of allBps) {
+      if ((bp as vscode.SourceBreakpoint).location) {
+        const srcBp = bp as vscode.SourceBreakpoint;
+        const uri = srcBp.location.uri;
+        if (!uri || uri.scheme !== 'file') continue;
+        const bpPath = path.resolve(uri.fsPath);
+        const bpBase = path.basename(bpPath);
+        if (!basenameToPaths.has(bpBase)) continue;
+        const pathsForBase = basenameToPaths.get(bpBase)!;
+        if (!pathsForBase.has(bpPath)) continue;
+        const lineNum = srcBp.location.range.start.line + 1;
+        const entry = { line: lineNum, enabled: !!bp.enabled } as any;
+        if (tokens.labels) {
+          for (const [labelName, labInfo] of Object.entries(tokens.labels)) {
+            try {
+              if ((labInfo as any).src && (labInfo as any).src === bpBase && (labInfo as any).line === lineNum) {
+                entry.label = labelName;
+                entry.addr = (labInfo as any).addr;
+                break;
+              }
+            } catch (e) {}
+          }
+          ext_utils.attachAddressFromTokens(tokens, bpPath, lineNum, entry);
+        }
+        if (!tokens.breakpoints[bpBase]) tokens.breakpoints[bpBase] = [];
+        tokens.breakpoints[bpBase].push(entry);
+      }
+    }
+    
+    fs.writeFileSync(debugPath, JSON.stringify(tokens, null, 4), 'utf8');
+    let cnt = 0;
+    for (const v of Object.values(tokens.breakpoints || {})) cnt += (v as any[]).length;
+    ext_utils.logOutput(devectorOutput, `Devector: Updated ${cnt} breakpoint(s) in ${debugPath} (no recompilation)`, true);
+    return true;
+  } catch (err) {
+    console.error('Failed to update breakpoints in debug file:', err);
+    return false;
+  }
+}
+
+
 export async function compileAsmSource(
   devectorOutput: vscode.OutputChannel,
   srcPath: string,
