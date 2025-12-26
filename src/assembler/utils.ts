@@ -383,30 +383,43 @@ export function parseTextLiteralToBytes(part: string, encoding: TextEncodingType
   return { error: `Invalid .text value '${trimmed}' - expected string or character literal` };
 }
 
-export function resolveIncludePath(includedFile: string, currentAsm?: string, mainAsm?: string)
-: string | undefined
+export function resolveIncludePath(
+  includedFile: string,
+  currentAsm?: string,
+  mainAsm?: string,
+  projectFile?: string
+): string | undefined
 {
-  let resolved: string | undefined = includedFile;
-  // Try to resolve the include path
-  if (!path.isAbsolute(resolved)) {
-    // First try: resolve relative to the current file
-    const currentFileDir = path.dirname(currentAsm || '');
-    resolved = path.resolve(currentFileDir, includedFile);;
-    if (!fs.existsSync(resolved)) {
-      // Second try: resolve relative to the workspace root (if VS Code API is available)
-      const root = tryGetWorkspaceRoot();
-      resolved = path.resolve(root || '', includedFile);
-      if (!fs.existsSync(resolved)) {
-        // Third try: resolve relative to the main asm file (sourcePath)
-        resolved = mainAsm ?
-          path.resolve(path.dirname(mainAsm), includedFile) :
-          process.cwd();
-        if (!resolved || !fs.existsSync(resolved))
-        {
-          return resolved;
-        }
-      }
-    }
+  // Keep a list of attempted paths so the caller can surface a useful error when none exist.
+  const attempted: string[] = [];
+
+  if (path.isAbsolute(includedFile)) {
+    return includedFile;
   }
-  return resolved;
+
+  const tryResolve = (baseDir?: string): string | undefined => {
+    if (!baseDir) return undefined;
+    const candidate = path.resolve(baseDir, includedFile);
+    attempted.push(candidate);
+    return fs.existsSync(candidate) ? candidate : undefined;
+  };
+
+  const projectDir = projectFile ? path.dirname(projectFile) : undefined;
+
+  // 1) Relative to the current file
+  const currentDir = currentAsm ? path.dirname(currentAsm) : undefined;
+  const found = tryResolve(currentDir)
+    // 2) Relative to the main asm file directory
+    || tryResolve(mainAsm ? path.dirname(mainAsm) : undefined)
+    // 3) Relative to the project file directory (explicit)
+    || tryResolve(projectDir)
+    // 4) Relative to the VS Code workspace root when available
+    || tryResolve(tryGetWorkspaceRoot())
+    // 5) Relative to the current working directory
+    || tryResolve(process.cwd());
+
+  if (found) return found;
+
+  // Fall back to the last attempted path so the caller can include it in the error message.
+  return attempted.length ? attempted[attempted.length - 1] : undefined;
 }

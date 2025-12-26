@@ -24,7 +24,8 @@ export function handleDB(
   origin: SourceOrigin | undefined,
   sourcePath: string | undefined,
   ctx: DataContext,
-  out?: number[]
+  out?: number[],
+  options: { defer?: boolean } = {}
 ): number {
   const op = tokens[0].toUpperCase();
   const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]).trim();
@@ -33,8 +34,8 @@ export function handleDB(
 
   for (const p of parts) {
     let val = toByte(p);
-    // If toByte fails, try evaluating as an expression
-    if (val === null && out) {
+    // If toByte fails, try evaluating as an expression unless we're deferring resolution
+    if (val === null && out && !options.defer) {
       const exprCtx: ExpressionEvalContext = {
         labels: ctx.labels,
         consts: ctx.consts,
@@ -67,7 +68,8 @@ export function handleDW(
   origin: SourceOrigin | undefined,
   sourcePath: string | undefined,
   ctx: DataContext,
-  out?: number[]
+  out?: number[],
+  options: { defer?: boolean } = {}
 ): number {
   const op = tokens[0].toUpperCase();
   const originDesc = describeOrigin(origin, srcLine, sourcePath);
@@ -90,17 +92,19 @@ export function handleDW(
     const parsed = parseWordLiteral(part);
 
     if ('error' in parsed) {
-      const exprCtx: ExpressionEvalContext = {
-        labels: ctx.labels,
-        consts: ctx.consts,
-        localsIndex: ctx.localsIndex,
-        scopes: ctx.scopes,
-        lineIndex: srcLine
-      };
-      try {
-        value = evaluateExpression(part, exprCtx, true) & 0xffff;
-      } catch (err: any) {
-        ctx.errors.push(`Bad ${op} value '${part}' at ${originDesc}: ${err?.message || err}`);
+      if (!options.defer) {
+        const exprCtx: ExpressionEvalContext = {
+          labels: ctx.labels,
+          consts: ctx.consts,
+          localsIndex: ctx.localsIndex,
+          scopes: ctx.scopes,
+          lineIndex: srcLine
+        };
+        try {
+          value = evaluateExpression(part, exprCtx, true) & 0xffff;
+        } catch (err: any) {
+          ctx.errors.push(`Bad ${op} value '${part}' at ${originDesc}: ${err?.message || err}`);
+        }
       }
     } else {
       value = parsed.value & 0xffff;

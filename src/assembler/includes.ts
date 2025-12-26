@@ -18,6 +18,7 @@ export function processIncludes(
   content: string,
   file?: string,
   sourcePath?: string,
+  projectFile?: string,
   depth = 0
 ): IncludeResult {
   if (depth > MAX_INCLUDE_DEPTH) {
@@ -40,7 +41,7 @@ export function processIncludes(
       const inc = m[1];
       // resolve path
       let incText: string;
-      const incPath: string | undefined = ext_utils.resolveIncludePath(inc, file, sourcePath);
+      const incPath: string | undefined = ext_utils.resolveIncludePath(inc, file, sourcePath, projectFile);
       if (!incPath) {
         throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li + 1} - ${incPath || inc}`);
       }
@@ -51,7 +52,7 @@ export function processIncludes(
         throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li+1} - ${em}`);
       }
 
-      const nested = processIncludes(incText, incPath, sourcePath, depth + 1);
+      const nested = processIncludes(incText, incPath, sourcePath, projectFile, depth + 1);
       for (let k = 0; k < nested.lines.length; k++) {
         outLines.push(nested.lines[k]);
         origins.push(nested.origins[k]);

@@ -10,6 +10,7 @@ export type IncbinContext = {
   localsIndex: Map<string, Map<string, Array<{ key: string; line: number }>>>;
   scopes: string[];
   errors: string[];
+  projectFile?: string;
 };
 
 type IncbinParams = {
@@ -55,7 +56,7 @@ function parseIncbinParams(
 
   // resolve path
   const currentAsm = origin?.file;
-  const incPath: string | undefined = ext_utils.resolveIncludePath(inc, currentAsm, sourcePath);
+  const incPath: string | undefined = ext_utils.resolveIncludePath(inc, currentAsm, sourcePath, ctx.projectFile);
   if (!incPath) {
     ctx.errors.push(`Failed to read binary file '${inc}' for .incbin at ${originDesc} - file not found`);
     return null;

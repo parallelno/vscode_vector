@@ -4,12 +4,33 @@ import * as path from 'path';
 // require compiled assembler JS from out/assembler (keeps runtime same as before)
 const asm: any = require('../assembler/assembler');
 
-const arg = process.argv[2] || path.join('test','asm_test_all_i8080_set','fill_erase_scr_set_pal.asm');
-const srcPath = path.resolve(arg);
+// Expect a project file (.project.json). Default to sample project.
+const arg = process.argv[2] || path.join('temp', 'project', 'gd_error.project.json');
+const projectPath = path.resolve(arg);
+
 try {
+  const projectText = fs.readFileSync(projectPath, 'utf8');
+  const project = JSON.parse(projectText);
+  if (!project.asmPath) {
+    throw new Error('Project file missing asmPath');
+  }
+
+  const projectDir = path.dirname(projectPath);
+  const srcPath = path.isAbsolute(project.asmPath)
+    ? project.asmPath
+    : path.resolve(projectDir, project.asmPath);
+  const outBin = project.romPath
+    ? (path.isAbsolute(project.romPath) ? project.romPath : path.resolve(projectDir, project.romPath))
+    : path.join(process.cwd(), 'tmp_test.rom');
+  const debugPath = project.debugPath
+    ? (path.isAbsolute(project.debugPath) ? project.debugPath : path.resolve(projectDir, project.debugPath))
+    : undefined;
+
   const src = fs.readFileSync(srcPath, 'utf8');
-  const outBin = path.join(process.cwd(), 'tmp_test.rom');
-  const res: any = asm.assembleAndWrite(src, outBin, srcPath);
+  const writer = typeof asm.assembleAndWriteWithProject === 'function'
+    ? asm.assembleAndWriteWithProject(projectPath)
+    : asm.assembleAndWrite;
+  const res: any = writer(src, outBin, srcPath, debugPath);
   if (!res.success) {
     console.error('Assembly failed:');
     if (res.errors) res.errors.forEach((e: any) => console.error(e));

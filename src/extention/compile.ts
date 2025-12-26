@@ -1,9 +1,10 @@
 import * as fs from 'fs';
 import path from 'path';
 import * as vscode from 'vscode';
-import { assembleAndWrite } from '../assembler/assembler';
 import * as ext_utils from './utils';
 import { DEBUG_FILE_SUFFIX } from './consts';
+import { assemble } from '../assembler/assembler';
+import { createAssembleAndWrite } from '../assembler/assemble_write';
 
 
 export async function compileAsmSource(
@@ -11,12 +12,13 @@ export async function compileAsmSource(
   srcPath: string,
   contents: string,
   outPath: string,
-  debugPath?: string)
+  debugPath?: string,
+  projectFile?: string)
   : Promise<boolean>
 {
   if (!srcPath) return false;
-
-  const writeRes = assembleAndWrite(contents, outPath, srcPath, debugPath);
+  const writer = createAssembleAndWrite(assemble, projectFile);
+  const writeRes = writer(contents, outPath, srcPath, debugPath);
   ext_utils.emitPrintMessages(devectorOutput, writeRes.printMessages);
   ext_utils.emitWarnings(devectorOutput, writeRes.warnings);
 
@@ -36,12 +38,12 @@ export async function compileAsmSource(
         seen.add(summary);
         summaries.push(summary);
       }
-      ext_utils.logOutput(devectorOutput, 'Devector: Compilation failed:', true);
+      ext_utils.logOutput(devectorOutput, '\nDevector: Compilation failed:', true);
       for (const summary of summaries) {
         ext_utils.logOutput(devectorOutput, summary);
       }
     } else {
-      ext_utils.logOutput(devectorOutput, 'Devector: Compilation failed: Assemble failed', true);
+      ext_utils.logOutput(devectorOutput, '\nDevector: Compilation failed: Assemble failed', true);
     }
     return false;
   }

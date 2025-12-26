@@ -45,13 +45,14 @@ import { INSTR_OPCODES, instructionEncoding } from './second_pass_instr';
 
 export function assemble(
   source: string,
-  sourcePath?: string)
+  sourcePath?: string,
+  projectFile?: string)
   : AssembleResult
 {
   let expanded: { lines: string[]; origins: SourceOrigin[] };
 
   try {
-    expanded = processIncludes(source, sourcePath, sourcePath, 0);
+    expanded = processIncludes(source, sourcePath, sourcePath, projectFile, 0);
   } catch (err: any) {
     return { success: false, errors: [err.message] };
   }
@@ -119,13 +120,7 @@ export function assemble(
     scopes,
     errors
   };
-  const incbinCtx: IncbinContext = {
-    labels,
-    consts,
-    localsIndex,
-    scopes,
-    errors
-  };
+  const incbinCtx: IncbinContext = { labels, consts, localsIndex, scopes, errors, projectFile };
 
   const evalState: AssemblyEvalState = { labels, consts, localsIndex, scopes };
 
@@ -426,12 +421,12 @@ export function assemble(
     const op = tokens[0].toUpperCase();
 
     if (op === 'DB' || op === '.BYTE') {
-      addr += handleDB(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx);
+      addr += handleDB(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx, undefined, { defer: true });
       continue;
     }
 
     if (op === 'DW' || op === '.WORD') {
-      addr += handleDW(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx);
+      addr += handleDW(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx, undefined, { defer: true });
       continue;
     }
 
@@ -561,7 +556,7 @@ export function assemble(
     scopes
   };
   const dataCtxSecond: DataContext = { labels, consts, localsIndex, scopes, errors };
-  const incbinCtxSecond: IncbinContext = { labels, consts, localsIndex, scopes, errors };
+  const incbinCtxSecond: IncbinContext = { labels, consts, localsIndex, scopes, errors, projectFile };
   const instrCtx: InstructionContext = { labels, consts, localsIndex, scopes, errors };
 
   const ifStackSecond: IfFrame[] = [];
@@ -840,5 +835,10 @@ export function assemble(
     origins };
 }
 
-// convenience when using from extension
+// convenience when using from extension (no bound project file)
 export const assembleAndWrite = createAssembleAndWrite(assemble);
+
+// helper to bind a specific project file for include resolution
+export function assembleAndWriteWithProject(projectFile?: string) {
+  return createAssembleAndWrite(assemble, projectFile);
+}

@@ -182,7 +182,8 @@ export async function compileProjectFile(
                                         project.absolute_asm_path!,
                                         contents,
                                         project.absolute_rom_path!,
-                                        project.absolute_debug_path!);
+                                        project.absolute_debug_path!,
+                                        project.absolute_path!);
   if (!success) return false;
 
   const reason = options.reason ? ` (${options.reason})` : '';
