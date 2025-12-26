@@ -113,12 +113,14 @@ export function instructionEncoding(
   }
 
   // Expression evaluation
+  const originLine = ctx.originLines ? ctx.originLines[srcLine - 1] : undefined;
   const exprCtx: ExpressionEvalContext = {
     labels: ctx.labels,
     consts: ctx.consts,
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
-    lineIndex: srcLine
+    lineIndex: srcLine,
+    originLine
   };
   let full: number | null = null;
   try {

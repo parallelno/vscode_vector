@@ -727,6 +727,23 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
+        name: 'Inline comment markers ignored inside strings',
+        sourceFile: 'comment_inline_strings.asm',
+        expect: {
+            // .text "http://x" = 8 bytes
+            // .text "semi;colon" = 10 bytes
+            // .text "// not comment" = 14 bytes
+            // db 0xAA
+            bytes: [
+                0x68, 0x74, 0x74, 0x70, 0x3A, 0x2F, 0x2F, 0x78,
+                0x73, 0x65, 0x6D, 0x69, 0x3B, 0x63, 0x6F, 0x6C, 0x6F, 0x6E,
+                0x2F, 0x2F, 0x20, 0x6E, 0x6F, 0x74, 0x20, 0x63, 0x6F, 0x6D, 0x6D, 0x65, 0x6E, 0x74,
+                0xAA
+            ],
+            noWarnings: true
+        }
+    },
+    {
         name: 'Multiline comments /* */ are stripped correctly',
         sourceFile: 'comment_multiline_basic.asm',
         expect: {

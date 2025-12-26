@@ -9,6 +9,7 @@ export type AssemblyEvalState = {
   consts: Map<string, number>;
   localsIndex: LocalLabelScopeIndex;
   scopes: string[];
+  originLines?: Array<number | undefined>;
 };
 
 function buildEvalContext(state: AssemblyEvalState, lineIndex: number): ExpressionEvalContext {
@@ -17,7 +18,8 @@ function buildEvalContext(state: AssemblyEvalState, lineIndex: number): Expressi
     consts: state.consts,
     localsIndex: state.localsIndex,
     scopes: state.scopes,
-    lineIndex
+    lineIndex,
+    originLine: state.originLines ? state.originLines[lineIndex - 1] : undefined
   };
 }
 

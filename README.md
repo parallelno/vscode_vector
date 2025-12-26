@@ -316,6 +316,26 @@ useful_routine:
 .endopt
 ```
 
+- **Local labels and constants (`@name`)**: locals are scoped between the nearest surrounding global labels (or the start/end of the file/macro/loop expansion). A reference resolves to the closest definition in the same scope, preferring the latest definition at or before the reference; if none, it falls back to the next definition in that scope. Locals are per-file/per-macro and do not collide with globals. Example:
+
+```
+mem_erase_sp_filler:
+  lxi b, $0000
+  sphl
+  mvi a, 0xFF
+@loop:
+  PUSH_B(16)
+  dcx d
+  cmp d
+  jnz @loop    ; resolves to @loop above (same scope)
+
+mem_fill_sp:              ; new global label -> new local scope
+  shld mem_erase_sp_filler + 1
+  ; @loop here would be unrelated to the one above
+```
+
+Locals can be redefined in a scope; references before a redefinition bind to the earlier definition, references after bind to the later one. Use globals for cross-scope jumps or data addresses.
+
 - `.print`: emit compile-time diagnostics to the console during the second pass. Arguments are comma-separated and can mix string literals (`"PC="`), numeric literals, labels, or arbitrary expressions. Each argument is evaluated with the same expression engine as `.if`, so you can dump intermediate values or addresses while assembling:
 
 ```

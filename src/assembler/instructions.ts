@@ -6,6 +6,7 @@ import {
   parseAddressToken,
   describeOrigin
 } from './utils';
+import { resolveLocalLabelKey } from './labels';
 import { evaluateExpression } from './expression';
 
 export type InstructionContext = {
@@ -14,6 +15,7 @@ export type InstructionContext = {
   localsIndex: Map<string, Map<string, Array<{ key: string; line: number }>>>;
   scopes: string[];
   errors: string[];
+  originLines?: Array<number | undefined>;
 };
 
 export function formatSignedHex(value: number): string {
@@ -76,18 +78,9 @@ export function resolveAddressToken(
       val = parseNumberFull(tok);
       if (val === null) {
         if (tok[0] === '@') {
-          if (lineIndex <= 0 || lineIndex - 1 >= ctx.scopes.length) return null;
-          const scopeKey = ctx.scopes[lineIndex - 1];
-          const fileMap = ctx.localsIndex.get(scopeKey);
-          if (!fileMap) return null;
-          const arr = fileMap.get(tok.slice(1));
-          if (!arr || !arr.length) return null;
-          let chosen = arr[0];
-          for (const entry of arr) {
-            if ((entry.line || 0) <= lineIndex) chosen = entry;
-            else break;
-          }
-          const key = chosen.key;
+          const refLine = ctx.originLines ? ctx.originLines[lineIndex - 1] : undefined;
+          const key = resolveLocalLabelKey(tok, lineIndex, ctx.scopes, ctx.localsIndex, refLine);
+          if (!key) return null;
           if (ctx.labels.has(key)) val = ctx.labels.get(key)!.addr;
           else val = null;
         } else if (ctx.labels.has(tok)) {
@@ -117,18 +110,9 @@ export function resolveAddressToken(
 
   // local label resolution
   if (s[0] === '@') {
-    if (lineIndex <= 0 || lineIndex - 1 >= ctx.scopes.length) return null;
-    const scopeKey = ctx.scopes[lineIndex - 1];
-    const fileMap = ctx.localsIndex.get(scopeKey);
-    if (!fileMap) return null;
-    const arr = fileMap.get(s.slice(1));
-    if (!arr || !arr.length) return null;
-    let chosen = arr[0];
-    for (const entry of arr) {
-      if ((entry.line || 0) <= lineIndex) chosen = entry;
-      else break;
-    }
-    const key = chosen.key;
+    const refLine = ctx.originLines ? ctx.originLines[lineIndex - 1] : undefined;
+    const key = resolveLocalLabelKey(s, lineIndex, ctx.scopes, ctx.localsIndex, refLine);
+    if (!key) return null;
     if (ctx.labels.has(key)) return ctx.labels.get(key)!.addr;
     return null;
   }

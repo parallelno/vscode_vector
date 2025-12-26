@@ -1,4 +1,5 @@
 import { ExpressionEvalContext } from './types';
+import { resolveLocalLabelKey } from './labels';
 import { isIdentifierPart, isIdentifierStart } from './utils';
 
 type ExprToken =
@@ -151,19 +152,8 @@ function resolveSymbolValue(name: string, ctx: ExpressionEvalContext): number | 
     if (k.toLowerCase() === lowered) return v.addr;
   }
   if (name[0] === '@') {
-    if (ctx.lineIndex <= 0) return null;
-    const scopeKey = ctx.scopes[ctx.lineIndex - 1];
-    if (!scopeKey) return null;
-    const fileMap = ctx.localsIndex.get(scopeKey);
-    if (!fileMap) return null;
-    const arr = fileMap.get(name.slice(1));
-    if (!arr || !arr.length) return null;
-    let chosen = arr[0];
-    for (const entry of arr) {
-      if ((entry.line || 0) <= ctx.lineIndex) chosen = entry;
-      else break;
-    }
-    const key = chosen.key;
+    const key = resolveLocalLabelKey(name, ctx.lineIndex, ctx.scopes, ctx.localsIndex, ctx.originLine);
+    if (!key) return null;
     if (ctx.consts.has(key)) return ctx.consts.get(key)!;
     if (ctx.labels.has(key)) return ctx.labels.get(key)!.addr;
     return null;

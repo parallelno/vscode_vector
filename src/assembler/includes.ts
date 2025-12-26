@@ -33,7 +33,7 @@ export function processIncludes(
 
   for (let li = 0; li < srcLines.length; li++) {
     const raw = srcLines[li];
-    const trimmed = raw.replace(/\/\/.*$|;.*$/, '').trim();
+    const trimmed = ext_utils.stripInlineComment(raw).trim();
 
     // match .include "filename" or .include 'filename'
     const m = trimmed.match(/^\.include\s+["']([^"']+)["']/i);
@@ -85,7 +85,7 @@ export function collectIncludeFiles(
   const srcLines = cleanedContent.split(/\r?\n/);
   for (let li = 0; li < srcLines.length; li++) {
     const raw = srcLines[li];
-    const trimmed = raw.replace(/\/\/.*$|;.*$/, '').trim();
+    const trimmed = ext_utils.stripInlineComment(raw).trim();
     const m = trimmed.match(/^\.include\s+["']([^"']+)["']/i);
     if (!m) continue;
 

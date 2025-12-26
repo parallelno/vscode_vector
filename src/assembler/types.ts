@@ -65,6 +65,8 @@ export type ExpressionEvalContext = {
   localsIndex: LocalLabelScopeIndex;
   scopes: string[];
   lineIndex: number;
+  // The originating source line (per-file) for better local-label matching; defaults to lineIndex when absent.
+  originLine?: number;
 };
 
 export type IfFrame = {

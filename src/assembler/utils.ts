@@ -69,8 +69,13 @@ export function stripMultilineComments(source: string): string {
     // Enter line comment (// or ;) to avoid mis-detecting quotes inside
     if (!inComment && (ch === ';' || (ch === '/' && next === '/'))) {
       inLineComment = true;
-      result += ch;
-      i += (ch === '/' ? 2 : 1);
+      if (ch === '/' && next === '/') {
+        result += '//';
+        i += 2;
+      } else {
+        result += ch;
+        i += 1;
+      }
       continue;
     }
 
@@ -97,7 +102,49 @@ export function stripMultilineComments(source: string): string {
 }
 
 export function stripInlineComment(line: string): string {
-  return line.replace(/\/\/.*$|;.*$/, '');
+  let inString = false;
+  let stringChar = '';
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    const next = i + 1 < line.length ? line[i + 1] : '';
+
+    if (inString) {
+      if (ch === stringChar) {
+        // Count preceding backslashes to detect escaping
+        let backslashes = 0;
+        let j = i - 1;
+        while (j >= 0 && line[j] === '\\') { backslashes++; j--; }
+        if ((backslashes % 2) === 0) {
+          inString = false;
+          stringChar = '';
+        }
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === '\'') {
+      // Enter string/char literal if quote is not escaped
+      let backslashes = 0;
+      let j = i - 1;
+      while (j >= 0 && line[j] === '\\') { backslashes++; j--; }
+      if ((backslashes % 2) === 0) {
+        inString = true;
+        stringChar = ch;
+      }
+      continue;
+    }
+
+    if (ch === ';') {
+      return line.slice(0, i);
+    }
+
+    if (ch === '/' && next === '/') {
+      return line.slice(0, i);
+    }
+  }
+
+  return line;
 }
 
 export function escapeRegExp(value: string): string {

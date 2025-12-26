@@ -77,6 +77,7 @@ export function assemble(
 
   const lines = optionalResult.lines;
   const origins = optionalResult.origins;
+  const originLines = origins.map((o) => o?.line);
   const labels = new Map<string, { addr: number; line: number; src?: string }>();
   const consts = new Map<string, number>();
   const constOrigins = new Map<string, { line: number; src?: string }>();
@@ -126,7 +127,7 @@ export function assemble(
   };
   const incbinCtx: IncbinContext = { labels, consts, localsIndex, scopes, errors, projectFile };
 
-  const evalState: AssemblyEvalState = { labels, consts, localsIndex, scopes };
+  const evalState: AssemblyEvalState = { labels, consts, localsIndex, scopes, originLines };
 
   function allocateLocalKey(name: string, origin: SourceOrigin | undefined, fallbackLine: number, scopeKey: string): string {
     const localName = name.slice(1);
@@ -561,7 +562,7 @@ export function assemble(
   };
   const dataCtxSecond: DataContext = { labels, consts, localsIndex, scopes, errors };
   const incbinCtxSecond: IncbinContext = { labels, consts, localsIndex, scopes, errors, projectFile };
-  const instrCtx: InstructionContext = { labels, consts, localsIndex, scopes, errors };
+  const instrCtx: InstructionContext = { labels, consts, localsIndex, scopes, errors, originLines };
 
   const ifStackSecond: IfFrame[] = [];
 
