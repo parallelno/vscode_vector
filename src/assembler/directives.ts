@@ -10,6 +10,7 @@ import {
   parseTextLiteralToBytes
 } from './utils';
 import { evaluateExpression } from './expression';
+import { formatMacroCallStack } from './utils';
 import { argsAfterToken } from './common';
 
 export type DirectiveContext = {
@@ -179,6 +180,7 @@ export function handleErrorDirective(
   if (!errorMatch) return false;
 
   const originDesc = describeOrigin(origin, lineIndex, sourcePath);
+  const macroStack = formatMacroCallStack(origin);
   const argsText = (errorMatch[1] || '').trim();
   const parts = argsText.length ? splitTopLevelArgs(argsText) : [];
   const fragments: string[] = [];
@@ -220,7 +222,8 @@ export function handleErrorDirective(
 
   if (!failed) {
     const errorMessage = fragments.length ? fragments.join(' ') : '';
-    ctx.errors.push(`.error: ${errorMessage} at ${originDesc}`);
+    const stackSuffix = macroStack ? `${macroStack}` : '';
+    ctx.errors.push(`.error: ${errorMessage} at ${originDesc}${stackSuffix}`);
   }
 
   return true;

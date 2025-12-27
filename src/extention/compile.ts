@@ -24,16 +24,11 @@ export async function compileAsmSource(
 
   if (!writeRes.success)
   {
-    const summarizeError = (raw: string): string => {
-      const firstLine = raw.split(/\r?\n/)[0]?.trim() || raw.trim();
-      return firstLine.replace(/ at \d+.*$/, '').trim();
-    };
-
     if (writeRes.errors && writeRes.errors.length) {
       const summaries: string[] = [];
       const seen = new Set<string>();
       for (const e of writeRes.errors) {
-        const summary = summarizeError(typeof e === 'string' ? e : String(e));
+        const summary = (typeof e === 'string' ? e : String(e)).trim();
         if (!summary || seen.has(summary)) continue;
         seen.add(summary);
         summaries.push(summary);
