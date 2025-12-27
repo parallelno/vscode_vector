@@ -140,6 +140,16 @@ export function logOutput(
 	} catch (e) { /* ignore output channel errors */ }
 };
 
+export function sanitizeFileName(value: string, fallback: string): string
+{
+  const sanitized = value
+    .replace(/[\/\\?%*:|"<>]/g, '_')
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .replace(/(\.|\s)+$/g, '');
+
+  return sanitized.length > 0 ? sanitized.normalize('NFC') : fallback;
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // ANYTHING BELOW UNCHECKED YET
@@ -215,16 +225,6 @@ export function reportInvalidBreakpointLine()
 {
 	vscode.window.setStatusBarMessage(
     'Breakpoints can only target label or instruction lines.', 3000);
-};
-
-
-export function sanitizeFileName(value: string | undefined, fallback: string)
-: string
-{
-  const trimmed = (value || '').trim();
-  if (!trimmed) return fallback;
-  const safe = trimmed.replace(/[^A-Za-z0-9_-]+/g, '_');
-  return safe.length ? safe : fallback;
 };
 
 
