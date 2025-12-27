@@ -3,6 +3,7 @@ import {
   stripInlineComment,
   splitTopLevelArgs,
   substituteIdentifiers,
+  escapeRegExp,
   detectNormalLabelName,
   describeOrigin
 } from './utils';
@@ -225,27 +226,46 @@ function instantiateMacroCall(
   for (const entry of call.definition.body) {
     let text = entry.line;
     if (Object.keys(replacements).length) {
-      text = substituteIdentifiers(text, replacements);
+      text = substituteMacroParams(text, replacements);
     }
     if (call.definition.normalLabels.size) {
       text = substituteIdentifiers(text, labelReplacements);
     }
+    const macroScope = origin.macroScope ? `${origin.macroScope}::${call.scopeName}` : call.scopeName;
     out.push({
       line: text,
       origin: {
         file: entry.origin.file,
         line: entry.origin.line,
-        macroScope: call.scopeName,
+        macroScope,
         macroInstance: {
           name: call.definition.name,
           ordinal: call.ordinal,
           callerFile: origin.file,
-          callerLine: origin.line
+          callerLine: origin.line,
+          callerMacro: origin.macroInstance
         }
       }
     });
   }
   return out;
+}
+
+// Replace macro parameters while wrapping expressions used with < or >
+function substituteMacroParams(source: string, replacements: Record<string, string>): string {
+  let output = source;
+  for (const [token, value] of Object.entries(replacements)) {
+    const pattern = new RegExp(`(?:(<|>)[\t ]*)?\\b${escapeRegExp(token)}\\b`, 'g');
+    output = output.replace(pattern, (_match, prefix: string | undefined) => {
+      const trimmed = value.trim();
+      if (prefix) {
+        return `${prefix}(${trimmed})`;
+      }
+      const needsWrap = /[+\-*/%&|^<>\s]/.test(trimmed) && !(trimmed.startsWith('(') && trimmed.endsWith(')'));
+      return needsWrap ? `(${trimmed})` : trimmed;
+    });
+  }
+  return output;
 }
 
 export function expandMacroInvocations(

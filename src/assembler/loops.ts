@@ -1,6 +1,6 @@
 import { ExpressionEvalContext, LocalLabelScopeIndex, LoopExpansionResult, SourceOrigin } from './types';
 import { stripInlineComment, describeOrigin } from './utils';
-import { evaluateConditionExpression } from './expression';
+import { evaluateExpression } from './expression';
 
 const LOOP_MAX_ITERATIONS = 100000;
 
@@ -17,7 +17,7 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
     return describeOrigin(origins[idx], idx + 1, sourcePath);
   }
 
-  function evaluateExpression(expr: string, idx: number, strict: boolean): number | null {
+  function evalExpr(expr: string, idx: number): number | null {
     const ctx: ExpressionEvalContext = {
       labels: dummyLabels,
       consts: constState,
@@ -26,9 +26,15 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
       lineIndex: origins[idx]?.line ?? (idx + 1)
     };
     try {
-      return evaluateConditionExpression(expr, ctx, true);
+      return evaluateExpression(expr, ctx, true);
     } catch (err: any) {
-      if (strict) errors.push(`Failed to evaluate expression '${expr}' at ${describeLine(idx)}: ${err?.message || err}`);
+      const msg = err?.message || String(err);
+      // During loop expansion we may see forward references or symbols that are
+      // defined later (e.g., variables or labels). Ignore those undefined
+      // symbol errors here and let the main assembly pass report them if needed.
+      if (!/Undefined symbol/i.test(msg)) {
+        errors.push(`Failed to evaluate expression '${expr}' at ${describeLine(idx)}: ${msg}`);
+      }
       return null;
     }
   }
@@ -38,7 +44,7 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
     if (assignMatch) {
       const [, name, rhsRaw] = assignMatch;
       const rhs = rhsRaw.trim();
-      const val = evaluateExpression(rhs, idx, false);
+      const val = evalExpr(rhs, idx);
       if (val !== null && Number.isFinite(val)) constState.set(name, val);
       return;
     }
@@ -46,7 +52,7 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
     if (equMatch) {
       const [, name, rhsRaw] = equMatch;
       const rhs = rhsRaw.trim();
-      const val = evaluateExpression(rhs, idx, false);
+      const val = evalExpr(rhs, idx);
       if (val !== null && Number.isFinite(val)) constState.set(name, val);
       return;
     }
@@ -94,7 +100,7 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
         }
         let iterations = 0;
         if (expr.length) {
-          const evaluated = evaluateExpression(expr, i, true);
+          const evaluated = evalExpr(expr, i);
           if (evaluated !== null) {
             if (!Number.isFinite(evaluated)) errors.push(`.loop count at ${describeLine(i)} must be finite`);
             else {
@@ -102,7 +108,7 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
               if (truncated !== evaluated) {
                 errors.push(`.loop count at ${describeLine(i)} must be an integer (got ${evaluated})`);
               } else if (truncated < 0) {
-                errors.push(`.loop count at ${describeLine(i)} must be non-negative`);
+                errors.push(`.loop count at ${describeLine(i)} must be non-negative (got ${evaluated})`);
               } else if (truncated > LOOP_MAX_ITERATIONS) {
                 errors.push(`.loop count at ${describeLine(i)} exceeds max of ${LOOP_MAX_ITERATIONS}`);
               } else {

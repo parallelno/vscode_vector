@@ -1,5 +1,5 @@
 import { argsAfterToken } from './common';
-import { evaluateConditionExpression } from './expression';
+import { evaluateExpression } from './expression';
 import { ExpressionEvalContext, LocalLabelScopeIndex, SourceOrigin } from './types';
 
 export type AlignDirectiveEntry = { value: number };
@@ -54,7 +54,7 @@ export function handleAlignFirstPass(params: {
   const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex };
   let alignment = 0;
   try {
-    alignment = evaluateConditionExpression(exprText, ctx, true);
+    alignment = evaluateExpression(exprText, ctx, true);
   } catch (err: any) {
     errors.push(`Failed to evaluate .align at ${originDesc}: ${err?.message || err}`);
     return { handled: true, addr, pendingDirectiveLabel };

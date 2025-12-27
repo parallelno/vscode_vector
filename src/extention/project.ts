@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as ext_utils from './utils';
 import * as ext_types from './project_info';
-import { compileAsmSource } from './compile';
+import { compileAsmSource, updateBreakpointsInDebugFile } from './compile';
 import { reloadEmulatorBreakpointsFromFile } from '../emulatorUI';
 import * as ext_consts from './consts';
 import { collectIncludeFiles } from '../assembler/includes';
@@ -182,7 +182,8 @@ export async function compileProjectFile(
                                         project.absolute_asm_path!,
                                         contents,
                                         project.absolute_rom_path!,
-                                        project.absolute_debug_path!);
+                                        project.absolute_debug_path!,
+                                        project.absolute_path!);
   if (!success) return false;
 
   const reason = options.reason ? ` (${options.reason})` : '';
@@ -207,6 +208,42 @@ export async function compileProjectFile(
 ////////////////////////////////////////////////////////////////////////////////
 
 
+/**
+ * Checks if any assembly source files have been modified since the ROM file was last built.
+ * Returns true if any .asm file is newer than the ROM file, false otherwise.
+ */
+function haveAsmFilesChanged(
+  project: ext_types.ProjectInfo,
+  asmFiles: Set<string>)
+  : boolean
+{
+  if (!project.absolute_rom_path || !fs.existsSync(project.absolute_rom_path)) {
+    // ROM doesn't exist, so we need to compile
+    return true;
+  }
+
+  try {
+    const romStat = fs.statSync(project.absolute_rom_path);
+    const romMtime = romStat.mtimeMs;
+
+    // Check if any assembly file is newer than the ROM
+    for (const asmPath of asmFiles) {
+      if (fs.existsSync(asmPath)) {
+        const asmStat = fs.statSync(asmPath);
+        if (asmStat.mtimeMs > romMtime) {
+          return true;
+        }
+      }
+    }
+    return false;
+  } catch (err) {
+    // If we can't check, assume files changed to be safe
+    console.error('Error checking file timestamps:', err);
+    return true;
+  }
+}
+
+
 export async function compileProjectsForBreakpointChanges(
   devectorOutput: vscode.OutputChannel,
   asmPaths: Set<string>)
@@ -217,27 +254,48 @@ export async function compileProjectsForBreakpointChanges(
   const infos = await loadAllProjects(devectorOutput, workspaceRoot, { silent: true });
   if (!infos.length) return;
 
-  // compile only projects that own the affected asm paths
+  // Process only projects that own the affected asm paths
   for (const project of infos)
   {
-    let shouldCompile = false;
-    // collect all asm files of the project
+    let shouldProcess = false;
     const mainsm = project.absolute_asm_path;
-    if (mainsm && fs.existsSync(mainsm))
-    {
-      const source = fs.readFileSync(mainsm, 'utf8');
-      const asmFiles = collectIncludeFiles(source, mainsm);
-      asmFiles.add(mainsm);
-      // check if any affected asm path is in the project
-      for (const p of asmPaths) {
-        if (asmFiles.has(p)) {
-          shouldCompile = true;
-          break;
-        }
+    if (!mainsm || !fs.existsSync(mainsm)) continue;
+
+    const source = fs.readFileSync(mainsm, 'utf8');
+    const asmFiles = collectIncludeFiles(source, mainsm);
+    asmFiles.add(mainsm);
+    
+    // Check if any affected asm path is in the project
+    for (const p of asmPaths) {
+      if (asmFiles.has(p)) {
+        shouldProcess = true;
+        break;
       }
     }
 
-    if (!shouldCompile) continue;
-    await compileProjectFile(devectorOutput, project, { silent: true, reason: 'breakpoint change' });
+    if (!shouldProcess) continue;
+
+    // Check if assembly files have actually changed
+    const filesChanged = haveAsmFilesChanged(project, asmFiles);
+    
+    if (filesChanged) {
+      // Assembly files changed - do full compilation
+      await compileProjectFile(devectorOutput, project, { silent: true, reason: 'breakpoint change' });
+    } else {
+      // Only breakpoints changed - just update debug file
+      project.init_debug_path();
+      if (project.absolute_debug_path && fs.existsSync(project.absolute_debug_path)) {
+        await updateBreakpointsInDebugFile(
+          devectorOutput,
+          mainsm,
+          source,
+          project.absolute_debug_path
+        );
+        reloadEmulatorBreakpointsFromFile();
+      } else {
+        // Debug file doesn't exist, need full compilation
+        await compileProjectFile(devectorOutput, project, { silent: true, reason: 'breakpoint change' });
+      }
+    }
   }
 }

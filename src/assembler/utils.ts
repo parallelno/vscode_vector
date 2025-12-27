@@ -1,8 +1,150 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import { SourceOrigin, WordLiteralResult } from './types';
 
+// VS Code API is optional at runtime (CLI/tests). Attempt to load lazily.
+function tryGetWorkspaceRoot(): string | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const vscode = require('vscode');
+    return vscode.workspace?.workspaceFolders?.[0]?.uri?.fsPath;
+  } catch (_e) {
+    return undefined;
+  }
+}
+
+export function stripMultilineComments(source: string): string {
+  // Remove /* */ style multiline comments while respecting strings and character literals
+  let result = '';
+  let i = 0;
+  let inString = false;
+  let stringChar = '';
+  let inComment = false;
+  let inLineComment = false;
+
+  while (i < source.length) {
+    const ch = source[i];
+    const next = i + 1 < source.length ? source[i + 1] : '';
+
+    // Short-circuit if we're inside a line comment: copy until newline
+    if (inLineComment) {
+      result += ch;
+      if (ch === '\n') inLineComment = false;
+      i++;
+      continue;
+    }
+
+    // Toggle string/char literal state (respect escapes)
+    if (!inComment && (ch === '"' || ch === '\'')) {
+      let escaped = false;
+      let j = i - 1;
+      while (j >= 0 && source[j] === '\\') { escaped = !escaped; j--; }
+      if (!escaped) {
+        if (!inString) {
+          inString = true;
+          stringChar = ch;
+        } else if (ch === stringChar) {
+          inString = false;
+          stringChar = '';
+        }
+      }
+      result += ch;
+      i++;
+      continue;
+    }
+
+    if (inString) {
+      result += ch;
+      i++;
+      continue;
+    }
+
+    // Enter multiline comment
+    if (!inComment && ch === '/' && next === '*') {
+      inComment = true;
+      i += 2;
+      continue;
+    }
+
+    // Enter line comment (// or ;) to avoid mis-detecting quotes inside
+    if (!inComment && (ch === ';' || (ch === '/' && next === '/'))) {
+      inLineComment = true;
+      if (ch === '/' && next === '/') {
+        result += '//';
+        i += 2;
+      } else {
+        result += ch;
+        i += 1;
+      }
+      continue;
+    }
+
+    // Exit comment
+    if (inComment && ch === '*' && next === '/') {
+      inComment = false;
+      i += 2;
+      continue;
+    }
+
+    if (inComment) {
+      // Preserve newlines so line numbers remain aligned after stripping
+      if (ch === '\n') result += '\n';
+      i++;
+      continue;
+    }
+
+    // If not in comment, copy char
+    result += ch;
+    i++;
+  }
+
+  return result;
+}
+
 export function stripInlineComment(line: string): string {
-  return line.replace(/\/\/.*$|;.*$/, '');
+  let inString = false;
+  let stringChar = '';
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    const next = i + 1 < line.length ? line[i + 1] : '';
+
+    if (inString) {
+      if (ch === stringChar) {
+        // Count preceding backslashes to detect escaping
+        let backslashes = 0;
+        let j = i - 1;
+        while (j >= 0 && line[j] === '\\') { backslashes++; j--; }
+        if ((backslashes % 2) === 0) {
+          inString = false;
+          stringChar = '';
+        }
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === '\'') {
+      // Enter string/char literal if quote is not escaped
+      let backslashes = 0;
+      let j = i - 1;
+      while (j >= 0 && line[j] === '\\') { backslashes++; j--; }
+      if ((backslashes % 2) === 0) {
+        inString = true;
+        stringChar = ch;
+      }
+      continue;
+    }
+
+    if (ch === ';') {
+      return line.slice(0, i);
+    }
+
+    if (ch === '/' && next === '/') {
+      return line.slice(0, i);
+    }
+  }
+
+  return line;
 }
 
 export function escapeRegExp(value: string): string {
@@ -206,6 +348,25 @@ export function describeOrigin(origin?: SourceOrigin, fallbackLine?: number, sou
   return `${file}:${line}`;
 }
 
+export function formatMacroCallStack(origin?: SourceOrigin): string {
+  const entries: Array<{ name: string; ordinal: number; file?: string; line?: number }> = [];
+  let frame = origin?.macroInstance;
+  while (frame) {
+    entries.push({ name: frame.name, ordinal: frame.ordinal, file: frame.callerFile, line: frame.callerLine });
+    frame = frame.callerMacro;
+  }
+  if (!entries.length) return '';
+
+  const lines = entries.reverse().map((e) => {
+    const file = e.file ? path.resolve(e.file) : '<memory>';
+    const line = e.line ?? 0;
+    const uri = e.file ? 'file:///' + path.resolve(e.file).replace(/\\/g, '/') + ':' + line : '';
+    return `${e.name}#${e.ordinal} at ${file}:${line}${uri ? ` (${uri})` : ''}`;
+  });
+
+  return '\nMacro call stack:\n  ' + lines.join('\n  ');
+}
+
 export function detectNormalLabelName(line: string): string | null {
   const stripped = stripInlineComment(line);
   const match = stripped.match(/^\s*([@A-Za-z_][A-Za-z0-9_@.]*)\s*:/);
@@ -286,4 +447,77 @@ export function parseTextLiteralToBytes(part: string, encoding: TextEncodingType
   // Check if it's a single character in quotes (parseStringLiteral handles this)
   // If parseStringLiteral returned null, it's not a valid string/char literal
   return { error: `Invalid .text value '${trimmed}' - expected string or character literal` };
+}
+
+export function resolveIncludePath(
+  includedFile: string,
+  currentAsm?: string,
+  mainAsm?: string,
+  projectFile?: string
+): string | undefined
+{
+  // Keep a list of attempted paths so the caller can surface a useful error when none exist.
+  const attempted: string[] = [];
+
+  if (path.isAbsolute(includedFile)) {
+    return includedFile;
+  }
+
+  const tryResolve = (baseDir?: string): string | undefined => {
+    if (!baseDir) return undefined;
+    const candidate = path.resolve(baseDir, includedFile);
+    attempted.push(candidate);
+    return fs.existsSync(candidate) ? candidate : undefined;
+  };
+
+  const projectDir = projectFile ? path.dirname(projectFile) : undefined;
+
+  // 1) Relative to the current file
+  const currentDir = currentAsm ? path.dirname(currentAsm) : undefined;
+  const found = tryResolve(currentDir)
+    // 2) Relative to the main asm file directory
+    || tryResolve(mainAsm ? path.dirname(mainAsm) : undefined)
+    // 3) Relative to the project file directory (explicit)
+    || tryResolve(projectDir)
+    // 4) Relative to the VS Code workspace root when available
+    || tryResolve(tryGetWorkspaceRoot())
+    // 5) Relative to the current working directory
+    || tryResolve(process.cwd());
+
+  if (found) return found;
+
+  // Fall back to the last attempted path so the caller can include it in the error message.
+  return attempted.length ? attempted[attempted.length - 1] : undefined;
+}
+
+export function parseDwordLiteral(v: string): WordLiteralResult {
+  const text = v.trim();
+  if (!text.length) return { error: 'Missing .dword value' };
+
+  const negativeMatch = /^-([0-9]+)$/.exec(text);
+  if (negativeMatch) {
+    const magnitude = parseInt(negativeMatch[1], 10);
+    if (isNaN(magnitude)) return { error: `Invalid negative .dword value '${text}'` };
+    if (magnitude > 0x7fffffff) return { error: `Negative .dword value '${text}' exceeds 31-bit limit` };
+    const value = (-magnitude) >>> 0;
+    return { value };
+  }
+
+  let parsed: number | null = null;
+  if (/^0x[0-9a-fA-F]+$/.test(text)) parsed = parseInt(text.slice(2), 16);
+  else if (/^\$[0-9a-fA-F]+$/.test(text)) parsed = parseInt(text.slice(1), 16);
+  else if (/^[0-9]+$/.test(text)) parsed = parseInt(text, 10);
+  else if (/^b[01_]+$/i.test(text)) parsed = parseInt(text.slice(1).replace(/_/g, ''), 2);
+  else if (/^%[01_]+$/i.test(text)) parsed = parseInt(text.slice(1).replace(/_/g, ''), 2);
+
+  if (parsed === null || isNaN(parsed)) {
+    return { error: `Invalid .dword value '${text}'` };
+  }
+  if (parsed < 0) {
+    return { error: `.dword value '${text}' cannot be negative (only decimal negatives allowed)` };
+  }
+  if (parsed > 0xffffffff) {
+    return { error: `.dword value '${text}' exceeds 32-bit range` };
+  }
+  return { value: parsed >>> 0 };
 }

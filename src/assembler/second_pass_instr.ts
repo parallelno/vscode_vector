@@ -1,7 +1,8 @@
 import { ensureImmediateRange, InstructionContext, resolveAddressToken } from "./instructions";
 import { INSTR_SIZES } from "./first_pass_instr";
-import { ExpressionEvalContext } from "./types";
-import { evaluateConditionExpression } from "./expression";
+import { ExpressionEvalContext, SourceOrigin } from "./types";
+import { evaluateExpression } from "./expression";
+import { describeOrigin, formatMacroCallStack } from "./utils";
 
 export const INSTR_OPCODES: Record<string, number | Record<string, number | Record<string, number>>> = {
   'NOP': 0x00,
@@ -58,6 +59,7 @@ export const INSTR_OPCODES: Record<string, number | Record<string, number | Reco
 export function instructionEncoding(
   tokens: string[],
   srcLine: number,
+  origin: SourceOrigin | undefined,
   ctx: InstructionContext,
   out: number[]
 ): number
@@ -90,7 +92,8 @@ export function instructionEncoding(
     }
   }
   if (opcode === -1) {
-    ctx.errors.push(`Invalid instruction or operands at ${srcLine}`);
+    const stack = formatMacroCallStack(origin);
+    ctx.errors.push(`Invalid instruction or operands at ${describeOrigin(origin, srcLine)}${stack}`);
     return 0;
   }
   // Emit opcode
@@ -101,40 +104,46 @@ export function instructionEncoding(
 
   // Handle instructions with immediate data
   if (possible_imm_idx === -1) {
-    ctx.errors.push(`Missing immediate data at ${srcLine}`);
+    const stack = formatMacroCallStack(origin);
+    ctx.errors.push(`Missing immediate data at ${describeOrigin(origin, srcLine)}${stack}`);
     return 0;
   }
 
   // Combine remaining tokens for immediate data
   const rawVal = tokens.slice(possible_imm_idx).join(' ');
   if (!rawVal) {
-    ctx.errors.push(`Missing immediate data at ${srcLine}`);
+    const stack = formatMacroCallStack(origin);
+    ctx.errors.push(`Missing immediate data at ${describeOrigin(origin, srcLine)}${stack}`);
     return 0;
   }
 
   // Expression evaluation
+  const originLine = ctx.originLines ? ctx.originLines[srcLine - 1] : undefined;
   const exprCtx: ExpressionEvalContext = {
     labels: ctx.labels,
     consts: ctx.consts,
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
-    lineIndex: srcLine
+    lineIndex: srcLine,
+    originLine,
+    locationCounter: ctx.locationCounter
   };
   let full: number | null = null;
   try {
-    full = evaluateConditionExpression(rawVal, exprCtx, true);
+    full = evaluateExpression(rawVal, exprCtx, true);
   } catch (err: any) {
     // Fall through to error below
   }
 
   if (full === null) {
-    ctx.errors.push(`Unable to resolve immediate value '${rawVal}' at ${srcLine}`);
+    const stack = formatMacroCallStack(origin);
+    ctx.errors.push(`Unable to resolve immediate value '${rawVal}' at ${describeOrigin(origin, srcLine)}${stack}`);
     return 0;
   }
 
   const bits = instr_len === 3 ? 16 : 8;
   if (!ensureImmediateRange(
-    full, bits, `Immediate ${rawVal}`, first_token, srcLine, ctx.errors))
+    full, bits, `Immediate ${rawVal}`, first_token, srcLine, ctx.errors, origin))
   {
     return 0;
   }

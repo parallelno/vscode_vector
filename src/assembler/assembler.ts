@@ -9,18 +9,17 @@ import {
 import {
   stripInlineComment,
   parseNumberFull,
-  parseAddressToken,
-  regCodes,
   describeOrigin
 } from './utils';
 
-import { evaluateConditionExpression } from './expression';
+import { evaluateExpression } from './expression';
 import { prepareMacros, expandMacroInvocations } from './macro';
 import { expandLoopDirectives } from './loops';
+import { applyOptionalBlocks } from './optional';
 import { processIncludes } from './includes';
-import { registerLabel as registerLabelHelper, getScopeKey } from './labels';
+import { registerLabel as registerLabelHelper, getScopeKey, formatMacroScopedName, resolveScopedConst } from './labels';
 import { isAddressDirective, checkLabelOnDirective, tokenize } from './common';
-import { handleDB, handleDW, handleDS, DataContext } from './data';
+import { handleDB, handleDW, handleDD, handleStorage, DataContext } from './data';
 import {
   handleIfDirective,
   handleEndifDirective,
@@ -30,18 +29,15 @@ import {
   handleTextDirective,
   DirectiveContext
 } from './directives';
-import { handleIncbinFirstPass, handleIncbinSecondPass, IncbinContext } from './incbin';
+import { handleIncbinFirstPass,
+  handleIncbinSecondPass,
+  IncbinContext } from './incbin';
 import {
-  resolveAddressToken as resolveAddressTokenInstr,
-  encodeMVI,
-  encodeMOV,
-  encodeLXI,
-  encodeThreeByteAddress,
-  encodeImmediateOp,
-  encodeRegisterOp,
   InstructionContext
 } from './instructions';
-import { AssemblyEvalState, evaluateExpressionValue, processVariableAssignment } from './pass_helpers';
+import { AssemblyEvalState,
+  evaluateExpressionValue,
+  processVariableAssignment } from './pass_helpers';
 import { createAssembleAndWrite } from './assemble_write';
 import { AlignDirectiveEntry, handleAlignFirstPass, handleAlignSecondPass } from './align';
 import { handleOrgFirstPass, handleOrgSecondPass } from './org';
@@ -50,13 +46,14 @@ import { INSTR_OPCODES, instructionEncoding } from './second_pass_instr';
 
 export function assemble(
   source: string,
-  sourcePath?: string)
+  sourcePath?: string,
+  projectFile?: string)
   : AssembleResult
 {
   let expanded: { lines: string[]; origins: SourceOrigin[] };
 
   try {
-    expanded = processIncludes(source, sourcePath, sourcePath, 0);
+    expanded = processIncludes(source, sourcePath, sourcePath, projectFile, 0);
   } catch (err: any) {
     return { success: false, errors: [err.message] };
   }
@@ -73,11 +70,25 @@ export function assemble(
   if (loopExpanded.errors.length) {
     return { success: false, errors: loopExpanded.errors, origins: loopExpanded.origins };
   }
+  const optionalResult = applyOptionalBlocks(loopExpanded.lines, loopExpanded.origins);
+  if (optionalResult.errors.length) {
+    return { success: false, errors: optionalResult.errors, origins: optionalResult.origins };
+  }
 
-  const lines = loopExpanded.lines;
+  const lines = optionalResult.lines;
+  const origins = optionalResult.origins;
+  const originLines = origins.map((o) => o?.line);
   const labels = new Map<string, { addr: number; line: number; src?: string }>();
   const consts = new Map<string, number>();
   const constOrigins = new Map<string, { line: number; src?: string }>();
+  const pendingConsts: Array<{
+    name: string;
+    rhs: string;
+    line: number;
+    origin: SourceOrigin | undefined;
+    originDesc: string;
+    locationCounter?: number;
+    lastError?: string }> = [];
   // Track which identifiers are variables (can be reassigned)
   const variables = new Set<string>();
   // localsIndex: scopeKey -> (localName -> array of { key, line }) ordered by appearance
@@ -93,8 +104,6 @@ export function assemble(
   const errors: string[] = [];
   const warnings: string[] = [];
   const printMessages: PrintMessage[] = [];
-  const origins = loopExpanded.origins;
-
   const ifStack: IfFrame[] = [];
 
   // Directive and data helpers share these contexts to mutate shared state
@@ -117,15 +126,88 @@ export function assemble(
     scopes,
     errors
   };
-  const incbinCtx: IncbinContext = {
-    labels,
-    consts,
-    localsIndex,
-    scopes,
-    errors
-  };
+  const incbinCtx: IncbinContext = { labels, consts, localsIndex, scopes, errors, projectFile };
 
-  const evalState: AssemblyEvalState = { labels, consts, localsIndex, scopes };
+  const evalState: AssemblyEvalState = { labels, consts, localsIndex, scopes, originLines };
+
+  function allocateLocalKey(name: string, origin: SourceOrigin | undefined, fallbackLine: number, scopeKey: string): string {
+    const localName = name.slice(1);
+    let fileMap = localsIndex.get(scopeKey);
+    if (!fileMap) {
+      fileMap = new Map();
+      localsIndex.set(scopeKey, fileMap);
+    }
+
+    let arr = fileMap.get(localName);
+    if (!arr) {
+      arr = [];
+      fileMap.set(localName, arr);
+    }
+
+    const gid = globalLocalCounters.get(localName) || 0;
+    globalLocalCounters.set(localName, gid + 1);
+    const key = '@' + localName + '_' + gid;
+    arr.push({ key, line: origin ? origin.line : fallbackLine });
+    return key;
+  }
+
+  function tryEvaluateConstant(rhs: string, lineIndex: number, origin?: SourceOrigin, locationCounter?: number): { value: number | null; error?: string } {
+    let val: number | null = parseNumberFull(rhs);
+    if (val === null) {
+      const scopeKey = lineIndex > 0 && lineIndex - 1 < scopes.length ? scopes[lineIndex - 1] : undefined;
+      const scoped = resolveScopedConst(rhs, consts, scopeKey, origin?.macroScope);
+      if (scoped !== undefined) {
+        val = scoped;
+      } else if (labels.has(rhs)) {
+        val = labels.get(rhs)!.addr;
+      }
+    }
+
+    if (val === null) {
+      const ctx: ExpressionEvalContext = {
+        labels,
+        consts,
+        localsIndex,
+        scopes,
+        lineIndex,
+        macroScope: origin?.macroScope,
+        locationCounter
+      };
+      try {
+        val = evaluateExpression(rhs, ctx, true);
+      } catch (err: any) {
+        return { value: null, error: err?.message || String(err) };
+      }
+    }
+
+    return { value: val };
+  }
+
+  function resolvePendingConstants(): void {
+    let madeProgress = true;
+    while (pendingConsts.length && madeProgress) {
+      madeProgress = false;
+      for (let idx = pendingConsts.length - 1; idx >= 0; idx--) {
+        const pending = pendingConsts[idx];
+        const result = tryEvaluateConstant(pending.rhs, pending.line, pending.origin, pending.locationCounter);
+        if (result.value !== null) {
+          consts.set(pending.name, result.value);
+          constOrigins.set(pending.name, { line: pending.line, src: pending.origin?.file || sourcePath });
+          pendingConsts.splice(idx, 1);
+          madeProgress = true;
+        } else {
+          pending.lastError = result.error;
+        }
+      }
+    }
+
+    if (pendingConsts.length) {
+      for (const pending of pendingConsts) {
+        const detail = pending.lastError ? `: ${pending.lastError}` : '';
+        errors.push(`Failed to resolve constant '${pending.name}' at ${pending.originDesc}${detail} (expression: ${pending.rhs})`);
+      }
+    }
+  }
 
   // Helper to register a label using the imported function
   function registerLabel(
@@ -142,6 +224,10 @@ export function assemble(
     return getScopeKey(orig, sourcePath, directiveCounter);
   }
 
+  function scopedConstName(name: string, origin: SourceOrigin | undefined): string {
+    return formatMacroScopedName(name, origin?.macroScope);
+  }
+
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -154,6 +240,12 @@ export function assemble(
     const raw = lines[i];
     const line = stripInlineComment(raw).trim();
     if (!line) continue;
+
+    directiveCtx.locationCounter = addr;
+    dataCtx.locationCounter = addr;
+    incbinCtx.locationCounter = addr;
+    directiveCtx.currentMacroScope = origins[i]?.macroScope;
+    directiveCtx.currentOriginLine = origins[i]?.line;
 
     // Update directive counter and scope key when file changes
     if (i > 0) {
@@ -186,11 +278,6 @@ export function assemble(
       errors.push(`Labels are not allowed on .error directives at ${originDesc}`);
       continue;
     }
-    const labelVarMatch = line.match(/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:\s*[A-Za-z_][A-Za-z0-9_]*\s+\.var\b/i);
-    if (labelVarMatch) {
-      errors.push(`Labels are not allowed on .var directives at ${originDesc}`);
-      continue;
-    }
 
     // Handle .endif directive
     if (handleEndifDirective(line, origins[i], i + 1, sourcePath, ifStack, directiveCtx)) {
@@ -213,35 +300,34 @@ export function assemble(
       continue;
     }
 
-    // .var directive: "NAME .var InitialValue"
-    const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+\.var\b(.*)$/i);
+    if (/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:\s*[A-Za-z_][A-Za-z0-9_]*\s+\.var\b/i.test(line)) {
+      errors.push(`Labels are not allowed on .var directives at ${originDesc}`);
+      continue;
+    }
+
+    // .var directive: "NAME .var InitialValue" (label optional)
+    const varMatch = line.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:?[\t ]+\.var\b(.*)$/i);
     if (varMatch) {
-      const name = varMatch[1];
+      const rawName = varMatch[1];
       const rhs = (varMatch[2] || '').trim();
       if (!rhs.length) {
-        errors.push(`Missing initial value for .var ${name} at ${i + 1}`);
+        errors.push(`Missing initial value for .var ${rawName} at ${i + 1}`);
         continue;
       }
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
-      }
-      // If still null, try evaluating as expression
-      if (val === null) {
-        const result = evaluateExpressionValue(rhs, i + 1, `Bad initial value '${rhs}' for .var ${name}`, evalState);
-        val = result.value;
-        if (result.error) {
-          errors.push(result.error);
-          val = null;
-        }
-      }
-      if (val === null) {
-        errors.push(`Bad initial value '${rhs}' for .var ${name} at ${i + 1}`);
+
+      const isLocal = rawName.startsWith('@');
+      const scopeKey = scopes[i];
+      const storeName = isLocal ? allocateLocalKey(rawName, origins[i], i + 1, scopeKey) : scopedConstName(rawName, origins[i]);
+
+      const result = tryEvaluateConstant(rhs, i + 1, origins[i], addr);
+      if (result.value === null) {
+        const detail = result.error ? `: ${result.error}` : '';
+        errors.push(`Bad initial value '${rhs}' for .var ${rawName} at ${originDesc}${detail}`);
       } else {
-        consts.set(name, val);
-        constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
-        variables.add(name); // Mark this identifier as a variable
+        consts.set(storeName, result.value);
+        constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
+        variables.add(rawName);
+        variables.add(storeName); // Track scoped name to avoid reassignment warnings
       }
       continue;
     }
@@ -254,104 +340,83 @@ export function assemble(
 
     // simple constant / EQU handling: "NAME = expr" or "NAME EQU expr"
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
-      const name = tokens[0];
+      const rawName = tokens[0].endsWith(':') ? tokens[0].slice(0, -1) : tokens[0];
       // Skip variable assignments in first pass (they'll be processed in second pass)
-      if (variables.has(name)) {
+      if (variables.has(rawName)) {
         continue;
       }
       const rhs = tokens.slice(2).join(' ').trim();
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
+
+      const isLocal = rawName.startsWith('@');
+      const scopeKey = scopes[i];
+      const storeName = isLocal ? allocateLocalKey(rawName, origins[i], i + 1, scopeKey) : scopedConstName(rawName, origins[i]);
+
+      // Disallow reassignment for globals before attempting resolution
+      if (!isLocal && consts.has(storeName) && !variables.has(storeName)) {
+        errors.push(`Cannot reassign constant '${rawName}' at ${i + 1} (use .var to create a variable instead)`);
+        continue;
       }
-      // If still null, try evaluating as expression
-      if (val === null) {
-        const result = evaluateExpressionValue(rhs, i + 1, `Bad constant value '${rhs}' for ${name}`, evalState);
-        val = result.value;
-        if (result.error) {
-          errors.push(result.error);
-          val = null;
-        }
-      }
-      if (val === null) {
-        errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
+
+      const result = tryEvaluateConstant(rhs, i + 1, origins[i], addr);
+      if (result.value !== null) {
+        consts.set(storeName, result.value);
+        constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
       } else {
-        // Check if this is a reassignment attempt
-        if (consts.has(name) && !variables.has(name)) {
-          errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
-        } else {
-          consts.set(name, val);
-          constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
-        }
+        pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc, locationCounter: addr });
       }
       continue;
     }
-    const assignMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
+    const assignMatch = line.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:?\s*=\s*(.+)$/);
     if (assignMatch) {
-      const name = assignMatch[1];
+      const rawName = assignMatch[1];
       // Skip variable assignments in first pass
-      if (variables.has(name)) {
+      if (variables.has(rawName)) {
         continue;
       }
+
+      const isLocal = rawName.startsWith('@');
+      const scopeKey = scopes[i];
+      const storeName = isLocal ? allocateLocalKey(rawName, origins[i], i + 1, scopeKey) : scopedConstName(rawName, origins[i]);
+
+      if (!isLocal && consts.has(storeName) && !variables.has(storeName)) {
+        errors.push(`Cannot reassign constant '${rawName}' at ${i + 1} (use .var to create a variable instead)`);
+        continue;
+      }
+
       const rhs = assignMatch[2].trim();
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
-      }
-      // If still null, try evaluating as expression
-      if (val === null) {
-        const result = evaluateExpressionValue(rhs, i + 1, `Bad constant value '${rhs}' for ${name}`, evalState);
-        val = result.value;
-        if (result.error) {
-          errors.push(result.error);
-          val = null;
-        }
-      }
-      if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
-      else {
-        // Check if this is a reassignment attempt
-        if (consts.has(name) && !variables.has(name)) {
-          errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
-        } else {
-          consts.set(name, val);
-          constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
-        }
+      const result = tryEvaluateConstant(rhs, i + 1, origins[i], addr);
+      if (result.value !== null) {
+        consts.set(storeName, result.value);
+        constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
+      } else {
+        pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc, locationCounter: addr });
       }
       continue;
     }
-    const equMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\s+(.+)$/i);
+    const equMatch = line.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:?\s+EQU\s+(.+)$/i);
     if (equMatch) {
-      const name = equMatch[1];
+      const rawName = equMatch[1];
       // Skip variable assignments in first pass
-      if (variables.has(name)) {
+      if (variables.has(rawName)) {
         continue;
       }
+
+      const isLocal = rawName.startsWith('@');
+      const scopeKey = scopes[i];
+      const storeName = isLocal ? allocateLocalKey(rawName, origins[i], i + 1, scopeKey) : scopedConstName(rawName, origins[i]);
+
+      if (!isLocal && consts.has(storeName) && !variables.has(storeName)) {
+        errors.push(`Cannot reassign constant '${rawName}' at ${i + 1} (use .var to create a variable instead)`);
+        continue;
+      }
+
       const rhs = equMatch[2].trim();
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
-      }
-      // If still null, try evaluating as expression
-      if (val === null) {
-        const result = evaluateExpressionValue(rhs, i + 1, `Bad constant value '${rhs}' for ${name}`, evalState);
-        val = result.value;
-        if (result.error) {
-          errors.push(result.error);
-          val = null;
-        }
-      }
-      if (val === null) errors.push(`Bad constant value '${rhs}' for ${name} at ${i + 1}`);
-      else {
-        // Check if this is a reassignment attempt
-        if (consts.has(name) && !variables.has(name)) {
-          errors.push(`Cannot reassign constant '${name}' at ${i + 1} (use .var to create a variable instead)`);
-        } else {
-          consts.set(name, val);
-          constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
-        }
+      const result = tryEvaluateConstant(rhs, i + 1, origins[i], addr);
+      if (result.value !== null) {
+        consts.set(storeName, result.value);
+        constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
+      } else {
+        pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc, locationCounter: addr });
       }
       continue;
     }
@@ -379,17 +444,23 @@ export function assemble(
     const op = tokens[0].toUpperCase();
 
     if (op === 'DB' || op === '.BYTE') {
-      addr += handleDB(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx);
+      addr += handleDB(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx, undefined, { defer: true });
       continue;
     }
 
     if (op === 'DW' || op === '.WORD') {
-      addr += handleDW(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx);
+      addr += handleDW(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx, undefined, { defer: true });
       continue;
     }
 
-    if (op === 'DS') {
-      addr += handleDS(line, tokens, tokenOffsets, i + 1, dataCtx);
+    if (op === 'DD' || op === '.DWORD') {
+      addr += handleDD(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx, undefined, { defer: true });
+      continue;
+    }
+
+    if (op === '.STORAGE' || op === '.DS') {
+      const { size } = handleStorage(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx);
+      addr += size;
       continue;
     }
 
@@ -464,8 +535,9 @@ export function assemble(
       continue;
     }
 
-    // unknown -> error
-    errors.push(`Unknown or unsupported opcode '${op}' at line ${i + 1}`);
+    // unknown -> error with source context
+    const sourceLine = (lines[i] || '').trim();
+    errors.push(`Unknown or unsupported opcode '${op}' at ${describeOrigin(origins[i], i + 1, sourcePath)}: ${sourceLine}`);
   }
 
   // Check for any unclosed .if directives and report errors
@@ -475,6 +547,9 @@ export function assemble(
       errors.push(`Missing .endif for .if at ${describeOrigin(frame.origin, frame.lineIndex, sourcePath)}`);
     }
   }
+
+  // Resolve any constants that referenced yet-to-be-defined symbols during the first pass
+  resolvePendingConstants();
 
   if (errors.length) return { success: false, errors, origins };
 
@@ -504,8 +579,8 @@ export function assemble(
     scopes
   };
   const dataCtxSecond: DataContext = { labels, consts, localsIndex, scopes, errors };
-  const incbinCtxSecond: IncbinContext = { labels, consts, localsIndex, scopes, errors };
-  const instrCtx: InstructionContext = { labels, consts, localsIndex, scopes, errors };
+  const incbinCtxSecond: IncbinContext = { labels, consts, localsIndex, scopes, errors, projectFile };
+  const instrCtx: InstructionContext = { labels, consts, localsIndex, scopes, errors, originLines };
 
   const ifStackSecond: IfFrame[] = [];
 
@@ -514,6 +589,13 @@ export function assemble(
     const srcLine = i + 1;
     const line = stripInlineComment(raw).trim();
     if (!line) continue;
+
+    directiveCtxSecond.locationCounter = addr;
+    dataCtxSecond.locationCounter = addr;
+    incbinCtxSecond.locationCounter = addr;
+    instrCtx.locationCounter = addr;
+    directiveCtxSecond.currentMacroScope = origins[i]?.macroScope;
+    directiveCtxSecond.currentOriginLine = origins[i]?.line;
 
     const originDesc = describeOrigin(origins[i], srcLine, sourcePath);
 
@@ -561,17 +643,26 @@ export function assemble(
         ifStackSecond.push({ effective: false, suppressed: !parentActive, origin: origins[i], lineIndex: srcLine });
         continue;
       }
-      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+      const ctx: ExpressionEvalContext = {
+        labels,
+        consts,
+        localsIndex,
+        scopes,
+        lineIndex: srcLine,
+        locationCounter: addr,
+        macroScope: origins[i]?.macroScope,
+        originLine: origins[i]?.line
+      };
       let conditionResult = false;
       if (!parentActive) {
         try {
-          evaluateConditionExpression(expr, ctx, false);
+          evaluateExpression(expr, ctx, false);
         } catch (err: any) {
           errors.push(`Failed to parse .if expression at ${originDesc}: ${err?.message || err}`);
         }
       } else {
         try {
-          const value = evaluateConditionExpression(expr, ctx, true);
+          const value = evaluateExpression(expr, ctx, true);
           conditionResult = value !== 0;
         } catch (err: any) {
           errors.push(`Failed to evaluate .if at ${originDesc}: ${err?.message || err}`);
@@ -599,15 +690,17 @@ export function assemble(
     if (/^[A-Za-z_][A-Za-z0-9_]*:$/.test(line)) continue; // label only
 
     // Skip .var directive in second pass (already processed in first pass)
-    if (/^[A-Za-z_][A-Za-z0-9_]*\s+\.var\b/i.test(line)) {
+    if (/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s+\.var\b/i.test(line)) {
       continue;
     }
 
     const tokenizedSecond = tokenize(line);
     const tokens = tokenizedSecond.tokens;
     const tokenOffsets = tokenizedSecond.offsets;
+    let leadingLabel: string | null = null;
     if (!tokens.length) continue;
     if (tokens[0].endsWith(':')) {
+      leadingLabel = tokens[0].slice(0, -1);
       tokens.shift();
       tokenOffsets.shift();
       if (!tokens.length) { map[srcLine] = addr; continue; }
@@ -616,28 +709,38 @@ export function assemble(
       tokenOffsets.shift();
     }
 
+    if (leadingLabel && tokens.length >= 2 && tokens[1].toUpperCase() === '.VAR') {
+      errors.push(`Labels are not allowed on .var directives at ${originDesc}`);
+      continue;
+    }
+
     map[srcLine] = addr;
     const lineStartAddr = addr;
 
     // Process variable assignments in second pass, but skip constant assignments
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
-      const name = tokens[0];
+      const name = leadingLabel ?? tokens[0];
       if (variables.has(name)) {
-        // This is a variable assignment - process it
         const rhs = tokens.slice(2).join(' ').trim();
-        processVariableAssignment(name, rhs, srcLine, originDesc, evalState, errors);
+        processVariableAssignment(name, rhs, srcLine, originDesc, evalState, errors, lineStartAddr);
       }
-      // Skip in second pass (constants were already processed in first pass)
       continue;
     }
-    if (/^[A-Za-z_][A-Za-z0-9_]*\s*=/.test(line) || /^[A-Za-z_][A-Za-z0-9_]*\s+EQU\b/i.test(line)) {
-      // Check if this is a variable assignment
-      const assignMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|EQU)\s*(.+)$/i);
+    if (leadingLabel && tokens.length >= 1 && (tokens[0] === '=' || tokens[0].toUpperCase() === 'EQU')) {
+      const name = leadingLabel;
+      if (variables.has(name)) {
+        const rhs = tokens.slice(1).join(' ').trim();
+        processVariableAssignment(name, rhs, srcLine, originDesc, evalState, errors, lineStartAddr);
+      }
+      continue;
+    }
+    if (/^[A-Za-z_][A-Za-z0-9_]*\s*:?\s*=/.test(line) || /^[A-Za-z_][A-Za-z0-9_]*\s*:?\s+EQU\b/i.test(line)) {
+      const assignMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:?\s*(?:=|EQU)\s*(.+)$/i);
       if (assignMatch) {
         const name = assignMatch[1];
         if (variables.has(name)) {
           const rhs = assignMatch[2].trim();
-          processVariableAssignment(name, rhs, srcLine, originDesc, evalState, errors);
+          processVariableAssignment(name, rhs, srcLine, originDesc, evalState, errors, lineStartAddr);
         }
       }
       continue;
@@ -663,9 +766,21 @@ export function assemble(
       continue;
     }
 
-    if (op === 'DS') {
-      const emitted = handleDS(line, tokens, tokenOffsets, srcLine, dataCtxSecond);
+    if (op === 'DD' || op === '.DWORD') {
+      const emitted = handleDD(line, tokens, tokenOffsets, srcLine, origins[i], sourcePath, dataCtxSecond, out);
+      if (emitted > 0) {
+        dataLineSpans[i] = { start: lineStartAddr, byteLength: emitted, unitBytes: 4 };
+      }
       addr += emitted;
+      continue;
+    }
+
+    if (op === '.STORAGE' || op === '.DS') {
+      const { size, filled } = handleStorage(line, tokens, tokenOffsets, srcLine, origins[i], sourcePath, dataCtxSecond, out);
+      if (filled && size > 0) {
+        dataLineSpans[i] = { start: lineStartAddr, byteLength: size, unitBytes: 1 };
+      }
+      addr += size;
       continue;
     }
 
@@ -681,6 +796,7 @@ export function assemble(
         lineIndex: srcLine,
         origins,
         sourcePath,
+        scopes,
         map
       });
       addr = result.addr;
@@ -723,7 +839,7 @@ export function assemble(
 
     // Instruction encoding
     if (INSTR_OPCODES.hasOwnProperty(op) === true) {
-      const emitted = instructionEncoding(tokens, srcLine, instrCtx, out);
+      const emitted = instructionEncoding(tokens, srcLine, origins[i], instrCtx, out);
       addr += emitted;
       continue;
     }
@@ -767,5 +883,11 @@ export function assemble(
     origins };
 }
 
-// convenience when using from extension
+
+// convenience when using from extension (no bound project file)
 export const assembleAndWrite = createAssembleAndWrite(assemble);
+
+// helper to bind a specific project file for include resolution
+export function assembleAndWriteWithProject(projectFile?: string) {
+  return createAssembleAndWrite(assemble, projectFile);
+}

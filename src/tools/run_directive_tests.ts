@@ -218,12 +218,15 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
-        name: 'DS reserves address space without emitting bytes',
-        sourceFile: 'ds_basic.asm',
+        name: '.storage reserves space and optionally fills it',
+        sourceFile: 'storage_basic.asm',
         expect: {
-            bytes: [0x99],
+            bytes: [0x7E, 0x7E, 0x7E, 0xAA],
             labels: {
-                after_ds: 0x0014
+                uninit: 0x0010,
+                after_uninit: 0x0014,
+                init: 0x0014,
+                after_init: 0x0017
             }
         }
     },
@@ -234,6 +237,69 @@ const tests: DirectiveTestCase[] = [
             bytes: [0xFF, 0x1A, 0xA1, 0x0C, 0x34, 0x12, 0xEE],
             labels: {
                 literal_block: 0x0010
+            }
+        }
+    },
+    {
+        name: '.dword emits 32-bit little-endian values and expressions',
+        sourceFile: 'dword_basic.asm',
+        expect: {
+            bytes: [
+                0x78, 0x56, 0x34, 0x12,
+                0x22, 0x00, 0x00, 0x01,
+                0xFF, 0xFF, 0xFF, 0xFF,
+                0x00
+            ],
+            labels: {
+                start: 0x1000,
+                after: 0x100C
+            },
+            consts: {
+                CONST_BASE: 0x01000000
+            },
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Constants allow label-style syntax with colon',
+        sourceFile: 'const_colon_equ.asm',
+        expect: {
+            bytes: [0x09]
+        }
+    },
+    {
+        name: 'Constants allow forward references',
+        sourceFile: 'const_forward.asm',
+        expect: {
+            bytes: [0x0E],
+            consts: {
+                BASENAME_LEN: 8,
+                BYTE_LEN: 1,
+                EXT_LEN: 3,
+                WORD_LEN: 2,
+                OS_FILENAME_LEN_MAX: 14
+            }
+        }
+    },
+    {
+        name: 'Location counter resolves in constants and data expressions',
+        sourceFile: 'const_location_counter.asm',
+        expect: {
+            bytes: [0x01, 0x01, 0x02, 0x01, 0x3E, 0x10],
+            consts: {
+                mvi_imm_addr: 0x0101
+            }
+        }
+    },
+    {
+        name: 'Local constants scope like local labels',
+        sourceFile: 'const_local_scope.asm',
+        expect: {
+            bytes: [0x00, 0x40, 0x00, 0x80],
+            consts: {
+                CONST1: 0x2000,
+                '@data_end_0': 0x4000,
+                '@data_end_1': 0x8000
             }
         }
     },
@@ -269,11 +335,32 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
+        name: 'Macro local labels resolve per invocation',
+        sourceFile: 'macro_local_labels.asm',
+        expect: {
+            bytes: [0x01, 0xC3, 0x00, 0x00, 0x02, 0xC3, 0x04, 0x00],
+            labels: {
+                '@loop_0': 0x0000,
+                '@loop_1': 0x0004
+            }
+        }
+    },
+    {
         name: 'Loop mismatches are caught inside macro bodies',
         sourceFile: 'macro_loop_missing_endloop.asm',
         expect: {
             success: false,
             errorsContains: ['Missing .endloop']
+        }
+    },
+    {
+        name: 'Macro constants stay scoped per invocation',
+        sourceFile: 'macro_const_scope.asm',
+        expect: {
+            bytes: [0x01, 0x05, 0x09],
+            consts: {
+                C: 9
+            }
         }
     },
     {
@@ -373,8 +460,8 @@ const tests: DirectiveTestCase[] = [
             // Address 515 = 0x203
             // start: DB >CONST1  -> high byte of 0xF00 = 0x0F
             // mvi a, >start     -> opcode 0x3E (MVI A), high byte of 515 = 0x02
-            // db <0x1234        -> low byte of 0x1234 = 0x34
-            // db >0x1234        -> high byte of 0x1234 = 0x12
+            // .db <0x1234        -> low byte of 0x1234 = 0x34
+            // .db >0x1234        -> high byte of 0x1234 = 0x12
             bytes: [0x0F, 0x3E, 0x02, 0x34, 0x12],
             labels: {
                 start: 515
@@ -390,7 +477,7 @@ const tests: DirectiveTestCase[] = [
         name: 'Unary and binary < > operators work together in expressions',
         sourceFile: 'unary_and_binary_operators.asm',
         expect: {
-            // db <VALUE = 0x34, db >VALUE = 0x12
+            // .db <VALUE = 0x34, .db >VALUE = 0x12
             // .if 5 > 3 -> true, emit 0xAA
             // .if 3 < 5 -> true, emit 0xBB
             // .if 3 > 5 -> false, skip 0xCC
@@ -528,6 +615,62 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
+        name: 'Binary literals with relational and shift operators',
+        sourceFile: 'binary_shift_relational.asm',
+        expect: {
+            bytes: [0x01, 0x00, 0x00, 0x09, 0x90, 0x00],
+            consts: {
+                CONST1: 0x03
+            },
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Division truncates to integer',
+        sourceFile: 'division_integer.asm',
+        expect: {
+            bytes: [0x02, 0xFE, 0x02, 0x00],
+            consts: {
+                CONST1: 2
+            },
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Modulo operator emits integer remainder',
+        sourceFile: 'modulo_expression.asm',
+        expect: {
+            bytes: [0x01, 0x02, 0x34, 0x00, 0x05],
+            consts: {
+                VAL: 1
+            },
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Binary literals allowed in constant expressions',
+        sourceFile: 'binary_const_expression.asm',
+        expect: {
+            bytes: [0xFA],
+            consts: {
+                MASK: 0xF0,
+                CONST: 0xFA
+            },
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Binary literals allowed in .var initialization',
+        sourceFile: 'binary_var_expression.asm',
+        expect: {
+            bytes: [0x3F, 0x4F],
+            consts: {
+                Value: 0x4F
+            },
+            noWarnings: true
+        }
+    },
+    {
         name: '.var creates a variable with initial value',
         sourceFile: 'var_basic.asm',
         expect: {
@@ -622,6 +765,113 @@ const tests: DirectiveTestCase[] = [
                 after_bin: 0x0304,
                 final_marker: 0x0305
             }
+        }
+    },
+    {
+        name: 'Inline comment markers ignored inside strings',
+        sourceFile: 'comment_inline_strings.asm',
+        expect: {
+            // .text "http://x" = 8 bytes
+            // .text "semi;colon" = 10 bytes
+            // .text "// not comment" = 14 bytes
+            // .db 0xAA
+            bytes: [
+                0x68, 0x74, 0x74, 0x70, 0x3A, 0x2F, 0x2F, 0x78,
+                0x73, 0x65, 0x6D, 0x69, 0x3B, 0x63, 0x6F, 0x6C, 0x6F, 0x6E,
+                0x2F, 0x2F, 0x20, 0x6E, 0x6F, 0x74, 0x20, 0x63, 0x6F, 0x6D, 0x6D, 0x65, 0x6E, 0x74,
+                0xAA
+            ],
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Multiline comments /* */ are stripped correctly',
+        sourceFile: 'comment_multiline_basic.asm',
+        expect: {
+            bytes: [0x01, 0x02, 0x03, 0x04],
+            labels: {
+                start: 0x0100
+            },
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Multiline comments work with instructions',
+        sourceFile: 'comment_multiline_code.asm',
+        expect: {
+            // mvi a, 0x10 = 0x3E, 0x10
+            // mvi b, 0x20 = 0x06, 0x20
+            // mvi c, 0x30 = 0x0E, 0x30
+            // .db 0xAA, 0xBB
+            bytes: [0x3E, 0x10, 0x06, 0x20, 0x0E, 0x30, 0xAA, 0xBB],
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Multiline comments handle edge cases',
+        sourceFile: 'comment_multiline_edge_cases.asm',
+        expect: {
+            // .db 0x01, 0x02
+            // mvi a, 0x03 = 0x3E, 0x03
+            // mvi b, 0x04 = 0x06, 0x04
+            // .db 0x05, 0x06
+            bytes: [0x01, 0x02, 0x3E, 0x03, 0x06, 0x04, 0x05, 0x06],
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Multiline comments respect string literals',
+        sourceFile: 'comment_multiline_strings.asm',
+        expect: {
+            // .text "This /* is not a comment */" = 27 bytes
+            // .text "Another string" = 14 bytes
+            // .db 0x01, 0x02
+            // .text '*', '/' = 2 bytes
+            // .db 0x03
+            bytes: [
+                0x54, 0x68, 0x69, 0x73, 0x20, 0x2F, 0x2A, 0x20,  // "This /* "
+                0x69, 0x73, 0x20, 0x6E, 0x6F, 0x74, 0x20, 0x61,  // "is not a"
+                0x20, 0x63, 0x6F, 0x6D, 0x6D, 0x65, 0x6E, 0x74,  // " comment"
+                0x20, 0x2A, 0x2F,                                // " */"
+                0x41, 0x6E, 0x6F, 0x74, 0x68, 0x65, 0x72, 0x20,  // "Another "
+                0x73, 0x74, 0x72, 0x69, 0x6E, 0x67,              // "string"
+                0x01, 0x02,                                      // .db 0x01, 0x02
+                0x2A, 0x2F,                                      // '*', '/'
+                0x03                                             // .db 0x03
+            ],
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Multiline comments handle escaped quotes correctly',
+        sourceFile: 'comment_multiline_escapes.asm',
+        expect: {
+            // .text "String with \" escaped quote" = 28 bytes (includes backslash and quote)
+            // .text 'Char with \' escaped quote' = 26 bytes
+            // .db 0x01
+            // .text "Path: C:\\" = 10 bytes (C:\ and final backslash)
+            // .db 0x02
+            // .text "Backslash \\ and quote" = 21 bytes
+            // .db 0x03
+            bytes: [
+                0x53, 0x74, 0x72, 0x69, 0x6E, 0x67, 0x20, 0x77,  // "String w"
+                0x69, 0x74, 0x68, 0x20, 0x22, 0x20, 0x65, 0x73,  // "ith \" es"
+                0x63, 0x61, 0x70, 0x65, 0x64, 0x20, 0x71, 0x75,  // "caped qu"
+                0x6F, 0x74, 0x65,                                // "ote"
+                0x43, 0x68, 0x61, 0x72, 0x20, 0x77, 0x69, 0x74,  // "Char wit"
+                0x68, 0x20, 0x27, 0x20, 0x65, 0x73, 0x63, 0x61,  // "h ' esca"
+                0x70, 0x65, 0x64, 0x20, 0x71, 0x75, 0x6F, 0x74,  // "ped quot"
+                0x65,                                            // "e"
+                0x01,                                            // .db 0x01
+                0x50, 0x61, 0x74, 0x68, 0x3A, 0x20, 0x43, 0x3A,  // "Path: C:"
+                0x5C,                                            // "\"
+                0x02,                                            // .db 0x02
+                0x42, 0x61, 0x63, 0x6B, 0x73, 0x6C, 0x61, 0x73,  // "Backslas"
+                0x68, 0x20, 0x5C, 0x20, 0x61, 0x6E, 0x64, 0x20,  // "h \ and "
+                0x71, 0x75, 0x6F, 0x74, 0x65,                    // "quote"
+                0x03                                             // .db 0x03
+            ],
+            noWarnings: true
         }
     }
 ];

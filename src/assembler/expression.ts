@@ -1,9 +1,11 @@
 import { ExpressionEvalContext } from './types';
+import { resolveLocalLabelKey, resolveScopedConst } from './labels';
 import { isIdentifierPart, isIdentifierStart } from './utils';
 
 type ExprToken =
   | { type: 'number'; value: number }
   | { type: 'identifier'; name: string }
+  | { type: 'location' }
   | { type: 'operator'; op: string }
   | { type: 'paren'; value: '(' | ')' };
 
@@ -53,6 +55,15 @@ function tokenizeConditionExpression(expr: string): ExprToken[] {
       continue;
     }
     const two = expr.slice(i, i + 2);
+    if (ch === '%' && /[01_]/.test(expr[i + 1] || '')) {
+      let j = i + 1;
+      while (j < expr.length && /[01_]/.test(expr[j]!)) j++;
+      if (j === i + 1) throw new Error('Malformed binary literal in expression');
+      const value = parseInt(expr.slice(i + 1, j).replace(/_/g, ''), 2);
+      tokens.push({ type: 'number', value });
+      i = j;
+      continue;
+    }
     if (MULTI_CHAR_OPERATORS.includes(two)) {
       tokens.push({ type: 'operator', op: two });
       i += 2;
@@ -60,6 +71,14 @@ function tokenizeConditionExpression(expr: string): ExprToken[] {
     }
     if (ch === '(' || ch === ')') {
       tokens.push({ type: 'paren', value: ch });
+      i++;
+      continue;
+    }
+    if (ch === '*') {
+      const prev = tokens[tokens.length - 1];
+      const prevIsValue =
+        prev && ((prev.type === 'number') || (prev.type === 'identifier') || (prev.type === 'location') || (prev.type === 'paren' && prev.value === ')'));
+      tokens.push(prevIsValue ? { type: 'operator', op: '*' } : { type: 'location' });
       i++;
       continue;
     }
@@ -101,15 +120,6 @@ function tokenizeConditionExpression(expr: string): ExprToken[] {
       i = j;
       continue;
     }
-    if (ch === '%') {
-      let j = i + 1;
-      while (j < expr.length && /[01_]/.test(expr[j]!)) j++;
-      if (j === i + 1) throw new Error('Malformed binary literal in expression');
-      const value = parseInt(expr.slice(i + 1, j).replace(/_/g, ''), 2);
-      tokens.push({ type: 'number', value });
-      i = j;
-      continue;
-    }
     if (/[0-9]/.test(ch)) {
       let j = i + 1;
       while (j < expr.length && /[0-9]/.test(expr[j]!)) j++;
@@ -141,22 +151,28 @@ function resolveSymbolValue(name: string, ctx: ExpressionEvalContext): number | 
   const lowered = name.toLowerCase();
   if (lowered === 'true') return 1;
   if (lowered === 'false') return 0;
-  if (ctx.consts.has(name)) return ctx.consts.get(name)!;
+  const scopeKey = ctx.lineIndex > 0 && ctx.lineIndex - 1 < ctx.scopes.length ? ctx.scopes[ctx.lineIndex - 1] : undefined;
+  const constVal = resolveScopedConst(name, ctx.consts, scopeKey, ctx.macroScope);
+  // Temporary debug to trace diff_addr scoping issues
+  if (lowered === 'diff_addr') {
+    console.log('resolveSymbolValue diff_addr', {
+      macroScope: ctx.macroScope,
+      scopeKey,
+      constVal,
+      hasKey: ctx.consts.has(name),
+      altKey: ctx.macroScope ? `${ctx.macroScope}::${name}` : undefined,
+      altHas: ctx.macroScope ? ctx.consts.has(`${ctx.macroScope}::${name}`) : undefined
+    });
+  }
+  if (constVal !== undefined) return constVal;
   if (ctx.labels.has(name)) return ctx.labels.get(name)!.addr;
+  for (const [k, v] of ctx.labels) {
+    if (k.toLowerCase() === lowered) return v.addr;
+  }
   if (name[0] === '@') {
-    if (ctx.lineIndex <= 0) return null;
-    const scopeKey = ctx.scopes[ctx.lineIndex - 1];
-    if (!scopeKey) return null;
-    const fileMap = ctx.localsIndex.get(scopeKey);
-    if (!fileMap) return null;
-    const arr = fileMap.get(name.slice(1));
-    if (!arr || !arr.length) return null;
-    let chosen = arr[0];
-    for (const entry of arr) {
-      if ((entry.line || 0) <= ctx.lineIndex) chosen = entry;
-      else break;
-    }
-    const key = chosen.key;
+    const key = resolveLocalLabelKey(name, ctx.lineIndex, ctx.scopes, ctx.localsIndex, ctx.originLine);
+    if (!key) return null;
+    if (ctx.consts.has(key)) return ctx.consts.get(key)!;
     if (ctx.labels.has(key)) return ctx.labels.get(key)!.addr;
     return null;
   }
@@ -166,7 +182,11 @@ function resolveSymbolValue(name: string, ctx: ExpressionEvalContext): number | 
 class ConditionExpressionParser {
   private index = 0;
 
-  constructor(private readonly tokens: ExprToken[], private readonly ctx: ExpressionEvalContext) {}
+  constructor(
+    private readonly tokens: ExprToken[],
+    private readonly ctx: ExpressionEvalContext,
+    private readonly exprText: string
+  ) {}
 
   parseExpression(allowEval: boolean): number {
     const value = this.parseLogicalOr(allowEval);
@@ -317,13 +337,15 @@ class ConditionExpressionParser {
         const rhs = this.parseUnary(allowEval);
         if (allowEval) {
           if (rhs === 0) throw new Error('Division by zero in expression');
-          value = value / rhs;
+            value = Math.trunc(value / rhs);
         }
       } else if (this.matchOperator('%')) {
         const rhs = this.parseUnary(allowEval);
         if (allowEval) {
           if (rhs === 0) throw new Error('Modulo by zero in expression');
-          value = value % rhs;
+          const lhsInt = Math.trunc(value);
+          const rhsInt = Math.trunc(rhs);
+          value = lhsInt % rhsInt;
         }
       } else {
         break;
@@ -361,11 +383,11 @@ class ConditionExpressionParser {
 
   private parsePrimary(allowEval: boolean): number {
     const token = this.tokens[this.index];
-    if (!token) throw new Error('Unexpected end of expression');
+    if (!token) throw new Error(`Unexpected end of expression '${this.exprText}'`);
     if (token.type === 'paren' && token.value === '(') {
       this.index++;
       const value = this.parseLogicalOr(allowEval);
-      if (!this.matchParen(')')) throw new Error('Unmatched ( in expression');
+      if (!this.matchParen(')')) throw new Error(`Unmatched ( in expression '${this.exprText}'`);
       return allowEval ? value : 0;
     }
     if (token.type === 'number') {
@@ -376,13 +398,23 @@ class ConditionExpressionParser {
       this.index++;
       if (!allowEval) return 0;
       const resolved = resolveSymbolValue(token.name, this.ctx);
-      if (resolved === null) throw new Error(`Undefined symbol '${token.name}' in expression`);
+      if (resolved === null) {
+        throw new Error(`Undefined symbol '${token.name}' in expression '${this.exprText}'`);
+      }
       return resolved;
     }
-    if (token.type === 'paren' && token.value === ')') {
-      throw new Error('Unmatched ) in expression');
+    if (token.type === 'location') {
+      this.index++;
+      if (!allowEval) return 0;
+      if (this.ctx.locationCounter === undefined) {
+        throw new Error(`Location counter '*' is not available in expression '${this.exprText}'`);
+      }
+      return this.ctx.locationCounter;
     }
-    throw new Error(`Unexpected token '${this.describeToken(token)}' in expression`);
+    if (token.type === 'paren' && token.value === ')') {
+      throw new Error(`Unmatched ) in expression '${this.exprText}'`);
+    }
+    throw new Error(`Unexpected token '${this.describeToken(token)}' in expression '${this.exprText}'`);
   }
 
   private matchOperator(op: string): boolean {
@@ -406,13 +438,18 @@ class ConditionExpressionParser {
   private describeToken(token: ExprToken): string {
     if (token.type === 'number') return token.value.toString();
     if (token.type === 'identifier') return token.name;
+    if (token.type === 'location') return '*';
     if (token.type === 'operator') return token.op;
     return token.value;
   }
 }
 
-export function evaluateConditionExpression(expr: string, ctx: ExpressionEvalContext, allowEval = true): number {
-  const tokens = tokenizeConditionExpression(expr);
-  const parser = new ConditionExpressionParser(tokens, ctx);
+export function evaluateExpression(expr: string, ctx: ExpressionEvalContext, allowEval = true): number {
+  const normalized = expr.trim();
+  const tokens = tokenizeConditionExpression(normalized);
+  const parser = new ConditionExpressionParser(tokens, ctx, normalized);
   return parser.parseExpression(allowEval);
 }
+
+// Backcompat: keep old name as alias so existing callers continue to work.
+export const evaluateConditionExpression = evaluateExpression;

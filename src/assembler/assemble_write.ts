@@ -3,17 +3,21 @@ import * as path from 'path';
 import { DEBUG_FILE_SUFFIX } from '../extention/consts';
 import { AssembleResult, AssembleWriteResult } from './types';
 
-type AssembleFn = (source: string, sourcePath?: string) => AssembleResult;
+type AssembleFn = (source: string, sourcePath?: string, projectFile?: string) => AssembleResult;
 
-export function createAssembleAndWrite(assemble: AssembleFn) {
+export function createAssembleAndWrite(assemble: AssembleFn, projectFile?: string)
+{
   return function assembleAndWrite(
     source: string,
     outPath: string,
     sourcePath?: string,
-    debugPath?: string
-  ): AssembleWriteResult {
+    debugPath?: string,
+  ): AssembleWriteResult
+  {
     const startTime = Date.now();
-    const res = assemble(source, sourcePath);
+
+    const res = assemble(source, sourcePath, projectFile);
+
     if (!res.success || !res.output) {
       // Improve error messages: include the source line, filename, line number,
       // and file URI / vscode URI so editors/terminals can link to the location.

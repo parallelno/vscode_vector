@@ -9,8 +9,10 @@ import {
   TextCaseType,
   parseTextLiteralToBytes
 } from './utils';
-import { evaluateConditionExpression } from './expression';
+import { evaluateExpression } from './expression';
+import { formatMacroCallStack } from './utils';
 import { argsAfterToken } from './common';
+import { extractMacroScope } from './labels';
 
 export type DirectiveContext = {
   labels: Map<string, { addr: number; line: number; src?: string }>;
@@ -23,6 +25,11 @@ export type DirectiveContext = {
   textCase: TextCaseType;
   localsIndex: Map<string, Map<string, Array<{ key: string; line: number }>>>;
   scopes: string[];
+  // Hints for macro/local resolution on the current line
+  currentMacroScope?: string;
+  currentOriginLine?: number;
+  // Optional address of the current line for location-counter expressions
+  locationCounter?: number;
 };
 
 export function handleIfDirective(
@@ -46,24 +53,28 @@ export function handleIfDirective(
     return true;
   }
 
+  const scopeEntry = lineIndex > 0 && lineIndex - 1 < ctx.scopes.length ? ctx.scopes[lineIndex - 1] : undefined;
   const exprCtx: ExpressionEvalContext = {
     labels: ctx.labels,
     consts: ctx.consts,
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
-    lineIndex
+    lineIndex,
+    locationCounter: ctx.locationCounter,
+    macroScope: origin?.macroScope ?? extractMacroScope(scopeEntry) ?? ctx.currentMacroScope,
+    originLine: origin?.line ?? ctx.currentOriginLine ?? lineIndex
   };
 
   let conditionResult = false;
   if (!parentActive) {
     try {
-      evaluateConditionExpression(expr, exprCtx, false);
+      evaluateExpression(expr, exprCtx, false);
     } catch (err: any) {
       ctx.errors.push(`Failed to parse .if expression at ${originDesc}: ${err?.message || err}`);
     }
   } else {
     try {
-      const value = evaluateConditionExpression(expr, exprCtx, true);
+      const value = evaluateExpression(expr, exprCtx, true);
       conditionResult = value !== 0;
     } catch (err: any) {
       ctx.errors.push(`Failed to evaluate .if at ${originDesc}: ${err?.message || err}`);
@@ -116,12 +127,16 @@ export function handlePrintDirective(
   const argsText = (printMatch[1] || '').trim();
   const parts = argsText.length ? splitTopLevelArgs(argsText) : [];
   const fragments: string[] = [];
+  const scopeEntry = lineIndex > 0 && lineIndex - 1 < ctx.scopes.length ? ctx.scopes[lineIndex - 1] : undefined;
   const exprCtx: ExpressionEvalContext = {
     labels: ctx.labels,
     consts: ctx.consts,
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
-    lineIndex
+    lineIndex,
+    locationCounter: ctx.locationCounter,
+    macroScope: origin?.macroScope ?? extractMacroScope(scopeEntry) ?? ctx.currentMacroScope,
+    originLine: origin?.line ?? ctx.currentOriginLine ?? lineIndex
   };
 
   let failed = false;
@@ -142,7 +157,7 @@ export function handlePrintDirective(
     }
 
     try {
-      const value = evaluateConditionExpression(part, exprCtx, true);
+      const value = evaluateExpression(part, exprCtx, true);
       fragments.push(String(value));
     } catch (err: any) {
       ctx.errors.push(`Failed to evaluate .print expression '${part}' at ${originDesc}: ${err?.message || err}`);
@@ -175,15 +190,20 @@ export function handleErrorDirective(
   if (!errorMatch) return false;
 
   const originDesc = describeOrigin(origin, lineIndex, sourcePath);
+  const macroStack = formatMacroCallStack(origin);
   const argsText = (errorMatch[1] || '').trim();
   const parts = argsText.length ? splitTopLevelArgs(argsText) : [];
   const fragments: string[] = [];
+  const scopeEntry = lineIndex > 0 && lineIndex - 1 < ctx.scopes.length ? ctx.scopes[lineIndex - 1] : undefined;
   const exprCtx: ExpressionEvalContext = {
     labels: ctx.labels,
     consts: ctx.consts,
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
-    lineIndex
+    lineIndex,
+    locationCounter: ctx.locationCounter,
+    macroScope: origin?.macroScope ?? extractMacroScope(scopeEntry) ?? ctx.currentMacroScope,
+    originLine: origin?.line ?? ctx.currentOriginLine ?? lineIndex
   };
 
   let failed = false;
@@ -204,7 +224,7 @@ export function handleErrorDirective(
     }
 
     try {
-      const value = evaluateConditionExpression(part, exprCtx, true);
+      const value = evaluateExpression(part, exprCtx, true);
       fragments.push(String(value));
     } catch (err: any) {
       ctx.errors.push(`Failed to evaluate .error expression '${part}' at ${originDesc}: ${err?.message || err}`);
@@ -215,7 +235,8 @@ export function handleErrorDirective(
 
   if (!failed) {
     const errorMessage = fragments.length ? fragments.join(' ') : '';
-    ctx.errors.push(`.error: ${errorMessage} at ${originDesc}`);
+    const stackSuffix = macroStack ? `${macroStack}` : '';
+    ctx.errors.push(`.error: ${errorMessage} at ${originDesc}${stackSuffix}`);
   }
 
   return true;

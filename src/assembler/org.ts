@@ -1,6 +1,7 @@
 import { argsAfterToken } from './common';
 import { parseNumberFull, describeOrigin } from './utils';
 import { LocalLabelScopeIndex, SourceOrigin } from './types';
+import { resolveScopedConst } from './labels';
 
 export function handleOrgFirstPass(params: {
   line: string;
@@ -87,9 +88,11 @@ export function handleOrgSecondPass(params: {
   lineIndex: number;
   origins: SourceOrigin[];
   sourcePath: string | undefined;
+  scopes: string[];
   map: Record<number, number>;
 }): { handled: boolean; addr: number } {
-  const { line, tokens, tokenOffsets, labels, consts, errors, addr: currentAddr, lineIndex, origins, sourcePath, map } = params;
+  const { line, tokens, tokenOffsets, labels, consts, errors, addr: currentAddr, lineIndex, origins, sourcePath, scopes, map } = params;
+  const scopeKey = lineIndex > 0 && lineIndex - 1 < scopes.length ? scopes[lineIndex - 1] : undefined;
   const originDesc = describeOrigin(origins[lineIndex - 1], lineIndex, sourcePath);
   const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]);
   const aTok = rest.trim().split(/\s+/)[0];
@@ -99,8 +102,9 @@ export function handleOrgSecondPass(params: {
     const addrVal = parsed ?? null;
     if (addrVal === null) {
       const labelVal = labels.has(aTok) ? labels.get(aTok)!.addr : null;
-      const constVal = consts.has(aTok) ? consts.get(aTok)! : null;
-      const resolved = labelVal !== null ? labelVal : constVal;
+      const constVal = resolveScopedConst(aTok, consts, scopeKey);
+      const constResolved = constVal !== undefined ? constVal : null;
+      const resolved = labelVal !== null ? labelVal : constResolved;
       if (resolved === null) {
         errors.push(`Bad ORG address '${aTok}' at ${originDesc}`);
         return { handled: true, addr: currentAddr };

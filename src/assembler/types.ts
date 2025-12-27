@@ -1,15 +1,18 @@
 import { Buffer } from 'buffer';
 
+export type MacroInstanceInfo = {
+  name: string;
+  ordinal: number;
+  callerFile?: string;
+  callerLine?: number;
+  callerMacro?: MacroInstanceInfo;
+};
+
 export type SourceOrigin = {
   file?: string;
   line: number;
   macroScope?: string;
-  macroInstance?: {
-    name: string;
-    ordinal: number;
-    callerFile?: string;
-    callerLine?: number;
-  };
+  macroInstance?: MacroInstanceInfo;
 };
 
 export type PrintMessage = {
@@ -65,6 +68,11 @@ export type ExpressionEvalContext = {
   localsIndex: LocalLabelScopeIndex;
   scopes: string[];
   lineIndex: number;
+  macroScope?: string;
+  // Optional current address for location-counter expressions (e.g. '*')
+  locationCounter?: number;
+  // The originating source line (per-file) for better local-label matching; defaults to lineIndex when absent.
+  originLine?: number;
 };
 
 export type IfFrame = {
