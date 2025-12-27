@@ -87,6 +87,7 @@ export function assemble(
     line: number;
     origin: SourceOrigin | undefined;
     originDesc: string;
+    locationCounter?: number;
     lastError?: string }> = [];
   // Track which identifiers are variables (can be reassigned)
   const variables = new Set<string>();
@@ -150,7 +151,7 @@ export function assemble(
     return key;
   }
 
-  function tryEvaluateConstant(rhs: string, lineIndex: number, origin?: SourceOrigin): { value: number | null; error?: string } {
+  function tryEvaluateConstant(rhs: string, lineIndex: number, origin?: SourceOrigin, locationCounter?: number): { value: number | null; error?: string } {
     let val: number | null = parseNumberFull(rhs);
     if (val === null) {
       const scopeKey = lineIndex > 0 && lineIndex - 1 < scopes.length ? scopes[lineIndex - 1] : undefined;
@@ -169,7 +170,8 @@ export function assemble(
         localsIndex,
         scopes,
         lineIndex,
-        macroScope: origin?.macroScope
+        macroScope: origin?.macroScope,
+        locationCounter
       };
       try {
         val = evaluateExpression(rhs, ctx, true);
@@ -187,7 +189,7 @@ export function assemble(
       madeProgress = false;
       for (let idx = pendingConsts.length - 1; idx >= 0; idx--) {
         const pending = pendingConsts[idx];
-        const result = tryEvaluateConstant(pending.rhs, pending.line, pending.origin);
+        const result = tryEvaluateConstant(pending.rhs, pending.line, pending.origin, pending.locationCounter);
         if (result.value !== null) {
           consts.set(pending.name, result.value);
           constOrigins.set(pending.name, { line: pending.line, src: pending.origin?.file || sourcePath });
@@ -239,6 +241,10 @@ export function assemble(
     const line = stripInlineComment(raw).trim();
     if (!line) continue;
 
+    directiveCtx.locationCounter = addr;
+    dataCtx.locationCounter = addr;
+    incbinCtx.locationCounter = addr;
+
     // Update directive counter and scope key when file changes
     if (i > 0) {
       const prev = origins[i - 1];
@@ -270,11 +276,6 @@ export function assemble(
       errors.push(`Labels are not allowed on .error directives at ${originDesc}`);
       continue;
     }
-    const labelVarMatch = line.match(/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:\s*[A-Za-z_][A-Za-z0-9_]*\s+\.var\b/i);
-    if (labelVarMatch) {
-      errors.push(`Labels are not allowed on .var directives at ${originDesc}`);
-      continue;
-    }
 
     // Handle .endif directive
     if (handleEndifDirective(line, origins[i], i + 1, sourcePath, ifStack, directiveCtx)) {
@@ -297,35 +298,34 @@ export function assemble(
       continue;
     }
 
-    // .var directive: "NAME .var InitialValue"
-    const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+\.var\b(.*)$/i);
+    if (/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:\s*[A-Za-z_][A-Za-z0-9_]*\s+\.var\b/i.test(line)) {
+      errors.push(`Labels are not allowed on .var directives at ${originDesc}`);
+      continue;
+    }
+
+    // .var directive: "NAME .var InitialValue" (label optional)
+    const varMatch = line.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:?[\t ]+\.var\b(.*)$/i);
     if (varMatch) {
-      const name = varMatch[1];
+      const rawName = varMatch[1];
       const rhs = (varMatch[2] || '').trim();
       if (!rhs.length) {
-        errors.push(`Missing initial value for .var ${name} at ${i + 1}`);
+        errors.push(`Missing initial value for .var ${rawName} at ${i + 1}`);
         continue;
       }
-      let val: number | null = parseNumberFull(rhs);
-      if (val === null) {
-        if (consts.has(rhs)) val = consts.get(rhs)!;
-        else if (labels.has(rhs)) val = labels.get(rhs)!.addr;
-      }
-      // If still null, try evaluating as expression
-      if (val === null) {
-        const result = evaluateExpressionValue(rhs, i + 1, `Bad initial value '${rhs}' for .var ${name}`, evalState);
-        val = result.value;
-        if (result.error) {
-          errors.push(result.error);
-          val = null;
-        }
-      }
-      if (val === null) {
-        errors.push(`Bad initial value '${rhs}' for .var ${name} at ${i + 1}`);
+
+      const isLocal = rawName.startsWith('@');
+      const scopeKey = scopes[i];
+      const storeName = isLocal ? allocateLocalKey(rawName, origins[i], i + 1, scopeKey) : scopedConstName(rawName, origins[i]);
+
+      const result = tryEvaluateConstant(rhs, i + 1, origins[i], addr);
+      if (result.value === null) {
+        const detail = result.error ? `: ${result.error}` : '';
+        errors.push(`Bad initial value '${rhs}' for .var ${rawName} at ${originDesc}${detail}`);
       } else {
-        consts.set(name, val);
-        constOrigins.set(name, { line: i + 1, src: origins[i]?.file || sourcePath });
-        variables.add(name); // Mark this identifier as a variable
+        consts.set(storeName, result.value);
+        constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
+        variables.add(rawName);
+        variables.add(storeName); // Track scoped name to avoid reassignment warnings
       }
       continue;
     }
@@ -355,12 +355,12 @@ export function assemble(
         continue;
       }
 
-      const result = tryEvaluateConstant(rhs, i + 1, origins[i]);
+      const result = tryEvaluateConstant(rhs, i + 1, origins[i], addr);
       if (result.value !== null) {
         consts.set(storeName, result.value);
         constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
       } else {
-        pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc });
+        pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc, locationCounter: addr });
       }
       continue;
     }
@@ -382,12 +382,12 @@ export function assemble(
       }
 
       const rhs = assignMatch[2].trim();
-      const result = tryEvaluateConstant(rhs, i + 1, origins[i]);
+      const result = tryEvaluateConstant(rhs, i + 1, origins[i], addr);
       if (result.value !== null) {
         consts.set(storeName, result.value);
         constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
       } else {
-        pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc });
+        pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc, locationCounter: addr });
       }
       continue;
     }
@@ -409,12 +409,12 @@ export function assemble(
       }
 
       const rhs = equMatch[2].trim();
-      const result = tryEvaluateConstant(rhs, i + 1, origins[i]);
+      const result = tryEvaluateConstant(rhs, i + 1, origins[i], addr);
       if (result.value !== null) {
         consts.set(storeName, result.value);
         constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
       } else {
-        pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc });
+        pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc, locationCounter: addr });
       }
       continue;
     }
@@ -588,6 +588,11 @@ export function assemble(
     const line = stripInlineComment(raw).trim();
     if (!line) continue;
 
+    directiveCtxSecond.locationCounter = addr;
+    dataCtxSecond.locationCounter = addr;
+    incbinCtxSecond.locationCounter = addr;
+    instrCtx.locationCounter = addr;
+
     const originDesc = describeOrigin(origins[i], srcLine, sourcePath);
 
     const labelIfMatch = line.match(/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s*\.if\b/i);
@@ -634,7 +639,14 @@ export function assemble(
         ifStackSecond.push({ effective: false, suppressed: !parentActive, origin: origins[i], lineIndex: srcLine });
         continue;
       }
-      const ctx: ExpressionEvalContext = { labels, consts, localsIndex, scopes, lineIndex: srcLine };
+      const ctx: ExpressionEvalContext = {
+        labels,
+        consts,
+        localsIndex,
+        scopes,
+        lineIndex: srcLine,
+        locationCounter: addr
+      };
       let conditionResult = false;
       if (!parentActive) {
         try {
@@ -672,7 +684,7 @@ export function assemble(
     if (/^[A-Za-z_][A-Za-z0-9_]*:$/.test(line)) continue; // label only
 
     // Skip .var directive in second pass (already processed in first pass)
-    if (/^[A-Za-z_][A-Za-z0-9_]*\s+\.var\b/i.test(line)) {
+    if (/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s+\.var\b/i.test(line)) {
       continue;
     }
 
@@ -691,6 +703,11 @@ export function assemble(
       tokenOffsets.shift();
     }
 
+    if (leadingLabel && tokens.length >= 2 && tokens[1].toUpperCase() === '.VAR') {
+      errors.push(`Labels are not allowed on .var directives at ${originDesc}`);
+      continue;
+    }
+
     map[srcLine] = addr;
     const lineStartAddr = addr;
 
@@ -699,7 +716,7 @@ export function assemble(
       const name = leadingLabel ?? tokens[0];
       if (variables.has(name)) {
         const rhs = tokens.slice(2).join(' ').trim();
-        processVariableAssignment(name, rhs, srcLine, originDesc, evalState, errors);
+        processVariableAssignment(name, rhs, srcLine, originDesc, evalState, errors, lineStartAddr);
       }
       continue;
     }
@@ -707,7 +724,7 @@ export function assemble(
       const name = leadingLabel;
       if (variables.has(name)) {
         const rhs = tokens.slice(1).join(' ').trim();
-        processVariableAssignment(name, rhs, srcLine, originDesc, evalState, errors);
+        processVariableAssignment(name, rhs, srcLine, originDesc, evalState, errors, lineStartAddr);
       }
       continue;
     }
@@ -717,7 +734,7 @@ export function assemble(
         const name = assignMatch[1];
         if (variables.has(name)) {
           const rhs = assignMatch[2].trim();
-          processVariableAssignment(name, rhs, srcLine, originDesc, evalState, errors);
+          processVariableAssignment(name, rhs, srcLine, originDesc, evalState, errors, lineStartAddr);
         }
       }
       continue;

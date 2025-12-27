@@ -10,6 +10,8 @@ export type InstructionContext = {
   scopes: string[];
   errors: string[];
   originLines?: Array<number | undefined>;
+  // Optional address of the current line for location-counter expressions
+  locationCounter?: number;
 };
 
 export function formatSignedHex(value: number): string {
@@ -54,7 +56,8 @@ export function resolveAddressToken(
     consts: ctx.consts,
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
-    lineIndex
+    lineIndex,
+    locationCounter: ctx.locationCounter
   };
 
   // simple numeric

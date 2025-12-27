@@ -23,6 +23,8 @@ export type DirectiveContext = {
   textCase: TextCaseType;
   localsIndex: Map<string, Map<string, Array<{ key: string; line: number }>>>;
   scopes: string[];
+  // Optional address of the current line for location-counter expressions
+  locationCounter?: number;
 };
 
 export function handleIfDirective(
@@ -51,7 +53,8 @@ export function handleIfDirective(
     consts: ctx.consts,
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
-    lineIndex
+    lineIndex,
+    locationCounter: ctx.locationCounter
   };
 
   let conditionResult = false;
@@ -121,7 +124,8 @@ export function handlePrintDirective(
     consts: ctx.consts,
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
-    lineIndex
+    lineIndex,
+    locationCounter: ctx.locationCounter
   };
 
   let failed = false;
@@ -183,7 +187,8 @@ export function handleErrorDirective(
     consts: ctx.consts,
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
-    lineIndex
+    lineIndex,
+    locationCounter: ctx.locationCounter
   };
 
   let failed = false;

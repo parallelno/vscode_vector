@@ -282,6 +282,16 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
+        name: 'Location counter resolves in constants and data expressions',
+        sourceFile: 'const_location_counter.asm',
+        expect: {
+            bytes: [0x01, 0x01, 0x02, 0x01, 0x3E, 0x10],
+            consts: {
+                mvi_imm_addr: 0x0101
+            }
+        }
+    },
+    {
         name: 'Local constants scope like local labels',
         sourceFile: 'const_local_scope.asm',
         expect: {

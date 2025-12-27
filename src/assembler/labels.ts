@@ -65,7 +65,9 @@ export function getScopeKey(
   sourcePath: string | undefined,
   directiveCounter: number
 ): string {
-  let key = getFileKey(orig, sourcePath) + '::' + directiveCounter;
+  const fileForScope = orig?.macroInstance?.callerFile || orig?.file;
+  const fileKey = fileForScope ? path.resolve(fileForScope) : getFileKey(orig, sourcePath);
+  let key = fileKey + '::' + directiveCounter;
   if (orig?.macroScope) key += `::${orig.macroScope}`;
   return key;
 }
@@ -77,12 +79,24 @@ export function extractMacroScope(scopeKey?: string): string | undefined {
   return parts.length >= 3 ? parts.slice(2).join('::') : undefined;
 }
 
+// Split a composite macro scope (outer::inner::nested) into a search list from
+// most specific to least specific: ['outer::inner::nested', 'outer::inner', 'outer'].
+export function expandMacroScopeChain(macroScope?: string): string[] {
+  if (!macroScope) return [];
+  const parts = macroScope.split('::');
+  const chain: string[] = [];
+  for (let i = parts.length; i >= 1; i--) {
+    chain.push(parts.slice(0, i).join('::'));
+  }
+  return chain;
+}
+
 // Build a unique name for a symbol that should be confined to a macro scope
 export function formatMacroScopedName(name: string, macroScope?: string): string {
   return macroScope ? `${macroScope}::${name}` : name;
 }
 
-// Resolve a constant value while respecting macro scoping rules
+// Resolve a constant value while respecting macro scoping rules (supports nested macro scope chains)
 export function resolveScopedConst(
   name: string,
   consts: Map<string, number>,
@@ -90,17 +104,16 @@ export function resolveScopedConst(
   macroScopeOverride?: string
 ): number | undefined {
   const macroScope = macroScopeOverride ?? extractMacroScope(scopeKey);
-  const scopedKey = macroScope ? formatMacroScopedName(name, macroScope) : undefined;
+  const scopeChain = expandMacroScopeChain(macroScope);
+  const candidateKeys = scopeChain.map((scope) => formatMacroScopedName(name, scope));
+  if (consts.has(name)) candidateKeys.push(name);
 
-  if (scopedKey && consts.has(scopedKey)) return consts.get(scopedKey);
-  if (consts.has(name)) return consts.get(name);
-
-  const targetLower = name.toLowerCase();
-  const scopedLower = scopedKey ? scopedKey.toLowerCase() : undefined;
-  for (const [k, v] of consts) {
-    const keyLower = k.toLowerCase();
-    if (keyLower === targetLower) return v;
-    if (scopedLower && keyLower === scopedLower) return v;
+  for (const key of candidateKeys) {
+    if (consts.has(key)) return consts.get(key);
+    const lower = key.toLowerCase();
+    for (const [k, v] of consts) {
+      if (k.toLowerCase() === lower) return v;
+    }
   }
 
   return undefined;

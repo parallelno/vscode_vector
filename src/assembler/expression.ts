@@ -5,6 +5,7 @@ import { isIdentifierPart, isIdentifierStart } from './utils';
 type ExprToken =
   | { type: 'number'; value: number }
   | { type: 'identifier'; name: string }
+  | { type: 'location' }
   | { type: 'operator'; op: string }
   | { type: 'paren'; value: '(' | ')' };
 
@@ -70,6 +71,14 @@ function tokenizeConditionExpression(expr: string): ExprToken[] {
     }
     if (ch === '(' || ch === ')') {
       tokens.push({ type: 'paren', value: ch });
+      i++;
+      continue;
+    }
+    if (ch === '*') {
+      const prev = tokens[tokens.length - 1];
+      const prevIsValue =
+        prev && ((prev.type === 'number') || (prev.type === 'identifier') || (prev.type === 'location') || (prev.type === 'paren' && prev.value === ')'));
+      tokens.push(prevIsValue ? { type: 'operator', op: '*' } : { type: 'location' });
       i++;
       continue;
     }
@@ -383,6 +392,14 @@ class ConditionExpressionParser {
       }
       return resolved;
     }
+    if (token.type === 'location') {
+      this.index++;
+      if (!allowEval) return 0;
+      if (this.ctx.locationCounter === undefined) {
+        throw new Error(`Location counter '*' is not available in expression '${this.exprText}'`);
+      }
+      return this.ctx.locationCounter;
+    }
     if (token.type === 'paren' && token.value === ')') {
       throw new Error(`Unmatched ) in expression '${this.exprText}'`);
     }
@@ -410,6 +427,7 @@ class ConditionExpressionParser {
   private describeToken(token: ExprToken): string {
     if (token.type === 'number') return token.value.toString();
     if (token.type === 'identifier') return token.name;
+    if (token.type === 'location') return '*';
     if (token.type === 'operator') return token.op;
     return token.value;
   }

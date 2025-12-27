@@ -125,7 +125,8 @@ export function instructionEncoding(
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
     lineIndex: srcLine,
-    originLine
+    originLine,
+    locationCounter: ctx.locationCounter
   };
   let full: number | null = null;
   try {

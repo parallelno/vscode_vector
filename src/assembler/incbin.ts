@@ -11,6 +11,8 @@ export type IncbinContext = {
   scopes: string[];
   errors: string[];
   projectFile?: string;
+  // Optional address of the current line for location-counter expressions
+  locationCounter?: number;
 };
 
 type IncbinParams = {
@@ -78,7 +80,8 @@ function parseIncbinParams(
     consts: ctx.consts,
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
-    lineIndex: srcLine
+    lineIndex: srcLine,
+    locationCounter: ctx.locationCounter
   };
 
   let offset = 0;

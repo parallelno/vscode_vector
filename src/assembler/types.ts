@@ -69,6 +69,8 @@ export type ExpressionEvalContext = {
   scopes: string[];
   lineIndex: number;
   macroScope?: string;
+  // Optional current address for location-counter expressions (e.g. '*')
+  locationCounter?: number;
   // The originating source line (per-file) for better local-label matching; defaults to lineIndex when absent.
   originLine?: number;
 };

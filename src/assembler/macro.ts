@@ -231,12 +231,13 @@ function instantiateMacroCall(
     if (call.definition.normalLabels.size) {
       text = substituteIdentifiers(text, labelReplacements);
     }
+    const macroScope = origin.macroScope ? `${origin.macroScope}::${call.scopeName}` : call.scopeName;
     out.push({
       line: text,
       origin: {
         file: entry.origin.file,
         line: entry.origin.line,
-        macroScope: call.scopeName,
+        macroScope,
         macroInstance: {
           name: call.definition.name,
           ordinal: call.ordinal,

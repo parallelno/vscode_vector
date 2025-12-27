@@ -249,6 +249,12 @@ Expressions can reference:
 - Constants defined with `=` or `EQU` (e.g., `MAX_VALUE`)
 - Local labels prefixed with `@` (e.g., `@loop`)
 - Boolean literals `TRUE` (1) and `FALSE` (0)
+- Location counter `*`, which resolves to the current address for any expression (constants, data, immediates, directives). Example:
+
+```asm
+.org $0100
+lxi h, * + 1 ; hl => $101
+```
 
 **Operator Precedence** (highest to lowest)
 

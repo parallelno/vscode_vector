@@ -13,7 +13,7 @@ export type AssemblyEvalState = {
   originLines?: Array<number | undefined>;
 };
 
-function buildEvalContext(state: AssemblyEvalState, lineIndex: number): ExpressionEvalContext {
+function buildEvalContext(state: AssemblyEvalState, lineIndex: number, locationCounter?: number): ExpressionEvalContext {
   const scopeKey = lineIndex > 0 && lineIndex - 1 < state.scopes.length ? state.scopes[lineIndex - 1] : undefined;
   return {
     labels: state.labels,
@@ -22,6 +22,7 @@ function buildEvalContext(state: AssemblyEvalState, lineIndex: number): Expressi
     scopes: state.scopes,
     lineIndex,
     macroScope: extractMacroScope(scopeKey),
+    locationCounter,
     originLine: state.originLines ? state.originLines[lineIndex - 1] : undefined
   };
 }
@@ -30,9 +31,10 @@ export function evaluateExpressionValue(
   expr: string,
   lineIndex: number,
   errorLabel: string,
-  state: AssemblyEvalState
+  state: AssemblyEvalState,
+  locationCounter?: number
 ): { value: number | null; error?: string } {
-  const ctx = buildEvalContext(state, lineIndex);
+  const ctx = buildEvalContext(state, lineIndex, locationCounter);
   try {
     const value = evaluateExpression(expr, ctx, true);
     return { value };
@@ -47,7 +49,8 @@ export function processVariableAssignment(
   srcLine: number,
   originDesc: string,
   state: AssemblyEvalState,
-  errors: string[]
+  errors: string[],
+  locationCounter?: number
 ): void {
   let val: number | null = parseNumberFull(rhs);
   if (val === null) {
@@ -58,7 +61,7 @@ export function processVariableAssignment(
   }
 
   if (val === null) {
-    const ctx: ExpressionEvalContext = buildEvalContext(state, srcLine);
+    const ctx: ExpressionEvalContext = buildEvalContext(state, srcLine, locationCounter);
     try {
       val = evaluateExpression(rhs, ctx, true);
     } catch (err: any) {

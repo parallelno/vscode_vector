@@ -15,6 +15,8 @@ export type DataContext = {
   localsIndex: Map<string, Map<string, Array<{ key: string; line: number }>>>;
   scopes: string[];
   errors: string[];
+  // Optional address of the current line for location-counter expressions
+  locationCounter?: number;
 };
 
 export function handleDB(
@@ -34,6 +36,40 @@ export function handleDB(
   let emitted = 0;
 
   for (const p of parts) {
+    // Allow string literals in DB/.BYTE (e.g., "TEXT")
+    const strMatch = p.match(/^(['"])(.*)\1$/);
+    if (strMatch) {
+      const content = strMatch[2] || '';
+      const bytes: number[] = [];
+      for (let i = 0; i < content.length; i++) {
+        let ch = content[i]!;
+        if (ch === '\\') {
+          i++;
+          if (i >= content.length) {
+            ctx.errors.push(`Bad ${op} value '${p}' at ${srcLine}: Unterminated escape sequence`);
+            break;
+          }
+          const esc = content[i]!;
+          switch (esc) {
+            case 'n': ch = '\n'; break;
+            case 'r': ch = '\r'; break;
+            case 't': ch = '\t'; break;
+            case '0': ch = '\0'; break;
+            case '\\': ch = '\\'; break;
+            case '\"': ch = '"'; break;
+            case '\'': ch = '\''; break;
+            default: ch = esc;
+          }
+        }
+        bytes.push(ch.charCodeAt(0) & 0xff);
+      }
+      if (bytes.length) {
+        if (out) bytes.forEach((b) => out.push(b));
+        emitted += bytes.length;
+        continue;
+      }
+    }
+
     let val = toByte(p);
     // If toByte fails, try evaluating as an expression unless we're deferring resolution
     if (val === null && out && !options.defer) {
@@ -42,7 +78,8 @@ export function handleDB(
         consts: ctx.consts,
         localsIndex: ctx.localsIndex,
         scopes: ctx.scopes,
-        lineIndex: srcLine
+        lineIndex: srcLine,
+        locationCounter: ctx.locationCounter === undefined ? undefined : ctx.locationCounter + emitted
       };
       try {
         val = evaluateExpression(p, exprCtx, true);
@@ -99,7 +136,8 @@ export function handleDW(
           consts: ctx.consts,
           localsIndex: ctx.localsIndex,
           scopes: ctx.scopes,
-          lineIndex: srcLine
+          lineIndex: srcLine,
+          locationCounter: ctx.locationCounter === undefined ? undefined : ctx.locationCounter + emitted
         };
         try {
           value = evaluateExpression(part, exprCtx, true) & 0xffff;
@@ -159,7 +197,8 @@ export function handleDD(
           consts: ctx.consts,
           localsIndex: ctx.localsIndex,
           scopes: ctx.scopes,
-          lineIndex: srcLine
+          lineIndex: srcLine,
+          locationCounter: ctx.locationCounter === undefined ? undefined : ctx.locationCounter + emitted
         };
         try {
           value = evaluateExpression(part, exprCtx, true) >>> 0;
@@ -211,7 +250,8 @@ export function handleStorage(
     consts: ctx.consts,
     localsIndex: ctx.localsIndex,
     scopes: ctx.scopes,
-    lineIndex: srcLine
+    lineIndex: srcLine,
+    locationCounter: ctx.locationCounter
   };
 
   let size = 0;
