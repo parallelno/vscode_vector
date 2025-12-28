@@ -9,7 +9,9 @@ import {
 import {
   stripInlineComment,
   parseNumberFull,
-  describeOrigin
+  describeOrigin,
+  splitTopLevelArgs,
+  parseStringLiteral
 } from './utils';
 
 import { evaluateExpression } from './expression';
@@ -44,6 +46,104 @@ import { handleOrgFirstPass, handleOrgSecondPass } from './org';
 import { INSTR_SIZES } from './first_pass_instr';
 import { INSTR_OPCODES, instructionEncoding } from './second_pass_instr';
 
+type AssemblerSettingValue = string | number | boolean;
+type AssemblerSettings = Record<string, AssemblerSettingValue>;
+
+const DEFAULT_SETTINGS: AssemblerSettings = { optional: true };
+
+function parseSettingValue(raw: string): { value: AssemblerSettingValue | null; error?: string } {
+  try {
+    const literal = parseStringLiteral(raw);
+    if (literal !== null) {
+      return { value: literal };
+    }
+  } catch (err: any) {
+    return { value: null, error: err?.message || String(err) };
+  }
+
+  const lower = raw.toLowerCase();
+  if (lower === 'true' || lower === 'false') {
+    return { value: lower === 'true' };
+  }
+
+  const numeric = parseNumberFull(raw);
+  if (numeric !== null) {
+    return { value: numeric };
+  }
+
+  return { value: null, error: `Invalid setting value '${raw}'` };
+}
+
+function parseAssemblerSettings(
+  lines: string[],
+  origins: SourceOrigin[],
+  sourcePath?: string
+): { settings: AssemblerSettings; lines: string[]; origins: SourceOrigin[]; errors: string[] }
+{
+  const settings: AssemblerSettings = { ...DEFAULT_SETTINGS };
+  const outLines: string[] = [];
+  const outOrigins: SourceOrigin[] = [];
+  const errors: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = stripInlineComment(lines[i] || '').trim();
+    const match = trimmed.match(/^\.setting\b(.*)$/i);
+    if (!match) {
+      outLines.push(lines[i]);
+      outOrigins.push(origins[i]);
+      continue;
+    }
+
+    const originDesc = describeOrigin(origins[i], i + 1, sourcePath);
+    const argsText = (match[1] || '').trim();
+    if (!argsText.length) {
+      errors.push(`Missing key/value for .setting at ${originDesc}`);
+      continue;
+    }
+
+    const args = splitTopLevelArgs(argsText);
+    if (args.length < 2) {
+      errors.push(`.setting expects key and value at ${originDesc}`);
+      continue;
+    }
+    if (args.length % 2 !== 0) {
+      errors.push(`.setting expects key/value pairs at ${originDesc}`);
+    }
+
+    const pairCount = Math.floor(args.length / 2);
+    for (let pairIndex = 0; pairIndex < pairCount; pairIndex++) {
+      const keyRaw = args[pairIndex * 2].trim();
+      const valueRaw = args[pairIndex * 2 + 1].trim();
+      if (!keyRaw.length) {
+        errors.push(`Empty setting key at ${originDesc}`);
+        continue;
+      }
+
+      const parsed = parseSettingValue(valueRaw);
+      if (parsed.value === null) {
+        errors.push(`${parsed.error || 'Invalid setting value'} at ${originDesc}`);
+        continue;
+      }
+
+      settings[keyRaw.toLowerCase()] = parsed.value;
+    }
+  }
+
+  return { settings, lines: outLines, origins: outOrigins, errors };
+}
+
+function coerceSettingToBoolean(value: AssemblerSettingValue | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) return defaultValue;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const lower = value.trim().toLowerCase();
+    if (lower === 'true' || lower === 'yes' || lower === 'on' || lower === '1') return true;
+    if (lower === 'false' || lower === 'no' || lower === 'off' || lower === '0') return false;
+  }
+  return defaultValue;
+}
+
 export function assemble(
   source: string,
   sourcePath?: string,
@@ -70,7 +170,13 @@ export function assemble(
   if (loopExpanded.errors.length) {
     return { success: false, errors: loopExpanded.errors, origins: loopExpanded.origins };
   }
-  const optionalResult = applyOptionalBlocks(loopExpanded.lines, loopExpanded.origins);
+  const settingsResult = parseAssemblerSettings(loopExpanded.lines, loopExpanded.origins, sourcePath);
+  if (settingsResult.errors.length) {
+    return { success: false, errors: settingsResult.errors, origins: settingsResult.origins };
+  }
+
+  const optionalEnabled = coerceSettingToBoolean(settingsResult.settings.optional, true);
+  const optionalResult = applyOptionalBlocks(settingsResult.lines, settingsResult.origins, optionalEnabled);
   if (optionalResult.errors.length) {
     return { success: false, errors: optionalResult.errors, origins: optionalResult.origins };
   }

@@ -12,7 +12,8 @@ export type OptionalBlock = {
 
 export function applyOptionalBlocks(
   lines: string[],
-  origins: SourceOrigin[]
+  origins: SourceOrigin[],
+  enabled: boolean = true
 ): { lines: string[]; origins: SourceOrigin[]; errors: string[] }
 {
   const errors: string[] = [];
@@ -22,6 +23,18 @@ export function applyOptionalBlocks(
 
   const startRegex = /^\.(?:opt|optional)\b/i;
   const endRegex = /^\.(?:endopt|endoptional)\b/i;
+
+  const stripMarkersOnly = () => {
+    const strippedLines: string[] = [];
+    const strippedOrigins: SourceOrigin[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = stripInlineComment(lines[i] || '').trim();
+      if (startRegex.test(trimmed) || endRegex.test(trimmed)) continue;
+      strippedLines.push(lines[i]);
+      strippedOrigins.push(origins[i]);
+    }
+    return { lines: strippedLines, origins: strippedOrigins };
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = stripInlineComment(lines[i] || '').trim();
@@ -51,6 +64,11 @@ export function applyOptionalBlocks(
     for (const id of stack.reverse()) {
       errors.push(`Missing .endoptional/.endopt for block starting at line ${blocks[id].start + 1}`);
     }
+  }
+
+  if (!enabled) {
+    const stripped = stripMarkersOnly();
+    return { lines: stripped.lines, origins: stripped.origins, errors };
   }
 
   if (!blocks.length) return { lines, origins, errors };

@@ -322,6 +322,11 @@ useful_routine:
 .endopt
 ```
 
+- `.setting key, value [, key2, value2 ...]`: updates assembler defaults using non-case-sensitive key/value pairs. Values may be string, integer, or boolean. Multiple pairs can be specified in one directive.
+```
+.setting optional, false ; disables pruning of `.optional` blocks (the markers are stripped, but bodies stay).
+```
+
 - **Local labels and constants (`@name`)**: locals are scoped between the nearest surrounding global labels (or the start/end of the file/macro/loop expansion). A reference resolves to the closest definition in the same scope, preferring the latest definition at or before the reference; if none, it falls back to the next definition in that scope. Locals are per-file/per-macro and do not collide with globals. Example:
 
 ```
