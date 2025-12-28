@@ -197,6 +197,7 @@ export function assemble(
     lastError?: string }> = [];
   // Track which identifiers are variables (can be reassigned)
   const variables = new Set<string>();
+  const variableInitials = new Map<string, number>();
   // localsIndex: scopeKey -> (localName -> array of { key, line }) ordered by appearance
   const localsIndex: LocalLabelScopeIndex = new Map();
   // global numeric id counters per local name to ensure exported keys are unique
@@ -434,6 +435,7 @@ export function assemble(
         constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
         variables.add(rawName);
         variables.add(storeName); // Track scoped name to avoid reassignment warnings
+        variableInitials.set(storeName, result.value);
       }
       continue;
     }
@@ -449,6 +451,7 @@ export function assemble(
       const rawName = tokens[0].endsWith(':') ? tokens[0].slice(0, -1) : tokens[0];
       const rhs = tokens.slice(2).join(' ').trim();
 
+      // Keep variable values in sync during first pass so conditional assembly matches second pass
       if (variables.has(rawName)) {
         processVariableAssignment(rawName, rhs, i + 1, originDesc, evalState, errors, addr);
         continue;
@@ -476,8 +479,8 @@ export function assemble(
     const assignMatch = line.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:?\s*=\s*(.+)$/);
     if (assignMatch) {
       const rawName = assignMatch[1];
-      // Process variable assignments in first pass too so .if conditions stay in sync
       if (variables.has(rawName)) {
+        // Evaluate variables in first pass to keep .if blocks aligned with emitted bytes
         processVariableAssignment(rawName, assignMatch[2].trim(), i + 1, originDesc, evalState, errors, addr);
         continue;
       }
@@ -660,6 +663,11 @@ export function assemble(
   resolvePendingConstants();
 
   if (errors.length) return { success: false, errors, origins };
+
+  // Restore variable values to their declared initial state before the second pass
+  for (const [key, value] of variableInitials) {
+    consts.set(key, value);
+  }
 
 
 

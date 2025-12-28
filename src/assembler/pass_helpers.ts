@@ -98,8 +98,8 @@ export function processVariableAssignment(
   }
 
   if (val !== null) {
-    const { key, alias } = resolveVariableStoreKey(name, state, srcLine);
+    const { key } = resolveVariableStoreKey(name, state, srcLine);
+    // Store under the scoped key only; avoids leaking macro-scoped variables via unscoped aliases
     state.consts.set(key, val);
-    if (alias && alias !== key) state.consts.set(alias, val);
   }
 }
