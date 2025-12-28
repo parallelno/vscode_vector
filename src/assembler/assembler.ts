@@ -447,11 +447,12 @@ export function assemble(
     // simple constant / EQU handling: "NAME = expr" or "NAME EQU expr"
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
       const rawName = tokens[0].endsWith(':') ? tokens[0].slice(0, -1) : tokens[0];
-      // Skip variable assignments in first pass (they'll be processed in second pass)
+      const rhs = tokens.slice(2).join(' ').trim();
+
       if (variables.has(rawName)) {
+        processVariableAssignment(rawName, rhs, i + 1, originDesc, evalState, errors, addr);
         continue;
       }
-      const rhs = tokens.slice(2).join(' ').trim();
 
       const isLocal = rawName.startsWith('@');
       const scopeKey = scopes[i];
@@ -475,8 +476,9 @@ export function assemble(
     const assignMatch = line.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:?\s*=\s*(.+)$/);
     if (assignMatch) {
       const rawName = assignMatch[1];
-      // Skip variable assignments in first pass
+      // Process variable assignments in first pass too so .if conditions stay in sync
       if (variables.has(rawName)) {
+        processVariableAssignment(rawName, assignMatch[2].trim(), i + 1, originDesc, evalState, errors, addr);
         continue;
       }
 
@@ -502,8 +504,8 @@ export function assemble(
     const equMatch = line.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:?\s+EQU\s+(.+)$/i);
     if (equMatch) {
       const rawName = equMatch[1];
-      // Skip variable assignments in first pass
       if (variables.has(rawName)) {
+        processVariableAssignment(rawName, equMatch[2].trim(), i + 1, originDesc, evalState, errors, addr);
         continue;
       }
 
