@@ -375,6 +375,13 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
+        name: 'Macro-scoped vars update within the same macro',
+        sourceFile: 'macro_var_scope_update.asm',
+        expect: {
+            bytes: [0xAA, 0xBB]
+        }
+    },
+    {
         name: '.text emits ASCII bytes from string',
         sourceFile: 'text_basic.asm',
         expect: {

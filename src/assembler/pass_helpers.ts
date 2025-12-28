@@ -1,7 +1,12 @@
 import { evaluateExpression } from './expression';
 import { parseNumberFull } from './utils';
 import { ExpressionEvalContext, LocalLabelScopeIndex } from './types';
-import { extractMacroScope, resolveScopedConst } from './labels';
+import {
+  expandMacroScopeChain,
+  extractMacroScope,
+  formatMacroScopedName,
+  resolveScopedConst
+} from './labels';
 
 type LabelMap = Map<string, { addr: number; line: number; src?: string }>;
 
@@ -25,6 +30,28 @@ function buildEvalContext(state: AssemblyEvalState, lineIndex: number, locationC
     locationCounter,
     originLine: state.originLines ? state.originLines[lineIndex - 1] : undefined
   };
+}
+
+function resolveVariableStoreKey(
+  name: string,
+  state: AssemblyEvalState,
+  srcLine: number
+): { key: string; alias?: string } {
+  const scopeKey = srcLine > 0 && srcLine - 1 < state.scopes.length ? state.scopes[srcLine - 1] : undefined;
+  const macroScope = extractMacroScope(scopeKey);
+
+  if (macroScope) {
+    const chain = expandMacroScopeChain(macroScope);
+    for (const scope of chain) {
+      const scoped = formatMacroScopedName(name, scope);
+      if (state.consts.has(scoped)) {
+        return { key: scoped, alias: name };
+      }
+    }
+    return { key: formatMacroScopedName(name, macroScope), alias: name };
+  }
+
+  return { key: name };
 }
 
 export function evaluateExpressionValue(
@@ -52,9 +79,9 @@ export function processVariableAssignment(
   errors: string[],
   locationCounter?: number
 ): void {
+  const scopeKey = srcLine > 0 && srcLine - 1 < state.scopes.length ? state.scopes[srcLine - 1] : undefined;
   let val: number | null = parseNumberFull(rhs);
   if (val === null) {
-    const scopeKey = srcLine > 0 && srcLine - 1 < state.scopes.length ? state.scopes[srcLine - 1] : undefined;
     const scopedConst = resolveScopedConst(rhs, state.consts, scopeKey);
     if (scopedConst !== undefined) val = scopedConst;
     else if (state.labels.has(rhs)) val = state.labels.get(rhs)!.addr;
@@ -71,6 +98,8 @@ export function processVariableAssignment(
   }
 
   if (val !== null) {
-    state.consts.set(name, val);
+    const { key, alias } = resolveVariableStoreKey(name, state, srcLine);
+    state.consts.set(key, val);
+    if (alias && alias !== key) state.consts.set(alias, val);
   }
 }
