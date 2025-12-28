@@ -221,12 +221,23 @@ const tests: DirectiveTestCase[] = [
         name: '.storage reserves space and optionally fills it',
         sourceFile: 'storage_basic.asm',
         expect: {
-            bytes: [0x7E, 0x7E, 0x7E, 0xAA],
+            bytes: [0x00, 0x00, 0x00, 0x00, 0x7E, 0x7E, 0x7E, 0xAA],
             labels: {
                 uninit: 0x0010,
                 after_uninit: 0x0014,
                 init: 0x0014,
                 after_init: 0x0017
+            }
+        }
+    },
+    {
+        name: '.storage emits zeroes when filler is omitted',
+        sourceFile: 'storage_default_zero.asm',
+        expect: {
+            bytes: [0x00, 0x00, 0x00, 0xAA],
+            labels: {
+                buf: 0x0010,
+                after: 0x0013
             }
         }
     },

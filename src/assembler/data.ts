@@ -266,6 +266,7 @@ export function handleStorage(
   }
 
   let filler: number | undefined;
+  let fillerProvided = false;
   if (parts.length > 1 && parts[1].trim().length) {
     const fillerText = parts[1].trim();
     let val = toByte(fillerText);
@@ -276,14 +277,22 @@ export function handleStorage(
         ctx.errors.push(`Bad .storage filler '${fillerText}' at ${originDesc}: ${err?.message || err}`);
       }
     }
-    if (val !== null) filler = val & 0xff;
+    if (val !== null) {
+      filler = val & 0xff;
+      fillerProvided = true;
+    }
   }
 
-  if (out && filler !== undefined && size > 0) {
+  // Default filler is 0 when none is provided so .storage always emits bytes.
+  if (filler === undefined) {
+    filler = 0;
+  }
+
+  if (out && size > 0) {
     for (let i = 0; i < size; i++) {
       out.push(filler);
     }
   }
 
-  return { size, filled: filler !== undefined };
+  return { size, filled: size > 0 }; // we always emit when size > 0 (default filler = 0)
 }
