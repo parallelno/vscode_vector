@@ -182,7 +182,7 @@ export async function openEmulatorPanel(
     panel.webview.postMessage({ type: 'setViewMode', viewMode: project.settings.viewMode });
   } catch (e) {}
   try {
-    panel.webview.postMessage({ type: 'setRamDiskClearAfterStart', value: project.settings.ramDiskClearAfterRestart });
+    panel.webview.postMessage({ type: 'setRamDiskSaveOnRestart', value: project.settings.saveRamDiskOnRestart });
   } catch (e) {}
 
 
@@ -194,7 +194,7 @@ export async function openEmulatorPanel(
       try { emu.hardware?.Request(HardwareReq.STOP); } catch (e) {}
       if (emu.hardware) {
         // Save the RAM Disk
-        if (project && project.settings && !project.settings.ramDiskClearAfterRestart)
+        if (project && project.settings && project.settings.saveRamDiskOnRestart)
         {
           // Ensure the RAM Disk path is initialized
           if (!project.absolute_ram_disk_path) project.init_ram_disk_path();
@@ -488,9 +488,9 @@ export async function openEmulatorPanel(
         sendFrameToWebview(false);
       }
     }
-    else if (msg && msg.type === 'ramDiskClearAfterStartChange') {
+    else if (msg && msg.type === 'ramDiskSaveOnRestartChange') {
       let enable = !!msg.value;
-      project!.settings.ramDiskClearAfterRestart = enable;
+      project!.settings.saveRamDiskOnRestart = enable;
     }
   }, undefined, context.subscriptions);
 
@@ -507,7 +507,7 @@ export async function openEmulatorPanel(
         panel.webview.postMessage({ type: 'setViewMode', viewMode: currentViewMode });
       } catch (e) {}
       try {
-        panel.webview.postMessage({ type: 'setRamDiskClearAfterStart', value: project!.settings.ramDiskClearAfterRestart });
+        panel.webview.postMessage({ type: 'setRamDiskSaveOnRestart', value: project!.settings.saveRamDiskOnRestart });
       } catch (e) {}
     }
   }, null, context.subscriptions);

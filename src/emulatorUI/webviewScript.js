@@ -12,7 +12,7 @@
     const memoryDeltaButtons = document.querySelectorAll('[data-mem-delta]');
     const memoryRefreshButton = document.querySelector('[data-mem-action="refresh"]');
     const memoryPcHint = document.getElementById('memory-pc-hint');
-    const ramDiskClearAfterRestart = document.getElementById('ram-disk-clear-after-restart');
+    const ramDiskSaveOnRestart = document.getElementById('ram-disk-save-on-restart');
     const hwRegsEl = document.getElementById('hw-regs');
     const hwStackBody = document.getElementById('hw-stack-body');
     const hwMetricsEl = document.getElementById('hw-metrics');
@@ -333,9 +333,9 @@
       });
     }
 
-    if (ramDiskClearAfterRestart instanceof HTMLInputElement) {
-      ramDiskClearAfterRestart.addEventListener('change', () => {
-        vscode.postMessage({ type: 'ramDiskClearAfterStartChange', value: ramDiskClearAfterRestart.checked });
+    if (ramDiskSaveOnRestart instanceof HTMLInputElement) {
+      ramDiskSaveOnRestart.addEventListener('change', () => {
+        vscode.postMessage({ type: 'ramDiskSaveOnRestartChange', value: ramDiskSaveOnRestart.checked });
       });
     }
 
@@ -428,9 +428,9 @@
           viewSelect.value = String(msg.viewMode);
         }
         break;
-      case 'setRamDiskClearAfterStart':
-        if (ramDiskClearAfterRestart instanceof HTMLInputElement && msg.value !== undefined) {
-          ramDiskClearAfterRestart.checked = !!msg.value;
+      case 'setRamDiskSaveOnRestart':
+        if (ramDiskSaveOnRestart instanceof HTMLInputElement && msg.value !== undefined) {
+          ramDiskSaveOnRestart.checked = !!msg.value;
         }
         break;
       default:

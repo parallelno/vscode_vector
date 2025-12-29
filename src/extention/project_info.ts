@@ -216,8 +216,8 @@ export class ProjectSettings {
   private _viewMode?: 'full' | 'noBorder' = undefined;
   /** Path to the RAM disk data file for persistence */
   private _ramDiskPath?: string = undefined;
-  /** Clear RAM disk data on emulator restart */
-  private _ramDiskClearAfterRestart?: boolean | undefined = undefined;
+  /** Save RAM disk data on emulator restart */
+  private _saveRamDiskOnRestart?: boolean | undefined = undefined;
   /** Floppy drive index to load fdd (0-3) */
   private _fddIdx?: number | undefined = undefined;
   /** Automatically boot FDD if pfddPath is set */
@@ -234,8 +234,8 @@ export class ProjectSettings {
   get ramDiskPath(): string | undefined {
     return this._ramDiskPath ?? undefined;
   }
-  get ramDiskClearAfterRestart(): boolean {
-    return this._ramDiskClearAfterRestart ?? true;
+  get saveRamDiskOnRestart(): boolean {
+    return this._saveRamDiskOnRestart ?? false;
   }
   get fddIdx(): number {
     return this._fddIdx ?? 0;
@@ -255,8 +255,8 @@ export class ProjectSettings {
   set ramDiskPath(value: string | undefined) {
     this._ramDiskPath = value;
   }
-  set ramDiskClearAfterRestart(value: boolean) {
-    this._ramDiskClearAfterRestart = value;
+  set saveRamDiskOnRestart(value: boolean) {
+    this._saveRamDiskOnRestart = value;
   }
   set fddIdx(value: number) {
     this._fddIdx = value;

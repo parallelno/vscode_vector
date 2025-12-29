@@ -55,7 +55,7 @@ export class Emulator {
     if (this._project.settings.ramDiskPath && !ramDisk) {
       result.addWarning(`Cannot load RAM disk file: ${this._project.absolute_ram_disk_path!}`);
     }
-    this._hardware = new Hardware(bootRom, ramDisk, this._project.settings.ramDiskClearAfterRestart);
+    this._hardware = new Hardware(bootRom, ramDisk);
     this._debugger = new Debugger(this._hardware);
 
     return result;
@@ -226,7 +226,7 @@ export class Emulator {
     let result = new type.EmulatorResult();
     if (!this._project) return result.addError("Settings was not inited");
 
-    if (!this._project.settings.ramDiskClearAfterRestart && this._project.settings.ramDiskPath)
+    if (this._project.settings.saveRamDiskOnRestart && this._project.settings.ramDiskPath)
     {
       const ramDisk = this._hardware?.Request(HardwareReq.GET_RAM_DISK)["data"] as Uint8Array | undefined;
       if (ramDisk)

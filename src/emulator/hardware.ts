@@ -60,10 +60,9 @@ export class Hardware
 
   constructor(
     bootRom: Uint8Array | undefined,
-    ramDisk: Uint8Array | undefined,
-    ramDiskClearAfterRestart: boolean,)
+    ramDisk: Uint8Array | undefined)
   {
-    this._memory = new Memory(bootRom, ramDisk, ramDiskClearAfterRestart);
+    this._memory = new Memory(bootRom, ramDisk);
     this.result.add(this._memory.result);
 
     this._keyboard = new Keyboard();
