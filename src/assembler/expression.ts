@@ -153,17 +153,6 @@ function resolveSymbolValue(name: string, ctx: ExpressionEvalContext): number | 
   if (lowered === 'false') return 0;
   const scopeKey = ctx.lineIndex > 0 && ctx.lineIndex - 1 < ctx.scopes.length ? ctx.scopes[ctx.lineIndex - 1] : undefined;
   const constVal = resolveScopedConst(name, ctx.consts, scopeKey, ctx.macroScope);
-  // Temporary debug to trace diff_addr scoping issues
-  if (lowered === 'diff_addr') {
-    console.log('resolveSymbolValue diff_addr', {
-      macroScope: ctx.macroScope,
-      scopeKey,
-      constVal,
-      hasKey: ctx.consts.has(name),
-      altKey: ctx.macroScope ? `${ctx.macroScope}::${name}` : undefined,
-      altHas: ctx.macroScope ? ctx.consts.has(`${ctx.macroScope}::${name}`) : undefined
-    });
-  }
   if (constVal !== undefined) return constVal;
   if (ctx.labels.has(name)) return ctx.labels.get(name)!.addr;
   for (const [k, v] of ctx.labels) {
