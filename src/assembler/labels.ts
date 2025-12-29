@@ -116,6 +116,16 @@ export function resolveScopedConst(
     }
   }
 
+  // Fallback: allow matching any scoped symbol whose trailing component matches
+  // the requested name. This covers cases where scope information was lost but
+  // the macro-scoped constant still exists (e.g., HL_ADVANCE_X::diff_addr).
+  const targetLower = name.toLowerCase();
+  for (const [k, v] of consts) {
+    const parts = k.split('::');
+    const tail = parts[parts.length - 1];
+    if (tail && tail.toLowerCase() === targetLower) return v;
+  }
+
   return undefined;
 }
 

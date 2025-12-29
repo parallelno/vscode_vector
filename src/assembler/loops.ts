@@ -12,6 +12,10 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
   const dummyLabels = new Map<string, { addr: number; line: number; src?: string }>();
   const dummyLocals: LocalLabelScopeIndex = new Map();
   const dummyScopes: string[] = [];
+  type IfFrame = { active: boolean; anyTrue: boolean; parentActive: boolean };
+  const ifStack: IfFrame[] = [];
+
+  const isActive = () => ifStack.length ? ifStack[ifStack.length - 1]!.active : true;
 
   function describeLine(idx: number): string {
     return describeOrigin(origins[idx], idx + 1, sourcePath);
@@ -32,7 +36,7 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
       // During loop expansion we may see forward references or symbols that are
       // defined later (e.g., variables or labels). Ignore those undefined
       // symbol errors here and let the main assembly pass report them if needed.
-      if (!/Undefined symbol/i.test(msg)) {
+      if (!/Undefined symbol/i.test(msg) && !/Location counter '\*' is not available/i.test(msg)) {
         errors.push(`Failed to evaluate expression '${expr}' at ${describeLine(idx)}: ${msg}`);
       }
       return null;
@@ -40,7 +44,7 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
   }
 
   function tryRecordConstant(trimmed: string, idx: number) {
-    const assignMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
+    const assignMatch = trimmed.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:??\s*=\s*(.+)$/);
     if (assignMatch) {
       const [, name, rhsRaw] = assignMatch;
       const rhs = rhsRaw.trim();
@@ -48,7 +52,7 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
       if (val !== null && Number.isFinite(val)) constState.set(name, val);
       return;
     }
-    const equMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\s+(.+)$/i);
+    const equMatch = trimmed.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:??\s+EQU\s+(.+)$/i);
     if (equMatch) {
       const [, name, rhsRaw] = equMatch;
       const rhs = rhsRaw.trim();
@@ -84,7 +88,77 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
         continue;
       }
 
+      if (/^\.if\b/i.test(trimmed)) {
+        const expr = trimmed.replace(/^\.if\b/i, '').trim();
+        const parentActive = isActive();
+        const condVal = expr.length ? evalExpr(expr, i) : null;
+        const truthy = condVal === null ? true : condVal !== 0;
+        const frame: IfFrame = { active: parentActive && truthy, anyTrue: truthy, parentActive };
+        ifStack.push(frame);
+        outLines.push(raw);
+        outOrigins.push(origins[i]);
+        i++;
+        continue;
+      }
+
+      if (/^\.elseif\b/i.test(trimmed)) {
+        if (!ifStack.length) {
+          errors.push(`.elseif without matching .if at ${describeLine(i)}`);
+          outLines.push(raw);
+          outOrigins.push(origins[i]);
+          i++;
+          continue;
+        }
+        const prev = ifStack[ifStack.length - 1]!;
+        const parentActive = prev.parentActive;
+        const condVal = trimmed.replace(/^\.elseif\b/i, '').trim();
+        const evaluated = condVal.length ? evalExpr(condVal, i) : null;
+        const truthy = evaluated === null ? true : evaluated !== 0;
+        const alreadyTrue = prev.anyTrue;
+        prev.active = parentActive && !alreadyTrue && truthy;
+        prev.anyTrue = alreadyTrue || truthy;
+        outLines.push(raw);
+        outOrigins.push(origins[i]);
+        i++;
+        continue;
+      }
+
+      if (/^\.else\b/i.test(trimmed)) {
+        if (!ifStack.length) {
+          errors.push(`.else without matching .if at ${describeLine(i)}`);
+          outLines.push(raw);
+          outOrigins.push(origins[i]);
+          i++;
+          continue;
+        }
+        const prev = ifStack[ifStack.length - 1]!;
+        prev.active = prev.parentActive && !prev.anyTrue;
+        prev.anyTrue = true;
+        outLines.push(raw);
+        outOrigins.push(origins[i]);
+        i++;
+        continue;
+      }
+
+      if (/^\.endif\b/i.test(trimmed)) {
+        if (!ifStack.length) {
+          errors.push(`.endif without matching .if at ${describeLine(i)}`);
+        } else {
+          ifStack.pop();
+        }
+        outLines.push(raw);
+        outOrigins.push(origins[i]);
+        i++;
+        continue;
+      }
+
       if (/^\.loop\b/i.test(trimmed)) {
+        if (!isActive()) {
+          outLines.push(raw);
+          outOrigins.push(origins[i]);
+          i++;
+          continue;
+        }
         if (/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?[ \t]*\.loop\b/i.test(trimmed)) {
           errors.push(`Labels are not allowed on .loop directives at ${describeLine(i)}`);
         }
@@ -125,6 +199,12 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
       }
 
       if (/^\.endloop\b/i.test(trimmed)) {
+        if (!isActive()) {
+          outLines.push(raw);
+          outOrigins.push(origins[i]);
+          i++;
+          continue;
+        }
         if (/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?[ \t]*\.endloop\b/i.test(trimmed)) {
           errors.push(`Labels are not allowed on .endloop directives at ${describeLine(i)}`);
         } else {
@@ -136,7 +216,9 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
 
       outLines.push(raw);
       outOrigins.push(origins[i]);
-      tryRecordConstant(trimmed, i);
+      if (isActive()) {
+        tryRecordConstant(trimmed, i);
+      }
       i++;
     }
   }
