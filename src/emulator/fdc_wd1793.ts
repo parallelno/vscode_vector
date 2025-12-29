@@ -232,6 +232,15 @@ export class Fdc1793 {
         return ret;
     }
 
+    Dismount(fddIdx: number): FdcDiskImage {
+        const idx = fddIdx % Fdc1793.DRIVES_MAX;
+        const ret = this.disks[idx].Dismount();
+        if (idx === this.drive) {
+            this.Reset();
+        }
+        return ret;
+    }
+
     DismountAll(): FdcDiskImage[] {
         const ret = [];
         for (let i = 0; i < Fdc1793.DRIVES_MAX; i++) {

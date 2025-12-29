@@ -4,3 +4,11 @@
 
 temp/
 test/**/*.rom
+
+# Frames output from run_frames tool
+frames_out/
+
+# Ignore build and cache artifacts
+.venv/
+dist/
+node_modules/.cache/

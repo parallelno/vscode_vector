@@ -36,3 +36,8 @@ test/core/
 
 temp/
 test/**/*.rom
+
+# Ignore build and cache artifacts
+.venv/
+dist/
+node_modules/.cache/

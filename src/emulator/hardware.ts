@@ -484,28 +484,38 @@ export class Hardware
         };
       break;
 */
-    case HardwareReq.MOUNT_FDD:{
-      const driveIdx = data["fddIdx"] || undefined;
-      const path = data["path"] || undefined;
-      const disk_data = data["data"] || undefined;
-      if (!disk_data || !path || !driveIdx) {
+    case HardwareReq.DISMOUNT_FDD:{
+      const driveIdx = data.fddIdx;
+      if (driveIdx === undefined) {
         break;
       }
-      const old_img = this._fdc?.Mount({fddIdx: driveIdx, data: disk_data, path: path});
-      out = {"data": old_img};
+      const old_img = this._fdc?.Dismount(driveIdx);
+      out = {data: old_img};
       break;
     }
+
+    case HardwareReq.MOUNT_FDD:{
+      const driveIdx = data.fddIdx;
+      const path = data.path;
+      const disk_data = data.data;
+      if (!disk_data || !path || driveIdx === undefined) {
+        break;
+      }
+      this._fdc?.Mount({fddIdx: driveIdx, data: disk_data, path: path});
+      break;
+    }
+
     case HardwareReq.DISMOUNT_FDD_ALL:
       const old_imgs = this._fdc?.DismountAll() || [];
-      out = {"data": old_imgs};
+      out = {data: old_imgs};
       break;
 
     case HardwareReq.RESET_UPDATE_FDD:
-      this._fdc?.ResetUpdate(data["driveIdx"]);
+      this._fdc?.ResetUpdate(data.driveIdx);
       break;
 
     case HardwareReq.DEBUG_ATTACH:
-      this.debugAttached = data["data"];
+      this.debugAttached = data.data;
       break;
 
     default:

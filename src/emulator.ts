@@ -143,6 +143,15 @@ export class Emulator {
       return result.addError("Project info was not provided");
     }
 
+    // Retrieve the old FDD image if any
+    const old_img = this._hardware?.Request(
+      HardwareReq.DISMOUNT_FDD, {"fddIdx": fddIdx}).data as FdcDiskImage;
+    // save old fdd to the disk
+    if (old_img && old_img.path && !this._project.settings.fddReadOnly) {
+      fs.writeFileSync(old_img.path, old_img.data);
+      result.addPrintMessage(`Saved old FDD image to path: ${old_img.path}`);
+    }
+
     const buffer = fs.readFileSync(path);
     let fddimg = new Uint8Array(buffer);
     if (!fddimg || fddimg.length === 0) {
@@ -158,9 +167,8 @@ export class Emulator {
     this._hardware?.Request(HardwareReq.STOP);
 
     // loading the fdd data
-    const fdcDiskImage: FdcDiskImage = {fddIdx: fddIdx, data: fddimg, path: path};
-    const old_img = this._hardware?.Request(
-      HardwareReq.MOUNT_FDD, {"data": fdcDiskImage})["data"] as FdcDiskImage;
+    const fdcDiskImage: FdcDiskImage = {"fddIdx": fddIdx, "data": fddimg, "path": path};
+    this._hardware?.Request(HardwareReq.MOUNT_FDD, fdcDiskImage).data as FdcDiskImage;
 
     // TODO: check if we still need this
     //this._debugger?.GetDebugData().LoadDebugData(_path);
@@ -175,11 +183,6 @@ export class Emulator {
 
     result.addPrintMessage(`Loaded FDD ${path}, index: ${fddIdx}, autoBoot: ${autoBoot}`);
 
-    // save old fdd to the disk
-    if (!this._project.settings.fddReadOnly && old_img.data.length > 0) {
-      fs.writeFileSync(old_img.path, old_img.data);
-      result.addPrintMessage(`Saved old FDD image to path: ${old_img.path}`);
-    }
     return result;
   }
 
