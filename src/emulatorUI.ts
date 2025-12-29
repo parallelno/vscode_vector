@@ -546,9 +546,13 @@ export async function openEmulatorPanel(
       }
       await new Promise(resolve => setTimeout(resolve, delay));
 
-    } while (running);
+    } while (running && !panelDisposed);
 
-    // Force hardware stats update (bypassing throttle) when breaking to ensure Register panel is synchronized
+    // If the panel is gone, skip post-break work
+    if (panelDisposed) return;
+
+    // Force hardware stats update (bypassing throttle) when breaking to
+    // ensure Register panel is synchronized
     sendFrameToWebview(true);
     printDebugState('Break:', emu.hardware!, devectorOutput, panel);
     emitToolbarState(false);
