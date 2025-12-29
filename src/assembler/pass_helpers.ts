@@ -5,7 +5,8 @@ import {
   expandMacroScopeChain,
   extractMacroScope,
   formatMacroScopedName,
-  resolveScopedConst
+  resolveScopedConst,
+  resolveLocalLabelKey
 } from './labels';
 
 type LabelMap = Map<string, { addr: number; line: number; src?: string }>;
@@ -37,6 +38,13 @@ function resolveVariableStoreKey(
   state: AssemblyEvalState,
   srcLine: number
 ): { key: string; alias?: string } {
+  if (name.startsWith('@')) {
+    const refLine = state.originLines ? state.originLines[srcLine - 1] : undefined;
+    const key = resolveLocalLabelKey(name, srcLine, state.scopes, state.localsIndex, refLine);
+    if (key) return { key };
+    return { key: name };
+  }
+
   const scopeKey = srcLine > 0 && srcLine - 1 < state.scopes.length ? state.scopes[srcLine - 1] : undefined;
   const macroScope = extractMacroScope(scopeKey);
 
