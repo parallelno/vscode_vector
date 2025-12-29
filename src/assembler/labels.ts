@@ -63,12 +63,14 @@ export function getFileKey(orig: SourceOrigin | undefined, sourcePath?: string):
 export function getScopeKey(
   orig: SourceOrigin | undefined,
   sourcePath: string | undefined,
-  directiveCounter: number
+  globalScopeId: number,
+  macroScopeOverride?: string
 ): string {
   const fileForScope = orig?.macroInstance?.callerFile || orig?.file;
   const fileKey = fileForScope ? path.resolve(fileForScope) : getFileKey(orig, sourcePath);
-  let key = fileKey + '::' + directiveCounter;
-  if (orig?.macroScope) key += `::${orig.macroScope}`;
+  const macroScope = macroScopeOverride ?? orig?.macroScope;
+  let key = `${fileKey}::${globalScopeId}`;
+  if (macroScope) key += `::${macroScope}`;
   return key;
 }
 

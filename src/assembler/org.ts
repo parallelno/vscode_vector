@@ -14,7 +14,7 @@ export function handleOrgFirstPass(params: {
   localsIndex: LocalLabelScopeIndex;
   labels: Map<string, { addr: number; line: number; src?: string }>;
   pendingDirectiveLabel: string | null;
-  makeScopeKey: (orig?: SourceOrigin) => string;
+  makeScopeKey: (orig?: SourceOrigin, scopeId?: number) => string;
   registerLabel: (name: string, address: number, origin: SourceOrigin | undefined, fallbackLine: number, scopeKey: string) => void;
   errors: string[];
   addr: number;

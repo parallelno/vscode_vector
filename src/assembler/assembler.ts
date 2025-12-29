@@ -19,7 +19,7 @@ import { prepareMacros, expandMacroInvocations } from './macro';
 import { expandLoopDirectives } from './loops';
 import { applyOptionalBlocks } from './optional';
 import { processIncludes } from './includes';
-import { registerLabel as registerLabelHelper, getScopeKey, formatMacroScopedName, resolveScopedConst } from './labels';
+import { registerLabel as registerLabelHelper, getScopeKey, getFileKey, formatMacroScopedName, resolveScopedConst } from './labels';
 import { isAddressDirective, checkLabelOnDirective, tokenize } from './common';
 import { handleDB, handleDW, handleDD, handleStorage, DataContext } from './data';
 import {
@@ -203,8 +203,11 @@ export function assemble(
   // global numeric id counters per local name to ensure exported keys are unique
   const globalLocalCounters = new Map<string, number>();
   const scopes: string[] = new Array(lines.length);
+  const globalScopeCounters = new Map<string, number>();
+  let currentFileKey = origins.length ? getFileKey(origins[0], sourcePath) : getFileKey(undefined, sourcePath);
+  let currentGlobalScopeId = 0;
+  globalScopeCounters.set(currentFileKey, currentGlobalScopeId);
   const alignDirectives: Array<AlignDirectiveEntry | undefined> = new Array(lines.length);
-  let directiveCounter = 0;
 
   // Initialize the current address counter to 0
   let addr = 0;
@@ -327,8 +330,9 @@ export function assemble(
   }
 
   // Helper to create scope key
-  function makeScopeKey(orig?: SourceOrigin): string {
-    return getScopeKey(orig, sourcePath, directiveCounter);
+  function makeScopeKey(orig?: SourceOrigin, scopeId?: number): string {
+    const scope = typeof scopeId === 'number' ? scopeId : currentGlobalScopeId;
+    return getScopeKey(orig, sourcePath, scope);
   }
 
   function scopedConstName(name: string, origin: SourceOrigin | undefined): string {
@@ -354,17 +358,26 @@ export function assemble(
     directiveCtx.currentMacroScope = origins[i]?.macroScope;
     directiveCtx.currentOriginLine = origins[i]?.line;
 
-    // Update directive counter and scope key when file changes
-    if (i > 0) {
-      const prev = origins[i - 1];
-      const curr = origins[i];
-      const prevKey = prev && prev.file ? path.resolve(prev.file) : (sourcePath ? path.resolve(sourcePath) : '<memory>');
-      const currKey = curr && curr.file ? path.resolve(curr.file) : (sourcePath ? path.resolve(sourcePath) : '<memory>');
-      if (prevKey !== currKey) {
-        directiveCounter++;
-      }
+    // Track current file scope and reset global-scope counter on file change
+    const currFileKey = getFileKey(origins[i], sourcePath);
+    if (currFileKey !== currentFileKey) {
+      currentFileKey = currFileKey;
+      currentGlobalScopeId = globalScopeCounters.get(currFileKey) ?? 0;
     }
 
+    // Tokenize early so we can detect scope boundaries before registering labels
+    const tokenized = tokenize(line);
+    const tokens = tokenized.tokens;
+    const tokenOffsets = tokenized.offsets;
+    if (!tokens.length) {
+      scopes[i] = makeScopeKey(origins[i]);
+      continue;
+    }
+    let pendingDirectiveLabel: string | null = null;
+
+    const leadingCandidate = tokens[0].endsWith(':') ? tokens[0].slice(0, -1)
+      : (tokens.length >= 2 && isAddressDirective(tokens[1]) ? tokens[0] : null);
+    const startsNewGlobalScope = !!leadingCandidate && !leadingCandidate.startsWith('@');
     scopes[i] = makeScopeKey(origins[i]);
     const originDesc = describeOrigin(origins[i], i + 1, sourcePath);
 
@@ -397,6 +410,15 @@ export function assemble(
     }
 
     const blockActive = ifStack.length === 0 ? true : ifStack[ifStack.length - 1].effective;
+
+    // Finalize scope for this line: only create a new scope when a global label is active
+    if (blockActive && startsNewGlobalScope) {
+      const nextScopeId = currentGlobalScopeId + 1;
+      scopes[i] = makeScopeKey(origins[i], nextScopeId);
+      currentGlobalScopeId = nextScopeId;
+      globalScopeCounters.set(currFileKey, currentGlobalScopeId);
+    }
+
     if (!blockActive) continue;
 
     // Skip .print and .error directives in first pass
@@ -413,7 +435,7 @@ export function assemble(
     }
 
     // .var directive: "NAME .var InitialValue" (label optional)
-    const varMatch = line.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:?[\t ]+\.var\b(.*)$/i);
+    const varMatch = line.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:?[^\S\r\n]*\.var\b(.*)$/i);
     if (varMatch) {
       const rawName = varMatch[1];
       const rhs = (varMatch[2] || '').trim();
@@ -439,12 +461,6 @@ export function assemble(
       }
       continue;
     }
-
-    const tokenized = tokenize(line);
-    const tokens = tokenized.tokens;
-    const tokenOffsets = tokenized.offsets;
-    if (!tokens.length) continue;
-    let pendingDirectiveLabel: string | null = null;
 
     // simple constant / EQU handling: "NAME = expr" or "NAME EQU expr"
     if (tokens.length >= 3 && (tokens[1] === '=' || tokens[1].toUpperCase() === 'EQU')) {
@@ -608,7 +624,6 @@ export function assemble(
         addr,
         originDesc
       });
-      directiveCounter++;
       addr = result.addr;
       pendingDirectiveLabel = result.pendingDirectiveLabel;
       continue;
