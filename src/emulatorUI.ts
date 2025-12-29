@@ -455,7 +455,7 @@ export async function openEmulatorPanel(
   panel.webview.onDidReceiveMessage(msg => {
     if (msg && msg.type === 'key') {
       // keyboard events: forward to keyboard handling
-      const action: string = msg.string === 'down' ? 'down' : 'up'
+      const action: string = msg.kind === 'down' ? 'down' : 'up';
       emu.hardware?.Request(HardwareReq.KEY_HANDLING, { "scancode": msg.code, "action": action });
 
     }
