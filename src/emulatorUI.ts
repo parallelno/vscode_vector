@@ -503,6 +503,12 @@ export async function openEmulatorPanel(
       try {
         panel.webview.postMessage({ type: 'setSpeed', speed: project!.settings.speed });
       } catch (e) {}
+      try {
+        panel.webview.postMessage({ type: 'setViewMode', viewMode: currentViewMode });
+      } catch (e) {}
+      try {
+        panel.webview.postMessage({ type: 'setRamDiskClearAfterStart', value: project!.settings.ramDiskClearAfterRestart });
+      } catch (e) {}
     }
   }, null, context.subscriptions);
 
