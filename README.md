@@ -499,6 +499,10 @@ Nested macros are supported (up to 32 levels deep), but you cannot open another 
 
 ## Dev's Pit
 
+### Using VSC devcontainers
+
+For dev container setup and usage see the dedicated file: [.devcontainer/README.md](.devcontainer/README.md)
+
 ### How to Compile this Extentsion
 
 - Compile TypeScript:
