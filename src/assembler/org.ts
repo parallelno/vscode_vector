@@ -1,7 +1,7 @@
 import { argsAfterToken } from './common';
 import { parseNumberFull, describeOrigin } from './utils';
 import { LocalLabelScopeIndex, SourceOrigin } from './types';
-import { resolveScopedConst } from './labels';
+import { resolveLocalLabelKey, resolveScopedConst } from './labels';
 
 export function handleOrgFirstPass(params: {
   line: string;
@@ -13,6 +13,7 @@ export function handleOrgFirstPass(params: {
   scopes: string[];
   localsIndex: LocalLabelScopeIndex;
   labels: Map<string, { addr: number; line: number; src?: string }>;
+  consts: Map<string, number>;
   pendingDirectiveLabel: string | null;
   makeScopeKey: (orig?: SourceOrigin, scopeId?: number) => string;
   registerLabel: (name: string, address: number, origin: SourceOrigin | undefined, fallbackLine: number, scopeKey: string) => void;
@@ -30,6 +31,7 @@ export function handleOrgFirstPass(params: {
     scopes,
     localsIndex,
     labels,
+    consts,
     pendingDirectiveLabel,
     makeScopeKey,
     registerLabel,
@@ -42,22 +44,22 @@ export function handleOrgFirstPass(params: {
   const aTok = rest.trim().split(/\s+/)[0];
   const org = origin;
   let val: number | null = null;
+  const scopeKey = scopes[lineIndex - 1];
   const num = parseNumberFull(aTok);
-  if (num !== null) val = num & 0xffff;
-  else if (aTok && aTok[0] === '@') {
-    // try to resolve local label in current scope
-    const scopeKey = makeScopeKey(org);
-    const fileMap = localsIndex.get(scopeKey);
-    if (fileMap) {
-      const arr = fileMap.get(aTok.slice(1));
-      if (arr && arr.length) {
-        // pick first definition (definitions earlier in file would be recorded)
-        const key = arr[0].key;
-        val = labels.get(key)!.addr & 0xffff;
-      }
+  if (num !== null) {
+    val = num & 0xffff;
+  } else if (aTok && aTok[0] === '@') {
+    const refLine = org?.line;
+    const key = resolveLocalLabelKey(aTok, lineIndex, scopes, localsIndex, refLine);
+    if (key) {
+      if (consts.has(key)) val = consts.get(key)! & 0xffff;
+      else if (labels.has(key)) val = labels.get(key)!.addr & 0xffff;
     }
   } else if (labels.has(aTok)) {
     val = labels.get(aTok)!.addr & 0xffff;
+  } else {
+    const constVal = resolveScopedConst(aTok, consts, scopeKey);
+    if (constVal !== undefined) val = constVal & 0xffff;
   }
   if (val === null) {
     errors.push(`Bad ORG address '${aTok}' at ${originDesc}`);
@@ -89,35 +91,57 @@ export function handleOrgSecondPass(params: {
   origins: SourceOrigin[];
   sourcePath: string | undefined;
   scopes: string[];
+  localsIndex: LocalLabelScopeIndex;
+  originLines?: Array<number | undefined>;
   map: Record<number, number>;
 }): { handled: boolean; addr: number } {
-  const { line, tokens, tokenOffsets, labels, consts, errors, addr: currentAddr, lineIndex, origins, sourcePath, scopes, map } = params;
+  const {
+    line,
+    tokens,
+    tokenOffsets,
+    labels,
+    consts,
+    errors,
+    addr: currentAddr,
+    lineIndex,
+    origins,
+    sourcePath,
+    scopes,
+    localsIndex,
+    originLines,
+    map
+  } = params;
   const scopeKey = lineIndex > 0 && lineIndex - 1 < scopes.length ? scopes[lineIndex - 1] : undefined;
   const originDesc = describeOrigin(origins[lineIndex - 1], lineIndex, sourcePath);
   const rest = argsAfterToken(line, tokens[0], tokenOffsets[0]);
   const aTok = rest.trim().split(/\s+/)[0];
-  const val = parseNumberFull(aTok);
-  if (val === null) {
-    const parsed = parseNumberFull(aTok);
-    const addrVal = parsed ?? null;
-    if (addrVal === null) {
-      const labelVal = labels.has(aTok) ? labels.get(aTok)!.addr : null;
-      const constVal = resolveScopedConst(aTok, consts, scopeKey);
-      const constResolved = constVal !== undefined ? constVal : null;
-      const resolved = labelVal !== null ? labelVal : constResolved;
-      if (resolved === null) {
-        errors.push(`Bad ORG address '${aTok}' at ${originDesc}`);
-        return { handled: true, addr: currentAddr };
-      }
-      map[lineIndex] = resolved & 0xffff;
-      return { handled: true, addr: resolved & 0xffff };
+  const directVal = parseNumberFull(aTok);
+
+  let resolved: number | null = directVal !== null ? directVal & 0xffff : null;
+
+  if (resolved === null && aTok && aTok[0] === '@') {
+    const refLine = originLines ? originLines[lineIndex - 1] : undefined;
+    const key = resolveLocalLabelKey(aTok, lineIndex, scopes, localsIndex, refLine);
+    if (key) {
+      if (consts.has(key)) resolved = consts.get(key)! & 0xffff;
+      else if (labels.has(key)) resolved = labels.get(key)!.addr & 0xffff;
     }
   }
-  const finalVal = val !== null ? val & 0xffff : parseNumberFull(aTok);
-  if (finalVal === null) {
+
+  if (resolved === null && labels.has(aTok)) {
+    resolved = labels.get(aTok)!.addr & 0xffff;
+  }
+
+  if (resolved === null) {
+    const constVal = resolveScopedConst(aTok, consts, scopeKey);
+    if (constVal !== undefined) resolved = constVal & 0xffff;
+  }
+
+  if (resolved === null) {
     errors.push(`Bad ORG address '${aTok}' at ${originDesc}`);
     return { handled: true, addr: currentAddr };
   }
-  map[lineIndex] = finalVal & 0xffff;
-  return { handled: true, addr: finalVal & 0xffff };
+
+  map[lineIndex] = resolved & 0xffff;
+  return { handled: true, addr: resolved & 0xffff };
 }

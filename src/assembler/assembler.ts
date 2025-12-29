@@ -616,6 +616,7 @@ export function assemble(
         sourcePath,
         scopes,
         localsIndex,
+        consts,
         labels,
         pendingDirectiveLabel,
         makeScopeKey,
@@ -928,6 +929,8 @@ export function assemble(
         origins,
         sourcePath,
         scopes,
+        localsIndex,
+        originLines,
         map
       });
       addr = result.addr;
