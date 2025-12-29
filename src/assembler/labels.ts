@@ -57,7 +57,9 @@ export function registerLabel(
 }
 
 export function getFileKey(orig: SourceOrigin | undefined, sourcePath?: string): string {
-  return (orig && orig.file) ? path.resolve(orig.file) : (sourcePath ? path.resolve(sourcePath) : '<memory>');
+  const callerFile = orig?.macroInstance?.callerFile;
+  const file = callerFile || orig?.file;
+  return file ? path.resolve(file) : (sourcePath ? path.resolve(sourcePath) : '<memory>');
 }
 
 export function getScopeKey(
@@ -144,7 +146,13 @@ export function resolveLocalLabelKey(
   if (!localName || localName[0] !== '@') return null;
   if (lineIndex <= 0 || lineIndex - 1 >= scopes.length) return null;
   const scopeKey = scopes[lineIndex - 1];
-  const fileKey = scopeKey.split('::')[0];
+  const parts = scopeKey.split('::');
+  const fileKey = parts[0];
+  const scopeId = parts[1];
+  const basePrefix = `${fileKey}::${scopeId}`;
+  const currMacroScope = extractMacroScope(scopeKey);
+
+  const logDebug = false;
 
   const tryResolve = (arr?: { key: string; line: number }[] | null) => {
     if (!arr || !arr.length) return null;
@@ -163,17 +171,42 @@ export function resolveLocalLabelKey(
     return chosen ? chosen.key : null;
   };
 
-  // First, attempt within the current scope
+  // First, attempt within the exact current scope
   const fileMap = localsIndex.get(scopeKey);
   const scopedKey = tryResolve(fileMap ? fileMap.get(localName.slice(1)) : null);
   if (scopedKey) return scopedKey;
 
-  // Fallback: scan other scopes from the same file (covers cases where a scope
-  // boundary was misaligned but the file-level local should still resolve).
-  for (const [key, map] of localsIndex.entries()) {
-    if (!key.startsWith(fileKey)) continue;
-    const altKey = tryResolve(map.get(localName.slice(1)) || null);
-    if (altKey) return altKey;
+  // If we are inside a macro-expanded line, also try the parent (caller) scope
+  // for the same file/scopeId without the macro suffix before widening search.
+  if (currMacroScope) {
+    const parentScopeKey = `${fileKey}::${scopeId}`;
+    const parentMap = localsIndex.get(parentScopeKey);
+    const parentKey = tryResolve(parentMap ? parentMap.get(localName.slice(1)) : null);
+    if (parentKey) return parentKey;
+  }
+
+  // Fallback: scan other scopes from the same file. Prefer the current global
+  // scope id first, then other scopes in the file. Within each scope, search
+  // the macro-scope chain (most specific -> ancestors -> unscoped). This
+  // allows macro bodies to see caller locals and lets alias labels (global
+  // names assigned to locals) resolve across adjacent global-scope ids
+  // without pulling symbols from other files.
+  const macroChain = expandMacroScopeChain(currMacroScope);
+  const searchOrders: Array<string | undefined> = [...macroChain];
+  if (!searchOrders.includes(undefined)) searchOrders.push(undefined);
+
+  const searchBuckets = [basePrefix, fileKey];
+
+  for (const bucket of searchBuckets) {
+    for (const targetMacroScope of searchOrders) {
+      for (const [key, map] of localsIndex.entries()) {
+        if (!key.startsWith(bucket)) continue;
+        const macroScope = extractMacroScope(key);
+        if (macroScope !== targetMacroScope) continue;
+        const altKey = tryResolve(map.get(localName.slice(1)) || null);
+        if (altKey) return altKey;
+      }
+    }
   }
 
   return null;
