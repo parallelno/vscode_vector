@@ -282,6 +282,25 @@ export async function compileProjectFile(
                                         project.absolute_path!);
   if (!success) return false;
 
+  const alignValue = project.romAlign;
+  if (typeof alignValue === 'number' && Number.isFinite(alignValue) && alignValue > 0) {
+    try {
+      const stat = fs.statSync(project.absolute_rom_path!);
+      const remainder = stat.size % alignValue;
+      if (remainder !== 0) {
+        const pad = alignValue - remainder;
+        fs.appendFileSync(project.absolute_rom_path!, Buffer.alloc(pad, 0));
+        ext_utils.logOutput(
+          devectorOutput,
+          `Devector: Padded ROM to ${alignValue}-byte alignment (+${pad} bytes)`);
+      }
+    } catch (err) {
+      ext_utils.logOutput(
+        devectorOutput,
+        `Devector: Failed to align ROM length: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const reason = options.reason ? ` (${options.reason})` : '';
   ext_utils.logOutput(
     devectorOutput,
@@ -292,7 +311,6 @@ export async function compileProjectFile(
     );
   }
 
-  // TODO: think of a better way to reload breakpoints
   reloadEmulatorBreakpointsFromFile();
   return true;
 }

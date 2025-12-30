@@ -14,6 +14,8 @@ export class ProjectInfo {
   debugPath: string | undefined = undefined;
   /** Path to the output ROM file */
   romPath: string | undefined = undefined;
+  /** Optional ROM size alignment in bytes (e.g., 2 to force even length) */
+  romAlign: number | undefined = undefined;
   /** Path to the FDD data file for persistence */
   fddPath: string | undefined = undefined;
   /** Optional directory that contains dependent project files to compile first */

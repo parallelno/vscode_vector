@@ -61,6 +61,7 @@ All projects begin by creating a `.project.json` file that declares the project 
   "debugPath": "prg.debug.json",
   "romPath": "out\\prg.rom",
   "fddPath": "out\\prg.fdd",
+  "romAlign": 2,
   "dependentProjectsDir": "deps",
   "settings": {
     "speed": "max",
@@ -77,6 +78,7 @@ All projects begin by creating a `.project.json` file that declares the project 
 - **debugPath**: (Optional) Path for the generated debug metadata (e.g., `prg.debug.json`).
 - **romPath**: (Optional) Output ROM path (e.g., `out\\prg.rom`).
 - **fddPath**: (Optional) FDD image to boot; takes precedence over `romPath` when valid.
+- **romAlign**: Optional ROM size alignment in bytes (e.g., `2` to force even length).
 - **dependentProjectsDir**: (Optional) Directory containing other `*.project.json` files to compile first; paths resolve relative to the current project file unless absolute.
 - **settings**: (Optional) Per-project emulator preferences (see below).
 
