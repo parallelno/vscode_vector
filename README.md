@@ -35,6 +35,8 @@ This repository contains a VS Code extension with key features: a two-pass Intel
 - Build with **Devector: Compile Project**.
 - Press **F5** to launch and debug in the emulator.
 
+If `dependentProjectsDir` is set in your project file, the compiler will build every `*.project.json` in that directory first (in alphabetical order) before compiling the current project.
+
 Tips:
 - If the emulator panel was closed, you may be prompted for the RAM disk image path.
 - With multiple projects, **Devector: Compile Project** and **F5** will ask which project to build/run.
@@ -59,6 +61,7 @@ All projects begin by creating a `.project.json` file that declares the project 
   "debugPath": "prg.debug.json",
   "romPath": "out\\prg.rom",
   "fddPath": "out\\prg.fdd",
+  "dependentProjectsDir": "deps",
   "settings": {
     "speed": "max",
     "viewMode": "noBorder",
@@ -74,6 +77,7 @@ All projects begin by creating a `.project.json` file that declares the project 
 - **debugPath**: (Optional) Path for the generated debug metadata (e.g., `prg.debug.json`).
 - **romPath**: (Optional) Output ROM path (e.g., `out\\prg.rom`).
 - **fddPath**: (Optional) FDD image to boot; takes precedence over `romPath` when valid.
+- **dependentProjectsDir**: (Optional) Directory containing other `*.project.json` files to compile first; paths resolve relative to the current project file unless absolute.
 - **settings**: (Optional) Per-project emulator preferences (see below).
 
 ### Settings

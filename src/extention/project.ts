@@ -9,6 +9,9 @@ import * as ext_consts from './consts';
 import { collectIncludeFiles } from '../assembler/includes';
 
 
+type CompileOptions = { silent?: boolean; reason?: string; visited?: Set<string> };
+
+
 export async function loadAllProjects(
 	devectorOutput: vscode.OutputChannel,
 	workspaceRoot: string, opts: { silent?: boolean } = {})
@@ -114,12 +117,102 @@ export async function ensureRomReady(
 };
 
 
+function reportDependencyIssue(
+  devectorOutput: vscode.OutputChannel,
+  options: CompileOptions,
+  message: string)
+{
+  if (!options.silent) vscode.window.showErrorMessage(message);
+  else ext_utils.logOutput(devectorOutput, 'Devector: ' + message);
+}
+
+
+// Recursively compile dependent projects
+async function compileDependentProjects(
+  devectorOutput: vscode.OutputChannel,
+  project: ext_types.ProjectInfo,
+  options: CompileOptions,
+  visited: Set<string>)
+: Promise<boolean>
+{
+  const depsDir = project.absolute_dependent_projects_dir;
+  if (!depsDir) return true;
+
+  let dirStat: fs.Stats;
+  try {
+    dirStat = fs.statSync(depsDir);
+  } catch (err) {
+    const msg = `Dependent projects directory not found: ${depsDir}`;
+    reportDependencyIssue(devectorOutput, options, msg);
+    return false;
+  }
+
+  if (!dirStat.isDirectory()) {
+    const msg = `Dependent projects path is not a directory: ${depsDir}`;
+    reportDependencyIssue(devectorOutput, options, msg);
+    return false;
+  }
+
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(depsDir);
+  } catch (err) {
+    const msg = `Failed to read dependent projects directory: ${depsDir}`;
+    reportDependencyIssue(devectorOutput, options, msg);
+    return false;
+  }
+
+  const depProjectFiles = entries
+    .filter((entry) => entry.toLowerCase().endsWith(ext_consts.PROJECT_FILE_SUFFIX))
+    .map((entry) => path.join(depsDir, entry))
+    .sort((a, b) => a.localeCompare(b));
+
+  if (!depProjectFiles.length) return true;
+
+  const normalizedCurrent = project.absolute_path
+    ? ext_utils.normalizeFsPath(project.absolute_path)
+    : '';
+
+  for (const depPath of depProjectFiles) {
+    const normalizedDepPath = ext_utils.normalizeFsPath(depPath);
+    if (normalizedCurrent && normalizedDepPath === normalizedCurrent) continue;
+    if (visited.has(normalizedDepPath)) continue;
+
+    const depProject = await ext_types.ProjectInfo.createFromFile(depPath);
+    if (depProject.error) {
+      reportDependencyIssue(devectorOutput, options, depProject.error);
+      return false;
+    }
+
+    const depReason = options.reason ? `${options.reason} dependency` : 'dependency';
+    const compiled = await compileProjectFile(
+      devectorOutput,
+      depProject,
+      { ...options, reason: depReason, visited });
+    if (!compiled) return false;
+  }
+
+  return true;
+}
+
+
 export async function compileProjectFile(
   devectorOutput: vscode.OutputChannel,
   project: ext_types.ProjectInfo,
-  options: { silent?: boolean; reason?: string } = {})
+  options: CompileOptions = {})
 	: Promise<boolean>
 {
+  if (!project.absolute_path || !path.isAbsolute(project.absolute_path)) {
+    const msg = 'Project path is not set or is not absolute.';
+    reportDependencyIssue(devectorOutput, options, msg);
+    return false;
+  }
+
+  const visited = options.visited ?? new Set<string>();
+  const normalizedProjectPath = ext_utils.normalizeFsPath(project.absolute_path);
+  if (visited.has(normalizedProjectPath)) return true;
+  visited.add(normalizedProjectPath);
+
   if (!project.absolute_asm_path || !fs.existsSync(project.absolute_asm_path!)) {
     const msg = `Main assembly file not found or 'asm_path' project field is invalid. `+
                 `Project path: ${project.absolute_path!}`;
@@ -128,6 +221,9 @@ export async function compileProjectFile(
     else ext_utils.logOutput(devectorOutput, 'Devector: ' + msg);
     return false;
   }
+
+  const depsCompiled = await compileDependentProjects(devectorOutput, project, options, visited);
+  if (!depsCompiled) return false;
 
   let contents: string;
   try {
@@ -264,7 +360,7 @@ export async function compileProjectsForBreakpointChanges(
     const source = fs.readFileSync(mainsm, 'utf8');
     const asmFiles = collectIncludeFiles(source, mainsm);
     asmFiles.add(mainsm);
-    
+
     // Check if any affected asm path is in the project
     for (const p of asmPaths) {
       if (asmFiles.has(p)) {
@@ -277,7 +373,7 @@ export async function compileProjectsForBreakpointChanges(
 
     // Check if assembly files have actually changed
     const filesChanged = haveAsmFilesChanged(project, asmFiles);
-    
+
     if (filesChanged) {
       // Assembly files changed - do full compilation
       await compileProjectFile(devectorOutput, project, { silent: true, reason: 'breakpoint change' });

@@ -16,6 +16,8 @@ export class ProjectInfo {
   romPath: string | undefined = undefined;
   /** Path to the FDD data file for persistence */
   fddPath: string | undefined = undefined;
+  /** Optional directory that contains dependent project files to compile first */
+  dependentProjectsDir: string | undefined = undefined;
   /** Project settings */
   settings: ProjectSettings = new ProjectSettings();
   /** project absolute path. this setting is not stored to project file */
@@ -161,6 +163,12 @@ export class ProjectInfo {
     return path.isAbsolute(this.settings.ramDiskPath)
       ? this.settings.ramDiskPath
       : path.join(this.projectDir!, this.settings.ramDiskPath);
+  }
+  get absolute_dependent_projects_dir(): string | undefined {
+    if (!this.absolute_path || !this.dependentProjectsDir) return undefined;
+    return path.isAbsolute(this.dependentProjectsDir)
+      ? this.dependentProjectsDir
+      : path.join(this.projectDir!, this.dependentProjectsDir);
   }
   get projectDir(): string | undefined {
     if (!this.absolute_path) return undefined;
