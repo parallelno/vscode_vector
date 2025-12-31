@@ -291,6 +291,15 @@ lxi h, * + 1 ; hl => $101
 
 - `.include` directive: include another file inline using `.include "file.asm"` or `.include 'file.asm'`. Includes can be relative paths.In that case they are resolved relative to the including file, the main asm file, or the workspace directory. Includes support recursive expansion up to 16 levels.
 
+- `.filesize Name, "path"`: defines a constant `Name` equal to the byte size of the given file. The path resolves like `.include` (current file, main asm, project folder, workspace, then CWD).
+
+  Example:
+
+  ```asm
+  ROM_SIZE .filesize "out/prg.rom" ; ROM_SIZE becomes the size of prg.rom
+  BufEnd   = BufStart + ROM_SIZE    ; use it in expressions
+  ```
+
 - `.incbin` directive: include raw bytes from an external file at the current address. Syntax: `.incbin "path"[ , offset[, length]]`. Paths resolve like `.include`. `offset` and `length` are optional expressions (decimal, hex, or binary); omit them to start at 0 and read the entire file.
 
 - `.macro` / `.endmacro`: build parameterized macros (with defaults, nested calls, and per-invocation label namespaces) that expand inline before assembly.

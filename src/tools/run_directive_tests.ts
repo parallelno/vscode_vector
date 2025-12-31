@@ -208,6 +208,16 @@ const tests: DirectiveTestCase[] = [
             }
         }
     },
+        {
+            name: '.filesize defines constant from file length',
+            sourceFile: 'filesize_basic.asm',
+            expect: {
+                bytes: [0x10],
+                consts: {
+                    FILE_SIZE: 16
+                }
+            }
+        },
     {
         name: '.print accumulates formatted output',
         sourceFile: 'print_basic.asm',

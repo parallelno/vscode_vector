@@ -34,6 +34,7 @@ import {
 import { handleIncbinFirstPass,
   handleIncbinSecondPass,
   IncbinContext } from './incbin';
+import { handleFilesizeDirectiveFirstPass } from './filesize';
 import {
   InstructionContext
 } from './instructions';
@@ -434,6 +435,24 @@ export function assemble(
       continue;
     }
 
+    const handledFilesize = handleFilesizeDirectiveFirstPass(
+      line,
+      origins[i],
+      i + 1,
+      {
+        scopes,
+        consts,
+        constOrigins,
+        variables,
+        errors,
+        projectFile,
+        sourcePath,
+      },
+      allocateLocalKey,
+      scopedConstName
+    );
+    if (handledFilesize) continue;
+
     // .var directive: "NAME .var InitialValue" (label optional)
     const varMatch = line.match(/^([A-Za-z_@][A-Za-z0-9_@.]*)\s*:?[^\S\r\n]*\.var\b(.*)$/i);
     if (varMatch) {
@@ -823,6 +842,11 @@ export function assemble(
 
     // Skip .var directive in second pass (already processed in first pass)
     if (/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s+\.var\b/i.test(line)) {
+      continue;
+    }
+
+    // Skip .filesize directive in second pass (constants were set in first pass)
+    if (/^[A-Za-z_@][A-Za-z0-9_@.]*\s*:?\s+\.filesize\b/i.test(line) || /^\.filesize\b/i.test(line)) {
       continue;
     }
 
