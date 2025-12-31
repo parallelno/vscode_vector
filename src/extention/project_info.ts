@@ -18,6 +18,10 @@ export class ProjectInfo {
   romAlign: number | undefined = undefined;
   /** Path to the FDD data file for persistence */
   fddPath: string | undefined = undefined;
+  /** Optional template file used when building FDD image */
+  fddTemplatePath: string | undefined = undefined;
+  /** Path to a folder whose files will be packed into the generated FDD image */
+  fddContentPath: string | undefined = undefined;
   /** Optional directory that contains dependent project files to compile first */
   dependentProjectsDir: string | undefined = undefined;
   /** Project settings */
@@ -159,6 +163,23 @@ export class ProjectInfo {
     return path.isAbsolute(this.fddPath)
       ? this.fddPath
       : path.join(this.projectDir!, this.fddPath);
+  }
+  get absolute_fdd_template_path(): string | undefined {
+    if (!this.fddTemplatePath) return undefined;
+    const templLower = this.fddTemplatePath.toLowerCase();
+    if (templLower === 'rds308.fdd') {
+      return path.join(__dirname, '../../res/fdd/rds308.fdd');
+    }
+    if (!this.absolute_path) return undefined;
+    return path.isAbsolute(this.fddTemplatePath)
+      ? this.fddTemplatePath
+      : path.join(this.projectDir!, this.fddTemplatePath);
+  }
+  get absolute_fdd_content_path(): string | undefined {
+    if (!this.absolute_path || !this.fddContentPath) return undefined;
+    return path.isAbsolute(this.fddContentPath)
+      ? this.fddContentPath
+      : path.join(this.projectDir!, this.fddContentPath);
   }
   get absolute_ram_disk_path(): string | undefined {
     if (!this.absolute_path || !this.settings.ramDiskPath) return undefined;

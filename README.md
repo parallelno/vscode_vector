@@ -56,6 +56,7 @@ Tips:
 - `<project_name>.rom` — Vector 06c executable loaded by the emulator.
 - `<project_name>.ram_disk.bin` — RAM disk image (all eight supported disks).
 - `<name>.fdd` — floppy disk image (usually 820 KB). Add `"fddPath": "./out/<your_fdd_name>.fdd"` to settings to auto-load it on the next run.
+  - If `fddContentPath` project setting is set, a new FDD image is rebuilt at `fddPath` on each successful ROM compile using that folder’s files (recursively).
 
 ## Project Configuration
 
@@ -70,6 +71,8 @@ All projects start with creating a `.project.json` file that declares the projec
   "debugPath": "prg.debug.json",
   "romPath": "out\\prg.rom",
   "fddPath": "out\\prg.fdd",
+  "fddContentPath": "assets\\fdd_contents",
+  "fddTemplatePath": "rds308.fdd",
   "romAlign": 2,
   "dependentProjectsDir": "deps",
   "settings": {
@@ -87,6 +90,8 @@ All projects start with creating a `.project.json` file that declares the projec
 - **debugPath**: (Optional) Path for the generated debug metadata (e.g., `prg.debug.json`).
 - **romPath**: (Optional) Output ROM path (e.g., `out\\prg.rom`).
 - **fddPath**: (Optional) FDD image to boot; takes precedence over `romPath` when valid.
+- **fddContentPath**: (Optional) Folder whose files are packed into a fresh FDD image at `fddPath` after each successful ROM compile. Paths are resolved relative to the project file unless absolute; files are added recursively.
+- **fddTemplatePath**: (Optional) Template FDD image to start from when building the output at `fddPath`. If it contains the `"rds308.fdd"` string, the built-in template (comes with this extension) is used; other values resolve relative to the project file unless absolute.
 - **romAlign**: Optional ROM size alignment in bytes (e.g., `2` to force even length).
 - **dependentProjectsDir**: (Optional) Directory containing dependent `*.project.json` files. Paths resolved relative to the current project file unless absolute. Use **Devector: Compile Dependencies** command or a context menu in Explorer to compile every `*.project.json` in that directory in alphabetical order.
 - **settings**: (Optional) Per-project emulator preferences (see below).

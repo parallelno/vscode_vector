@@ -31,6 +31,68 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Filesystem } from './fddimage';
 
+export type BuildFddImageOptions = {
+    templateFile?: string;
+    inputFiles: string[];
+    outputFile: string;
+    log?: (message: string) => void;
+};
+
+export function buildFddImage(options: BuildFddImageOptions): { success: boolean; error?: string } {
+    const log = options.log ?? (() => {});
+    const templateFile = options.templateFile || '';
+    const filesToPut = options.inputFiles || [];
+    const outputFile = options.outputFile;
+
+    if (!outputFile) {
+        return { success: false, error: 'Output file is required' };
+    }
+    if (!filesToPut.length) {
+        return { success: false, error: 'No input files provided' };
+    }
+
+    const fdd = new Filesystem();
+
+    if (templateFile) {
+        try {
+            const templateData: Buffer = fs.readFileSync(templateFile);
+            fdd.fromArray(new Uint8Array(templateData));
+        } catch {
+            return { success: false, error: `Error reading template file: ${templateFile}` };
+        }
+    }
+
+    for (const name of filesToPut) {
+        let data: Buffer;
+        try {
+            data = fs.readFileSync(name);
+        } catch {
+            return { success: false, error: `Could not read file ${name}. Please check if the file exists and is readable.` };
+        }
+
+        const basename = path.basename(name);
+        fdd.saveFile(basename, new Uint8Array(data));
+        log(`Saved file ${basename} to FDD image (${data.length} bytes)`);
+    }
+
+    try {
+        const dir = path.dirname(outputFile);
+        if (dir && dir !== '.' && dir !== path.sep) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+    } catch (err) {
+        return { success: false, error: `Error ensuring output directory exists: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    try {
+        fs.writeFileSync(outputFile, Buffer.from(fdd.bytes));
+        log(`FDD image written to: ${outputFile}`);
+        return { success: true };
+    } catch {
+        return { success: false, error: `Error writing FDD to: ${outputFile}` };
+    }
+}
+
 function printUsage(): void {
     console.log('Usage: node ./out/tools/fddutil.js -r [template.fdd] -i file1.com [-i file2.dat] -o output.fdd');
     console.log('');
@@ -43,7 +105,6 @@ function printUsage(): void {
 }
 
 function main(): void {
-    const launchPath = __dirname;
     // Default template file - can be overridden with -t option
     let templateFile = '';
     const filesToPut: string[] = [];
@@ -104,44 +165,15 @@ function main(): void {
         process.exit(1);
     }
 
-    const fdd = new Filesystem()
+    const result = buildFddImage({
+        templateFile,
+        inputFiles: filesToPut,
+        outputFile: outputFile!,
+        log: console.log,
+    });
 
-    // Read the template file
-    if (templateFile) {
-        try {
-            // Create filesystem from template data
-            const templateData: Buffer = fs.readFileSync(templateFile);
-            fdd.fromArray(new Uint8Array(templateData));
-        } catch {
-            console.error(`Error reading template file: ${templateFile}`);
-            process.exit(1);
-        }
-    }
-
-    console.log('Contents of template disk:');
-    fdd.listDir();
-
-    // Add files to the FDD image
-    for (const name of filesToPut) {
-        let data: Buffer;
-        try {
-            data = fs.readFileSync(name);
-        } catch {
-            console.error(`Could not read file ${name}. Please check if the file exists and is readable.`);
-            process.exit(1);
-        }
-
-        const basename = path.basename(name);
-        fdd.saveFile(basename, new Uint8Array(data));
-        console.log(`Saved file ${basename} to FDD image (${data.length} bytes)`);
-    }
-
-    // Write the FDD image to output file
-    try {
-        fs.writeFileSync(outputFile!, Buffer.from(fdd.bytes));
-        console.log(`FDD image written to: ${outputFile}`);
-    } catch {
-        console.error(`Error writing FDD to: ${outputFile}`);
+    if (!result.success) {
+        console.error(result.error || 'Unknown error building FDD image');
         process.exit(1);
     }
 }

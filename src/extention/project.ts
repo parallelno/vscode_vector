@@ -7,6 +7,7 @@ import { compileAsmSource, updateBreakpointsInDebugFile } from './compile';
 import { reloadEmulatorBreakpointsFromFile } from '../emulatorUI';
 import * as ext_consts from './consts';
 import { collectIncludeFiles } from '../assembler/includes';
+import { buildFddImage } from '../tools/fddutil';
 
 
 type CompileOptions = {
@@ -336,6 +337,9 @@ export async function compileProjectFile(
     }
   }
 
+  const fddBuilt = buildProjectFddImage(devectorOutput, project);
+  if (!fddBuilt) return false;
+
   const reason = options.reason ? ` (${options.reason})` : '';
   ext_utils.logOutput(
     devectorOutput,
@@ -347,6 +351,92 @@ export async function compileProjectFile(
   }
 
   reloadEmulatorBreakpointsFromFile();
+  return true;
+}
+
+function collectFilesRecursively(root: string): { files: string[]; error?: string } {
+  const files: string[] = [];
+  const stack: string[] = [root];
+
+  while (stack.length) {
+    const current = stack.pop()!;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { files: [], error: `Failed to read FDD content directory ${current}: ${message}` };
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+      } else if (entry.isFile()) {
+        files.push(fullPath);
+      }
+    }
+  }
+
+  return { files };
+}
+
+function buildProjectFddImage(
+  devectorOutput: vscode.OutputChannel,
+  project: ext_types.ProjectInfo)
+: boolean
+{
+  const fddContentPath = project.absolute_fdd_content_path;
+  if (!fddContentPath) return true;
+
+  const fddOutputPath = project.absolute_fdd_path;
+  if (!fddOutputPath) {
+    ext_utils.logOutput(devectorOutput, 'Devector: fddPath is not set; skipping FDD image build');
+    return false;
+  }
+
+  const templatePath = project.absolute_fdd_template_path;
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(fddContentPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    ext_utils.logOutput(devectorOutput, `Devector: FDD content folder is not accessible: ${fddContentPath} (${message})`);
+    return false;
+  }
+
+  if (!stat.isDirectory()) {
+    ext_utils.logOutput(devectorOutput, `Devector: FDD content path is not a directory: ${fddContentPath}`);
+    return false;
+  }
+
+  const collected = collectFilesRecursively(fddContentPath);
+  if (collected.error) {
+    ext_utils.logOutput(devectorOutput, `Devector: ${collected.error}`);
+    return false;
+  }
+
+  if (!collected.files.length) {
+    ext_utils.logOutput(devectorOutput, `Devector: FDD content folder is empty: ${fddContentPath}`);
+    return true;
+  }
+
+  const result = buildFddImage({
+    templateFile: templatePath,
+    inputFiles: collected.files,
+    outputFile: fddOutputPath,
+    log: (message: string) => ext_utils.logOutput(devectorOutput, message),
+  });
+
+  if (!result.success) {
+    ext_utils.logOutput(devectorOutput, `Devector: Failed to build FDD image: ${result.error || 'Unknown error'}`);
+    return false;
+  }
+
+  ext_utils.logOutput(
+    devectorOutput,
+    `Devector: Built FDD image ${path.basename(fddOutputPath)} with ${collected.files.length} file(s)`);
   return true;
 }
 
