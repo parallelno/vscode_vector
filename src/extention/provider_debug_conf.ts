@@ -12,8 +12,30 @@ export function provideDebugConfigurations(
   : vscode.ProviderResult<vscode.DebugConfiguration[]>
 {
   return [
-    { type: ext_consts.EXTENTION_NAME, request: 'launch', name: ext_consts.VS_CODE_LAUNCH_RUN, run: true, compile: false },
-    { type: ext_consts.EXTENTION_NAME, request: 'launch', name: ext_consts.VS_CODE_LAUNCH_COMPILE_AND_RUN, run: true, compile: true }
+    {
+      type: ext_consts.EXTENTION_NAME,
+      request: 'launch',
+      name: ext_consts.VS_CODE_LAUNCH_RUN,
+      run: true,
+      compile: false,
+      compileDependencies: false,
+    },
+    {
+      type: ext_consts.EXTENTION_NAME,
+      request: 'launch',
+      name: ext_consts.VS_CODE_LAUNCH_COMPILE_AND_RUN,
+      run: true,
+      compile: true,
+      compileDependencies: false,
+    },
+    {
+      type: ext_consts.EXTENTION_NAME,
+      request: 'launch',
+      name: ext_consts.VS_CODE_LAUNCH_COMPILE_DEPENDENCIES,
+      run: false,
+      compile: false,
+      compileDependencies: true,
+    }
   ];
 }
 
@@ -43,16 +65,31 @@ export async function resolveDebugConfiguration(
     }
     if (!selected) return undefined;
 
-    const ready = await ext_prg.ensureRomReady(
-      devectorOutput, selected,
-      { compile: !!config.compile ||
-        config.name === ext_consts.VS_CODE_LAUNCH_COMPILE_AND_RUN }
-    );
-    if (!ready) {
-      if (!fs.existsSync(selected.absolute_rom_path!)) {
-        vscode.window.showErrorMessage(`File not found: ${selected.absolute_rom_path!}`);
+    const compileDependenciesOnly = config.compileDependencies === true;
+    const compileMain = config.compile === true;
+
+    if (compileDependenciesOnly) {
+      const depsOk = await ext_prg.compileProjectFile(devectorOutput, selected, {
+        silent: false,
+        reason: ext_consts.VS_CODE_LAUNCH_COMPILE_DEPENDENCIES,
+        includeDependencies: true,
+        skipMain: true,
+      });
+      if (!depsOk) return undefined;
+    }
+
+    if (compileMain || config.run) {
+      const ready = await ext_prg.ensureRomReady(
+        devectorOutput,
+        selected,
+        { compile: compileMain, includeDependencies: compileMain ? false : true }
+      );
+      if (!ready) {
+        if (!fs.existsSync(selected.absolute_rom_path!)) {
+          vscode.window.showErrorMessage(`File not found: ${selected.absolute_rom_path!}`);
+        }
+        return undefined;
       }
-      return undefined;
     }
 
     if (config.run) {

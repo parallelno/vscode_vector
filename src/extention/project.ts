@@ -9,7 +9,13 @@ import * as ext_consts from './consts';
 import { collectIncludeFiles } from '../assembler/includes';
 
 
-type CompileOptions = { silent?: boolean; reason?: string; visited?: Set<string> };
+type CompileOptions = {
+  silent?: boolean;
+  reason?: string;
+  visited?: Set<string>;
+  includeDependencies?: boolean; // whether to compile dependent projects
+  skipMain?: boolean;            // whether to skip compiling the main project
+};
 
 
 export async function loadAllProjects(
@@ -90,9 +96,10 @@ export async function pickProject(
 export async function ensureRomReady(
   devectorOutput: vscode.OutputChannel,
   project: ext_types.ProjectInfo,
-  options: { compile?: boolean } = {})
+  options: { compile?: boolean; includeDependencies?: boolean } = {})
 : Promise<boolean>
 {
+  const includeDependencies = options.includeDependencies ?? true;
   const reason = options.compile ?
     ext_consts.VS_CODE_LAUNCH_COMPILE_AND_RUN :
     ext_consts.VS_CODE_LAUNCH_RUN;
@@ -109,7 +116,12 @@ export async function ensureRomReady(
     if (action !== 'Compile') return false;
   }
 
-  const compiled = await compileProjectFile(devectorOutput, project, { silent: false, reason: reason });
+  const compiled = await compileProjectFile(devectorOutput, project, {
+    silent: false,
+    reason: reason,
+    includeDependencies,
+    skipMain: false,
+  });
   if (!compiled) return false;
 
   reloadEmulatorBreakpointsFromFile();
@@ -188,7 +200,13 @@ async function compileDependentProjects(
     const compiled = await compileProjectFile(
       devectorOutput,
       depProject,
-      { ...options, reason: depReason, visited });
+      {
+        ...options,
+        reason: depReason,
+        visited,
+        skipMain: false,
+        includeDependencies: options.includeDependencies ?? true,
+      });
     if (!compiled) return false;
   }
 
@@ -213,17 +231,34 @@ export async function compileProjectFile(
   if (visited.has(normalizedProjectPath)) return true;
   visited.add(normalizedProjectPath);
 
+  const includeDependencies = options.includeDependencies ?? true;
+  const skipMain = options.skipMain ?? false;
+
+  if (includeDependencies) {
+    const depsCompiled = await compileDependentProjects(devectorOutput, project, options, visited);
+    if (!depsCompiled) return false;
+  }
+
+  if (skipMain) {
+    const reason = options.reason ? ` (${options.reason})` : '';
+    const note = includeDependencies ? 'dependencies' : 'nothing';
+    ext_utils.logOutput(
+      devectorOutput,
+      `Devector: Skipped main compilation for ${project.name}; ${note} done` + reason);
+    if (!options.silent && includeDependencies) {
+      vscode.window.showInformationMessage(`Compiled dependencies for ${project.name}`);
+    }
+    return true;
+  }
+
   if (!project.absolute_asm_path || !fs.existsSync(project.absolute_asm_path!)) {
     const msg = `Main assembly file not found or 'asm_path' project field is invalid. `+
-                `Project path: ${project.absolute_path!}`;
+        `Project path: ${project.absolute_path!}`;
 
     if (!options.silent) vscode.window.showErrorMessage(msg);
     else ext_utils.logOutput(devectorOutput, 'Devector: ' + msg);
     return false;
   }
-
-  const depsCompiled = await compileDependentProjects(devectorOutput, project, options, visited);
-  if (!depsCompiled) return false;
 
   let contents: string;
   try {

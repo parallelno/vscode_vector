@@ -31,17 +31,26 @@ This repository contains a VS Code extension with key features: a two-pass Intel
 ## Quick Start
 
 - Open the project folder in VS Code.
-- Run **Devector: Create Project** to scaffold a new Vector 06c project.
-- Build with **Devector: Compile Project**.
-- Press **F5** to launch and debug in the emulator.
-
-If `dependentProjectsDir` is set in your project file, the compiler will build every `*.project.json` in that directory first (in alphabetical order) before compiling the current project.
+- Run **Devector: Create Project** command or a context menu in Explorer to create a new Vector 06c template project.
+- Build with **Devector: Compile Project** command or a context menu in Explorer.
+- Press **F5** to launch and debug in the emulator or the **Run Project (F5)** command or a context menu in Explorer.
 
 Tips:
 - If the emulator panel was closed, you may be prompted for the RAM disk image path.
 - With multiple projects, **Devector: Compile Project** and **F5** will ask which project to build/run.
 
-Project artifacts:
+## Compile options
+
+- **Devector: Compile Project** extension command compiles only the main project (no dependencies).
+- **Devector: Compile Dependencies** extension command compiles only the projects found in `dependentProjectsDir`, skipping the main project.
+- The `Compile and Run` launch config mirrors this: it builds the main project only, while `Compile Dependencies` is available as a separate launch entry for dependency-only builds.
+
+## Context menu in Explorer
+
+- Right-click in the Explorer to access **Devector: Create Project**, **Compile Project**, **Compile Dependencies**, and **Run Project (F5)**. These mirror the command palette entries but are quicker when you are already browsing project files.
+
+## Project Artifacts
+
 - `<project_name>.project.json` — project settings.
 - `<project_name>.debug.json` — debug metadata (tokens, labels, consts, breakpoints).
 - `<project_name>.rom` — Vector 06c executable loaded by the emulator.
@@ -50,7 +59,7 @@ Project artifacts:
 
 ## Project Configuration
 
-All projects begin by creating a `.project.json` file that declares the project name, entry ASM file, output ROM path, and any optional emulator settings. It's an entry point for all extention command. Generate a fresh project file with **Devector: Create Project**.
+All projects start with creating a `.project.json` file that declares the project name, entry ASM file, output ROM path, and any optional emulator settings. It's an entry point for all extention command. Generate a fresh project file with **Devector: Create Project**.
 
 ### Example `.project.json`
 
@@ -79,7 +88,7 @@ All projects begin by creating a `.project.json` file that declares the project 
 - **romPath**: (Optional) Output ROM path (e.g., `out\\prg.rom`).
 - **fddPath**: (Optional) FDD image to boot; takes precedence over `romPath` when valid.
 - **romAlign**: Optional ROM size alignment in bytes (e.g., `2` to force even length).
-- **dependentProjectsDir**: (Optional) Directory containing other `*.project.json` files to compile first; paths resolve relative to the current project file unless absolute.
+- **dependentProjectsDir**: (Optional) Directory containing dependent `*.project.json` files. Paths resolved relative to the current project file unless absolute. Use **Devector: Compile Dependencies** command or a context menu in Explorer to compile every `*.project.json` in that directory in alphabetical order.
 - **settings**: (Optional) Per-project emulator preferences (see below).
 
 ### Settings
@@ -104,7 +113,7 @@ The bundled extension exposes a veriaty quality-of-life helpers whenever you edi
 
 ## Emulator panel controls
 
-This is the emulator main panel. You will see it when you start the emulation pressing F5 and chosing one of the available launch configuration. That panel includes the debug toolbar, a rendered frame, hardware statistics, and the memory dump. It provides realtime data to monitor execution, memory, and performance while you debug.
+This is the emulator main panel. You will see it when you start the emulation pressing F5 or with **Run Project (F5)** and chosing one of the available launch configuration. That panel includes the debug toolbar, a rendered frame, hardware statistics, and the memory dump. It provides realtime data to monitor execution, memory, and performance while you debug.
 
 ### Debug Toobar
 

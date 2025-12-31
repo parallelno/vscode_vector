@@ -18,6 +18,7 @@ export async function runProject(
 		name: ext_consts.VS_CODE_LAUNCH_RUN,
 		run: true,
 		compile: false,
+		compileDependencies: false,
 		projectPath: selected.absolute_path
 	});
 }

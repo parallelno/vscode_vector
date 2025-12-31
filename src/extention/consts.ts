@@ -13,6 +13,7 @@ export const DEBUG_LOG_SUFFIX = '.debug.log';
 export const EXTENTION_NAME = 'devector';
 export const VS_CODE_LAUNCH_RUN = 'Run';
 export const VS_CODE_LAUNCH_COMPILE_AND_RUN = 'Compile and Run';
+export const VS_CODE_LAUNCH_COMPILE_DEPENDENCIES = 'Compile dependencies';
 
 export const EXT_ROM: string = ".rom";
 export const EXT_FDD: string = ".fdd";

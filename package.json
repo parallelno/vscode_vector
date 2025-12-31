@@ -32,6 +32,7 @@
   "activationEvents": [
     "onLanguage:asm",
     "onCommand:devector.compileProject",
+    "onCommand:devector.compileDependencies",
     "onCommand:devector.runProject",
     "onCommand:devector.createProject",
     "onDebug"
@@ -67,6 +68,10 @@
         "title": "Devector: Compile Project"
       },
       {
+        "command": "devector.compileDependencies",
+        "title": "Devector: Compile Dependencies"
+      },
+      {
         "command": "devector.runProject",
         "title": "Devector: Run Project (F5)"
       }
@@ -80,6 +85,10 @@
         {
           "command": "devector.compileProject",
           "group": "navigation@9"
+        },
+        {
+            "command": "devector.compileDependencies",
+            "group": "navigation@9"
         },
         {
           "command": "devector.runProject",
@@ -102,6 +111,22 @@
               "program": {
                 "type": "string",
                 "description": "Path to .asm (source) or .bin (binary) to run"
+              },
+              "run": {
+                "type": "boolean",
+                "description": "Run the emulator after preparing the project"
+              },
+              "compile": {
+                "type": "boolean",
+                "description": "Compile only the main project (no dependencies) before launch"
+              },
+              "compileDependencies": {
+                "type": "boolean",
+                "description": "Compile dependent projects only (skip the selected main project)"
+              },
+              "projectPath": {
+                "type": "string",
+                "description": "Absolute path to the devector project file"
               }
             }
           }
