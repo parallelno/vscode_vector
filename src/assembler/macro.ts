@@ -5,7 +5,8 @@ import {
   substituteIdentifiers,
   escapeRegExp,
   detectNormalLabelName,
-  describeOrigin
+  describeOrigin,
+  parseStringLiteral
 } from './utils';
 
 const MAX_MACRO_DEPTH = 32;
@@ -261,7 +262,8 @@ function substituteMacroParams(source: string, replacements: Record<string, stri
       if (prefix) {
         return `${prefix}(${trimmed})`;
       }
-      const needsWrap = /[+\-*/%&|^<>\s]/.test(trimmed) && !(trimmed.startsWith('(') && trimmed.endsWith(')'));
+      const isStringLiteral = parseStringLiteral(trimmed) !== null;
+      const needsWrap = !isStringLiteral && /[+\-*/%&|^<>\s]/.test(trimmed) && !(trimmed.startsWith('(') && trimmed.endsWith(')'));
       return needsWrap ? `(${trimmed})` : trimmed;
     });
   }

@@ -392,6 +392,13 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
+        name: 'Macro .text keeps string literal args',
+        sourceFile: 'macro_text_literal.asm',
+        expect: {
+            bytes: [0x08, 0x09, 0x21, 0x6A]
+        }
+    },
+    {
         name: '.text emits ASCII bytes from string',
         sourceFile: 'text_basic.asm',
         expect: {
