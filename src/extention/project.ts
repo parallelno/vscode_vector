@@ -451,32 +451,45 @@ function buildProjectFddImage(
  * Checks if any assembly source files have been modified since the ROM file was last built.
  * Returns true if any .asm file is newer than the ROM file, false otherwise.
  */
+function latestMtime(paths: Array<string | undefined>): number | undefined {
+  let latest: number | undefined;
+  for (const p of paths) {
+    if (!p) continue;
+    try {
+      const t = fs.statSync(p).mtimeMs;
+      if (latest === undefined || t > latest) latest = t;
+    } catch (_) {
+      // ignore missing paths here; caller decides fallback
+    }
+  }
+  return latest;
+}
+
 function haveAsmFilesChanged(
   project: ext_types.ProjectInfo,
   asmFiles: Set<string>)
   : boolean
 {
-  if (!project.absolute_rom_path || !fs.existsSync(project.absolute_rom_path)) {
-    // ROM doesn't exist, so we need to compile
-    return true;
-  }
+  project.init_rom_path();
+  project.init_debug_path();
+
+  const latestBuild = latestMtime([
+    project.absolute_rom_path,
+    project.absolute_debug_path,
+  ]);
+
+  // If we have no build artifacts, play it safe and recompile
+  if (latestBuild === undefined) return true;
 
   try {
-    const romStat = fs.statSync(project.absolute_rom_path);
-    const romMtime = romStat.mtimeMs;
-
-    // Check if any assembly file is newer than the ROM
     for (const asmPath of asmFiles) {
-      if (fs.existsSync(asmPath)) {
-        const asmStat = fs.statSync(asmPath);
-        if (asmStat.mtimeMs > romMtime) {
-          return true;
-        }
+      const asmTime = fs.statSync(asmPath).mtimeMs;
+      if (asmTime > latestBuild) {
+        return true;
       }
     }
     return false;
   } catch (err) {
-    // If we can't check, assume files changed to be safe
     console.error('Error checking file timestamps:', err);
     return true;
   }
@@ -497,6 +510,9 @@ export async function compileProjectsForBreakpointChanges(
   for (const project of infos)
   {
     let shouldProcess = false;
+    project.init_asm_path();
+    project.init_rom_path();
+    project.init_debug_path();
     const mainsm = project.absolute_asm_path;
     if (!mainsm || !fs.existsSync(mainsm)) continue;
 
