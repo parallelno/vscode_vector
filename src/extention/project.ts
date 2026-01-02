@@ -501,7 +501,7 @@ export async function compileProjectsForBreakpointChanges(
     if (!mainsm || !fs.existsSync(mainsm)) continue;
 
     const source = fs.readFileSync(mainsm, 'utf8');
-    const asmFiles = collectIncludeFiles(source, mainsm);
+    const asmFiles = collectIncludeFiles(source, mainsm, mainsm, project.absolute_path);
     asmFiles.add(mainsm);
 
     // Check if any affected asm path is in the project
