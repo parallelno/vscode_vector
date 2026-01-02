@@ -42,6 +42,22 @@ export default class Breakpoints {
     this._updates++;
   }
 
+  GetAll(): Array<{ addr: number; status: number; autoDel: boolean; operand: number; cond: number; value: number; comment: string }> {
+    const result: Array<{ addr: number; status: number; autoDel: boolean; operand: number; cond: number; value: number; comment: string }> = [];
+    for (const bp of this._breakpoints.values()) {
+      result.push({
+        addr: bp.addr,
+        status: bp.status,
+        autoDel: bp.autoDel,
+        operand: bp.operand,
+        cond: bp.cond,
+        value: bp.value,
+        comment: bp.comment,
+      });
+    }
+    return result;
+  }
+
   GetStatus(addr: number): BpStatus{
     return this._breakpoints.get(addr)?.status ?? BpStatus.DELETED;
   }

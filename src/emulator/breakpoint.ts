@@ -3,7 +3,7 @@ import { MemState, RAM_DISK_MAX, RAMDISK_PAGES_MAX } from "./memory";
 
 // mem pages to check.
 // 1 main memory + ramdisk pages
-const mem_pages = 1 + RAMDISK_PAGES_MAX * RAM_DISK_MAX;
+export const BP_MEM_PAGES = 1 + RAMDISK_PAGES_MAX * RAM_DISK_MAX;
 
 export enum BpStatus {
   DISABLED = 0,
@@ -12,13 +12,13 @@ export enum BpStatus {
   COUNT,
 };
 
-enum BpOperand { A = 0, F, B, C, D, E, H, L, PSW, BC, DE, HL, CC, SP, COUNT };
-enum BpCondition { ANY = 0, EQU, LESS, GREATER, LESS_EQU, GREATER_EQU, NOT_EQU, INVALID, COUNT };
+export enum BpOperand { A = 0, F, B, C, D, E, H, L, PSW, BC, DE, HL, CC, SP, COUNT };
+export enum BpCondition { ANY = 0, EQU, LESS, GREATER, LESS_EQU, GREATER_EQU, NOT_EQU, INVALID, COUNT };
 
 
 export class Breakpoint {
   addr: number = 0;
-  pageIdx: boolean[] = new Array(mem_pages).fill(true);
+  pageIdx: boolean[] = new Array(BP_MEM_PAGES).fill(true);
   status: BpStatus = BpStatus.ACTIVE;
 	autoDel: boolean = false;
   operand: BpOperand = BpOperand.A;
@@ -28,7 +28,7 @@ export class Breakpoint {
 
   constructor(
     addr: number,
-    pageIdx: boolean[] = new Array(mem_pages).fill(true),
+    pageIdx: boolean[] = new Array(BP_MEM_PAGES).fill(true),
     status: BpStatus = BpStatus.ACTIVE,
     autoDel: boolean = false,
     operand: BpOperand = BpOperand.A,

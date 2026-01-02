@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Hardware } from './emulator/hardware';
 import { HardwareReq } from './emulator/hardware_reqs';
+import { BpStatus } from './emulator/breakpoint';
 import { ACTIVE_AREA_H, ACTIVE_AREA_W, BORDER_LEFT, FRAME_H, FRAME_W, SCAN_ACTIVE_AREA_TOP } from './emulator/display';
 import { getWebviewContent } from './emulatorUI/webviewContent';
 import { getDebugLine } from './emulatorUI/debugOutput';
@@ -376,13 +377,16 @@ export async function openEmulatorPanel(
         emu.hardware.Request(HardwareReq.STOP);
         sendFrameToWebview(true);
         printDebugState('Pause:', emu.hardware, devectorOutput, panel);
+        syncEditorBreakpointsFromHardware(emu.hardware);
         emitToolbarState(false);
         break;
+
       case 'run':
         emu.hardware.Request(HardwareReq.RUN);
         emitToolbarState(true);
         tick();
         break;
+
       case 'stepInto':
         emu.hardware.Request(HardwareReq.STOP);
         emu.hardware?.Request(HardwareReq.EXECUTE_INSTR);
@@ -393,7 +397,7 @@ export async function openEmulatorPanel(
       case 'stepOver':
         emu.hardware.Request(HardwareReq.STOP);
         const addr = emu.hardware.Request(HardwareReq.GET_STEP_OVER_ADDR)['data'];
-        emu.hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr });
+        emu.hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr: addr, autoDel: true });
         printDebugState('Step over:', emu.hardware, devectorOutput, panel);
         emu.hardware.Request(HardwareReq.RUN);
         emitToolbarState(true);
@@ -407,6 +411,7 @@ export async function openEmulatorPanel(
         sendFrameToWebview(true);
         printDebugState('Step out (NOT IMPLEMENTED):', emu.hardware, devectorOutput, panel);
         break;
+
       case 'stepFrame':
         emu.hardware.Request(HardwareReq.STOP);
         emu.hardware.Request(HardwareReq.EXECUTE_FRAME_NO_BREAKS);
@@ -414,6 +419,7 @@ export async function openEmulatorPanel(
         printDebugState('Run frame:', emu.hardware, devectorOutput, panel);
         emitToolbarState(false);
         break;
+
       case 'step256':
         emu.hardware.Request(HardwareReq.STOP);
         for (let i = 0; i < 256; i++) {
@@ -422,6 +428,7 @@ export async function openEmulatorPanel(
         sendFrameToWebview(true);
         printDebugState('Step 256:', emu.hardware, devectorOutput, panel);
         break;
+
       case 'restart':
         emu.hardware.Request(HardwareReq.STOP);
         emu.hardware.Request(HardwareReq.RESET);
@@ -431,6 +438,7 @@ export async function openEmulatorPanel(
         emitToolbarState(true);
         tick();
         break;
+
       default:
         break;
     }
@@ -561,6 +569,7 @@ export async function openEmulatorPanel(
     // ensure Register panel is synchronized
     sendFrameToWebview(true);
     printDebugState('Break:', emu.hardware!, devectorOutput, panel);
+    syncEditorBreakpointsFromHardware(emu.hardware);
     emitToolbarState(false);
   }
 
@@ -898,10 +907,8 @@ function loadBreakpointsFromToken(
   }
 
   for (const [addr, meta] of desired) {
-    hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr });
-    if (meta.enabled === false) {
-      hardware.Request(HardwareReq.DEBUG_BREAKPOINT_DISABLE, { addr });
-    }
+    const status: BpStatus = (meta.enabled === false) ? BpStatus.DISABLED : BpStatus.ACTIVE;
+    hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr: addr, status: status });
   }
 
   try {
@@ -1018,6 +1025,55 @@ function collectBreakpointAddresses(tokens: any): Map<number, BreakpointMeta> {
   }
 
   return resolved;
+}
+
+function mapHardwareAddrToEditorLocation(addr: number): { uri: vscode.Uri; range: vscode.Range } | undefined {
+  if (!lastAddressSourceMap) return undefined;
+  const ref = lastAddressSourceMap.get(addr & 0xffff);
+  if (!ref) return undefined;
+  const uri = vscode.Uri.file(ref.file);
+  const lineIdx = Math.max(ref.line - 1, 0);
+  const range = new vscode.Range(lineIdx, 0, lineIdx, 0);
+  return { uri, range };
+}
+
+function buildSourceBreakpointsFromHardware(hardware: Hardware | undefined | null): vscode.SourceBreakpoint[] {
+  if (!hardware) return [];
+  let data: any;
+  try {
+    data = hardware.Request(HardwareReq.DEBUG_BREAKPOINT_GET_ALL)?.data;
+  } catch (err) {
+    return [];
+  }
+
+  if (!Array.isArray(data)) return [];
+
+  const result: vscode.SourceBreakpoint[] = [];
+  for (const entry of data) {
+    const addr = typeof entry?.addr === 'number' ? entry.addr : undefined;
+    if (addr === undefined) continue;
+    const loc = mapHardwareAddrToEditorLocation(addr);
+    if (!loc) continue;
+    const enabled = (entry?.status ?? BpStatus.ACTIVE) !== BpStatus.DISABLED;
+    result.push(new vscode.SourceBreakpoint(new vscode.Location(loc.uri, loc.range), enabled));
+  }
+  return result;
+}
+
+function syncEditorBreakpointsFromHardware(hardware: Hardware | undefined | null): void {
+  const target = buildSourceBreakpointsFromHardware(hardware);
+  if (!target) return;
+
+  const targetFiles = new Set(target.map(bp => bp.location.uri.fsPath));
+  const existing = vscode.debug.breakpoints.filter(bp => bp instanceof vscode.SourceBreakpoint) as vscode.SourceBreakpoint[];
+  const toRemove = existing.filter(bp => targetFiles.has(bp.location.uri.fsPath));
+
+  if (toRemove.length) {
+    vscode.debug.removeBreakpoints(toRemove);
+  }
+  if (target.length) {
+    vscode.debug.addBreakpoints(target);
+  }
 }
 
 

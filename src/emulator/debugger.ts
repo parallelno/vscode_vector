@@ -4,7 +4,7 @@ import { CpuState } from './cpu_i8080';
 import { MemState } from './memory';
 import { ReqData } from './hardware_types';
 import Breakpoints from './breakpoints';
-import { BpStatus, Breakpoint } from './breakpoint';
+import { BP_MEM_PAGES, BpCondition, BpOperand, BpStatus, Breakpoint } from './breakpoint';
 import { DisplayState } from './display';
 import { IOState } from './io';
 
@@ -225,7 +225,19 @@ export default class Debugger {
       break;
 
     case HardwareReq.DEBUG_BREAKPOINT_ADD: {
-      this._breakpoints.Add(new Breakpoint(reqData["addr"]));
+      const addr = reqData["addr"];
+      if (addr === undefined) {
+        break;
+      }
+      const pageIdx: boolean[] = new Array(BP_MEM_PAGES).fill(true);
+      const status: BpStatus = reqData["status"] ?? BpStatus.ACTIVE;
+      const autoDel = reqData["autoDel"] ?? false;
+      const operand = reqData["operand"] ?? BpOperand.A;
+      const cond = reqData["cond"] ?? BpCondition.ANY;
+      const value = reqData["value"] ?? 0;
+      const comment = reqData["comment"] ?? "";
+
+      this._breakpoints.Add(new Breakpoint(addr, pageIdx, status, autoDel, operand, cond, value, comment));
       break;
     }
     case HardwareReq.DEBUG_BREAKPOINT_SET_STATUS:
@@ -241,6 +253,10 @@ export default class Debugger {
     case HardwareReq.DEBUG_BREAKPOINT_DISABLE:
       this._breakpoints.SetStatus(
         reqData["addr"], BpStatus.DISABLED);
+      break;
+
+    case HardwareReq.DEBUG_BREAKPOINT_GET_ALL:
+      out = { "data": this._breakpoints.GetAll() };
       break;
 
     case HardwareReq.DEBUG_BREAKPOINT_GET_STATUS:
