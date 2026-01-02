@@ -10,7 +10,6 @@ import { getDebugLine } from './emulatorUI/debugOutput';
 import { handleMemoryDumpControlMessage, resetMemoryDumpState, updateMemoryDumpFromHardware } from './emulatorUI/memoryDump';
 import { disposeHardwareStatsTracking, resetHardwareStatsTracking, tryCollectHardwareStats } from './emulatorUI/hardwareStats';
 import { parseAddressLike } from './emulatorUI/utils';
-import { MemoryAccessLog } from './emulator/debugger';
 import { ProjectInfo } from './extention/project_info';
 import { DEBUG_FILE_SUFFIX } from './extention/consts';
 import * as ext_consts from './extention/consts';
@@ -24,13 +23,24 @@ import {
   coerceAddressList,
 } from './emulatorUI/breakpoints';
 import {
+  DataAddressEntry,
+  DataDirectiveHoverInfo,
+  DataLineSpan,
   HoverSymbolInfo,
   InstructionHoverInfo,
-  formatInstructionHoverText,
-  formatHexByte,
+  resolveDataDirectiveHoverForMemory,
   resolveInstructionHoverForMemory,
   resolveHoverSymbol,
 } from './emulatorUI/hover';
+import {
+  clearDataLineHighlights,
+  clearHighlightedSourceLine,
+  highlightSourceFromHardware,
+  reapplyDataHighlightsFromCache,
+  reapplyExecutionHighlight,
+  refreshDataLineHighlights,
+  setHighlightContext,
+} from './emulatorUI/highlight';
 
 // set to true to enable instruction logging to file
 const log_tick_to_file = false;
@@ -51,25 +61,12 @@ type SymbolCache = {
   filePaths: Map<string, string>;
 };
 
-type DataLineSpan = { start: number; byteLength: number; unitBytes: number };
 type DataLineCache = Map<string, Map<number, DataLineSpan>>;
-type DataAddressEntry = { fileKey: string; line: number; span: DataLineSpan };
 
 let lastSymbolCache: SymbolCache | null = null;
 let dataLineSpanCache: DataLineCache | null = null;
 let dataAddressLookup: Map<number, DataAddressEntry> | null = null;
-let highlightContext: vscode.ExtensionContext | null = null;
-let pausedLineDecoration: vscode.TextEditorDecorationType | null = null;
-let unmappedAddressDecoration: vscode.TextEditorDecorationType | null = null;
-let lastHighlightedEditor: vscode.TextEditor | null = null;
-let lastHighlightedLine: number | null = null;
-let lastHighlightedFilePath: string | null = null;
-let lastHighlightDecoration: vscode.DecorationOptions | null = null;
-let lastHighlightIsUnmapped: boolean = false;
 let currentToolbarIsRunning = true;
-let dataReadDecoration: vscode.TextEditorDecorationType | null = null;
-let dataWriteDecoration: vscode.TextEditorDecorationType | null = null;
-let lastDataAccessLog: MemoryAccessLog | null = null;
 
 export type DebugAction = 'pause' | 'run' | 'stepOver' | 'stepInto' | 'stepOut' | 'stepFrame' | 'step256' | 'restart';
 type ToolbarListener = (isRunning: boolean) => void;
@@ -127,8 +124,7 @@ export async function openEmulatorPanel(
 
   const html = getWebviewContent();
   panel.webview.html = html;
-  highlightContext = context;
-  ensureHighlightDecoration(context);
+  setHighlightContext(context);
   currentToolbarIsRunning = true;
   resetHardwareStatsTracking();
   resetMemoryDumpState();
@@ -259,9 +255,8 @@ export async function openEmulatorPanel(
       clearHighlightedSourceLine();
       lastAddressSourceMap = null;
       clearDataLineHighlights();
-      lastDataAccessLog = null;
       clearSymbolMetadataCache();
-      highlightContext = null;
+      setHighlightContext(null);
       resetMemoryDumpState();
       disposeHardwareStatsTracking();
 
@@ -375,14 +370,13 @@ export async function openEmulatorPanel(
     if (isRunning) {
       clearHighlightedSourceLine();
       clearDataLineHighlights();
-      lastDataAccessLog = null;
       try {
         emu.hardware?.Request(HardwareReq.DEBUG_MEM_ACCESS_LOG_RESET);
       } catch (err) {
         /* ignore */
       }
     } else {
-      refreshDataLineHighlights(emu.hardware);
+      refreshDataLineHighlights(emu.hardware, dataAddressLookup, lastSymbolCache?.filePaths);
     }
   };
 
@@ -543,11 +537,9 @@ export async function openEmulatorPanel(
   const editorVisibilityDisposable = vscode.window.onDidChangeVisibleTextEditors(() => {
     if (!currentToolbarIsRunning) {
       // Reapply execution highlight when editor visibility changes
-      reapplyExecutionHighlight();
+      reapplyExecutionHighlight(currentToolbarIsRunning);
       // Reapply data line highlights (reads/writes)
-      if (lastDataAccessLog) {
-        applyDataLineHighlightsFromSnapshot(lastDataAccessLog);
-      }
+      reapplyDataHighlightsFromCache(dataAddressLookup, lastSymbolCache?.filePaths);
     }
   });
   context.subscriptions.push(editorVisibilityDisposable);
@@ -626,10 +618,10 @@ function printDebugState(
     emuOutput.appendLine((header ? header + ' ' : '') + line);
   } catch (e) {}
   if (highlightSource) {
-    highlightSourceFromHardware(hardware);
+    highlightSourceFromHardware(hardware, lastAddressSourceMap, lastSymbolCache?.lineAddresses);
     updateMemoryDumpFromHardware(panel, hardware, 'pc');
     if (!currentToolbarIsRunning) {
-      refreshDataLineHighlights(hardware);
+      refreshDataLineHighlights(hardware, dataAddressLookup, lastSymbolCache?.filePaths);
     }
   }
 }
@@ -712,51 +704,14 @@ export function isEmulatorPanelPaused(): boolean {
   return !!currentPanelController && !currentToolbarIsRunning;
 }
 
-export type DataDirectiveHoverInfo = {
-  value: number;
-  address: number;
-  unitBytes: number;
-  directive: 'byte' | 'word';
-  range: vscode.Range;
-  sourceValue?: number;
-};
-
 export function resolveDataDirectiveHover(document: vscode.TextDocument, position: vscode.Position): DataDirectiveHoverInfo | undefined {
-  if (!lastBreakpointSource?.hardware || currentToolbarIsRunning) return undefined;
-  if (!dataLineSpanCache || dataLineSpanCache.size === 0) return undefined;
-  const fileKey = normalizeFileKey(document.uri.fsPath);
-  if (!fileKey) return undefined;
-  const lineSpans = dataLineSpanCache.get(fileKey);
-  if (!lineSpans) return undefined;
-  const lineNumber = position.line + 1;
-  const span = lineSpans.get(lineNumber);
-  if (!span) return undefined;
-  const lineText = document.lineAt(position.line).text;
-  const directiveInfo = extractDataDirectiveInfo(lineText);
-  if (!directiveInfo) return undefined;
-  const { directive, ranges } = directiveInfo;
-  if ((directive === 'byte' && span.unitBytes !== 1) || (directive === 'word' && span.unitBytes !== 2)) {
-    // directive mismatch; fallback to unitBytes to infer
-  }
-  const matchIndex = ranges.findIndex(range => position.character >= range.start && position.character < range.end);
-  if (matchIndex < 0) return undefined;
-  const byteOffset = matchIndex * span.unitBytes;
-  if (byteOffset >= span.byteLength) return undefined;
-  const addr = (span.start + byteOffset) & 0xffff;
-  const value = readMemoryValueForSpan(lastBreakpointSource.hardware, addr, span.unitBytes);
-  if (value === undefined) return undefined;
-  const tokenRange = ranges[matchIndex];
-  const literalRange = new vscode.Range(position.line, tokenRange.start, position.line, tokenRange.end);
-  const literalText = document.getText(literalRange);
-  const sourceValue = parseDataLiteralValue(literalText, span.unitBytes);
-  return {
-    value,
-    address: addr,
-    unitBytes: span.unitBytes,
-    directive,
-    range: literalRange,
-    sourceValue
-  };
+  return resolveDataDirectiveHoverForMemory(
+    document,
+    position,
+    lastBreakpointSource?.hardware,
+    currentToolbarIsRunning,
+    dataLineSpanCache
+  );
 }
 
 function resolveTokenFileReference(tokenPath: string | undefined, fileKey: string): string {
@@ -944,497 +899,4 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
   lastSymbolCache = { byName, byLowerCase, lineAddresses, filePaths };
   dataLineSpanCache = dataLines.size ? dataLines : null;
   dataAddressLookup = addressLookup.size ? addressLookup : null;
-}
-
-function ensureHighlightDecoration(context: vscode.ExtensionContext) {
-  if (!pausedLineDecoration) {
-    pausedLineDecoration = vscode.window.createTextEditorDecorationType({
-      isWholeLine: true,
-      backgroundColor: 'rgba(129, 127, 38, 0.45)',
-      overviewRulerColor: 'rgba(200, 200, 175, 0.8)',
-      overviewRulerLane: vscode.OverviewRulerLane.Full
-    });
-    context.subscriptions.push(pausedLineDecoration);
-  }
-  if (!unmappedAddressDecoration) {
-    unmappedAddressDecoration = vscode.window.createTextEditorDecorationType({
-      isWholeLine: true,
-      backgroundColor: 'rgba(200, 180, 0, 0.35)',
-      overviewRulerColor: 'rgba(255, 220, 100, 0.8)',
-      overviewRulerLane: vscode.OverviewRulerLane.Full
-    });
-    context.subscriptions.push(unmappedAddressDecoration);
-  }
-}
-
-function clearHighlightedSourceLine() {
-  if (lastHighlightedEditor) {
-    try {
-      if (pausedLineDecoration) {
-        lastHighlightedEditor.setDecorations(pausedLineDecoration, []);
-      }
-      if (unmappedAddressDecoration) {
-        lastHighlightedEditor.setDecorations(unmappedAddressDecoration, []);
-      }
-    } catch (e) { /* ignore decoration clearing errors */ }
-  }
-  lastHighlightedEditor = null;
-  lastHighlightedLine = null;
-  lastHighlightedFilePath = null;
-  lastHighlightDecoration = null;
-  lastHighlightIsUnmapped = false;
-}
-
-/**
- * Reapplies the execution highlight to the source editor when it becomes visible again.
- * This function is called when the visible editors change (e.g., when tabs are moved or split).
- * It restores the paused line decoration (green highlight) or unmapped address decoration (yellow)
- * to maintain continuity of the debugger state visualization.
- *
- * The function only operates when:
- * - The emulator is paused (not running)
- * - There is a saved highlight state (file path and decoration)
- * - The highlighted file is among the currently visible editors
- */
-function reapplyExecutionHighlight() {
-  // Only reapply if we have saved highlight state and emulator is paused
-  if (!lastHighlightedFilePath || !lastHighlightDecoration || currentToolbarIsRunning) {
-    return;
-  }
-
-  // Find the editor for the highlighted file in visible editors
-  const editor = vscode.window.visibleTextEditors.find(
-    (ed: vscode.TextEditor) => ed.document.uri.fsPath === lastHighlightedFilePath
-  );
-
-  if (!editor) {
-    return;
-  }
-
-  // Use the saved flag to determine which decoration type to apply
-  const decorationType = lastHighlightIsUnmapped
-    ? unmappedAddressDecoration
-    : pausedLineDecoration;
-
-  if (!decorationType) {
-    return;
-  }
-
-  try {
-    // Reapply the decoration to the editor
-    editor.setDecorations(decorationType, [lastHighlightDecoration]);
-    lastHighlightedEditor = editor;
-  } catch (e) {
-    /* ignore decoration reapply errors */
-  }
-}
-
-
-function isSkippableHighlightLine(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return true;
-  if (trimmed.startsWith(';') || trimmed.startsWith('//')) return true;
-  const colonIdx = trimmed.indexOf(':');
-  if (colonIdx >= 0) {
-    const before = trimmed.slice(0, colonIdx).trim();
-    const after = trimmed.slice(colonIdx + 1).trim();
-    if (/^[A-Za-z_.$@?][\w.$@?]*$/.test(before) && (!after || after.startsWith(';') || after.startsWith('//'))) {
-      return true;
-    }
-  }
-  const equMatch = trimmed.match(/^([A-Za-z_.$@?][\w.$@?]*)\s+(equ)\b/i);
-  if (equMatch && !trimmed.includes(':')) return true;
-  const eqIdx = trimmed.indexOf('=');
-  if (eqIdx > 0) {
-    const lhs = trimmed.slice(0, eqIdx).trim();
-    const rhs = trimmed.slice(eqIdx + 1).trim();
-    if (/^[A-Za-z_.$@?][\w.$@?]*$/.test(lhs) && rhs && !rhs.startsWith(';') && !trimmed.includes(':')) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function resolvePreferredHighlightLine(filePath: string, addr: number, doc?: vscode.TextDocument): number | undefined {
-  if (!lastSymbolCache || !lastSymbolCache.lineAddresses.size) return undefined;
-  const fileKey = normalizeFileKey(filePath);
-  if (!fileKey) return undefined;
-  const perLine = lastSymbolCache.lineAddresses.get(fileKey);
-  if (!perLine || perLine.size === 0) return undefined;
-  const normalizedAddr = addr & 0xffff;
-  const candidates: number[] = [];
-  for (const [lineNumber, lineAddrs] of perLine.entries()) {
-    for (const lineAddr of lineAddrs) {
-      if ((lineAddr & 0xffff) === normalizedAddr) {
-        candidates.push(lineNumber);
-        break;
-      }
-    }
-  }
-  if (!candidates.length) return undefined;
-  candidates.sort((a, b) => b - a);
-  if (doc) {
-    for (const lineNumber of candidates) {
-      const idx = lineNumber - 1;
-      if (idx < 0 || idx >= doc.lineCount) continue;
-      const text = doc.lineAt(idx).text;
-      if (!isSkippableHighlightLine(text)) {
-        return lineNumber;
-      }
-    }
-  }
-  return candidates[0];
-}
-
-function highlightSourceFromHardware(hardware: Hardware | undefined | null) {
-  if (!hardware || !highlightContext) return;
-  try {
-    const pc = hardware?.Request(HardwareReq.GET_REG_PC)['pc'] ?? 0;
-    const debugLine = getDebugLine(hardware);
-    highlightSourceAddress(hardware, pc, debugLine);
-  } catch (e) {
-    /* ignore highlight errors */
-  }
-}
-
-function disassembleInstructionAt(hardware: Hardware | undefined | null, addr: number)
-: string | undefined
-{
-  if (!hardware) return undefined;
-
-  const instr = hardware.Request(HardwareReq.GET_INSTR, { "addr": addr })['data'] as number[];
-  const opcode = instr.shift() ?? 0;
-  const bytes = instr;
-
-  const listing = bytes.map(formatHexByte).join(' ');
-  const display = formatInstructionHoverText(opcode, bytes, '');
-  return `${display} (bytes: ${listing})`;
-}
-
-function highlightSourceAddress(hardware: Hardware | undefined | null, addr?: number, debugLine?: string) {
-  if (!highlightContext || addr === undefined || addr === null) return;
-  ensureHighlightDecoration(highlightContext);
-
-  const normalizedAddr = addr & 0xffff;
-
-  // Check if we have a source map and if this address is mapped
-  if (!lastAddressSourceMap || lastAddressSourceMap.size === 0) {
-    // No source map at all - clear any previous highlights
-    clearHighlightedSourceLine();
-    return;
-  }
-
-  const info = lastAddressSourceMap.get(normalizedAddr);
-
-  // Handle unmapped address case: show yellow highlight with explanation
-  if (!info) {
-    // Save reference to the currently highlighted editor and line before clearing
-    const editorToUse = lastHighlightedEditor;
-    const lineToUse = lastHighlightedLine;
-
-    // Clear previous highlight decorations
-    clearHighlightedSourceLine();
-
-    // If we have an editor with a previous highlight, show the unmapped indicator there
-    if (editorToUse && unmappedAddressDecoration && lineToUse !== null) {
-      try {
-        const doc = editorToUse.document;
-        const idx = Math.min(Math.max(lineToUse, 0), doc.lineCount - 1);
-        const lineText = doc.lineAt(idx).text;
-        const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
-        const addrHex = '0x' + normalizedAddr.toString(16).toUpperCase().padStart(4, '0');
-        const disasm = disassembleInstructionAt(hardware, normalizedAddr);
-        const disasmText = disasm ? ` - executing ${disasm}` : ' - executing unmapped code';
-        const decoration: vscode.DecorationOptions = {
-          range,
-          renderOptions: {
-            after: {
-              contentText: `  No source mapping for address ${addrHex}${disasmText}`,
-              color: consts.UNMAPPED_ADDRESS_COLOR,
-              fontStyle: 'italic',
-              fontWeight: 'normal'
-            }
-          }
-        };
-        editorToUse.setDecorations(unmappedAddressDecoration, [decoration]);
-        lastHighlightedEditor = editorToUse;  // Restore the reference
-        lastHighlightedLine = idx;  // Restore the line number
-        lastHighlightedFilePath = doc.uri.fsPath;
-        lastHighlightDecoration = decoration;
-        lastHighlightIsUnmapped = true;
-      } catch (err) {
-        /* ignore unmapped decoration errors */
-      }
-    }
-    return;
-  }
-
-  // We have a mapping - show normal green highlight
-  if (!pausedLineDecoration) return;
-
-  const targetPath = path.resolve(info.file);
-  const run = async () => {
-    try {
-      const uri = vscode.Uri.file(targetPath);
-      const doc = await vscode.workspace.openTextDocument(uri);
-      let editor = vscode.window.visibleTextEditors.find((ed) => ed.document.uri.fsPath === uri.fsPath);
-      if (!editor) {
-        const existing = vscode.window.tabGroups.all.flatMap(group => group.tabs.map(tab => ({ tab, viewColumn: group.viewColumn })))
-          .find(entry => entry.tab.input && (entry.tab.input as any).uri && (entry.tab.input as any).uri.fsPath === uri.fsPath);
-        if (existing && existing.viewColumn !== undefined) {
-          editor = await vscode.window.showTextDocument(doc, { preview: false, viewColumn: existing.viewColumn, preserveFocus: false });
-        }
-      }
-      if (!editor) {
-        editor = await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
-      }
-      const preferredLine = resolvePreferredHighlightLine(targetPath, normalizedAddr, doc) ?? info.line;
-      const totalLines = doc.lineCount;
-      if (totalLines === 0) return;
-      const idx = Math.min(Math.max(preferredLine - 1, 0), totalLines - 1);
-      const lineText = doc.lineAt(idx).text;
-      const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
-      const decoration: vscode.DecorationOptions = {
-        range,
-        renderOptions: debugLine ? {
-          after: {
-            contentText: '  ' + debugLine,
-            color: '#b4ffb0',
-            fontStyle: 'normal',
-            fontWeight: 'normal'
-          }
-        } : undefined
-      };
-      clearHighlightedSourceLine();
-      editor.setDecorations(pausedLineDecoration!, [decoration]);
-      editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-      lastHighlightedEditor = editor;
-      lastHighlightedLine = idx;
-      lastHighlightedFilePath = targetPath;
-      lastHighlightDecoration = decoration;
-      lastHighlightIsUnmapped = false;
-    } catch (err) {
-      /* ignore highlight errors */
-    }
-  };
-  void run();
-}
-
-function ensureDataHighlightDecorations(context: vscode.ExtensionContext) {
-  if (!dataReadDecoration) {
-    dataReadDecoration = vscode.window.createTextEditorDecorationType({
-      isWholeLine: false,
-      backgroundColor: 'rgba(64, 127, 255, 0.25)'
-    });
-    context.subscriptions.push(dataReadDecoration);
-  }
-  if (!dataWriteDecoration) {
-    dataWriteDecoration = vscode.window.createTextEditorDecorationType({
-      isWholeLine: false,
-      backgroundColor: 'rgba(255, 92, 92, 0.25)'
-    });
-    context.subscriptions.push(dataWriteDecoration);
-  }
-}
-
-function normalizeFsPathSafe(value: string): string {
-  try {
-    return path.resolve(value).replace(/\\/g, '/').toLowerCase();
-  } catch {
-    return value.toLowerCase();
-  }
-}
-
-function buildElementRanges(elements: Map<number, Set<number>>, doc: vscode.TextDocument): vscode.Range[] {
-  const ranges: vscode.Range[] = [];
-  for (const [line, elementIndices] of elements) {
-    const lineIdx = line - 1;
-    if (!Number.isFinite(lineIdx) || lineIdx < 0 || lineIdx >= doc.lineCount) continue;
-    const lineText = doc.lineAt(lineIdx).text;
-    const directiveInfo = extractDataDirectiveInfo(lineText);
-    if (!directiveInfo || !directiveInfo.ranges.length) continue;
-    for (const elemIdx of elementIndices) {
-      // Skip if the element index doesn't match a parsed token
-      // (can happen if source was edited or byte spans differ from token count)
-      if (elemIdx < 0 || elemIdx >= directiveInfo.ranges.length) continue;
-      const tokenRange = directiveInfo.ranges[elemIdx];
-      ranges.push(new vscode.Range(lineIdx, tokenRange.start, lineIdx, tokenRange.end));
-    }
-  }
-  return ranges;
-}
-
-function applyDataLineHighlightsFromSnapshot(snapshot?: MemoryAccessLog) {
-  if (!highlightContext) return;
-  ensureDataHighlightDecorations(highlightContext);
-  if (!snapshot || !dataAddressLookup || !lastSymbolCache || !lastSymbolCache.filePaths.size) {
-    clearDataLineHighlights();
-    lastDataAccessLog = null;
-    return;
-  }
-  lastDataAccessLog = snapshot;
-
-  // Accumulate which element indices were accessed for each line
-  // bucket maps: fileKey -> Map<line, Set<elementIndex>>
-  const accumulate = (addr: number, bucket: Map<string, Map<number, Set<number>>>) => {
-    const entry = dataAddressLookup?.get(addr & 0xffff);
-    if (!entry) return;
-    const resolvedPath = lastSymbolCache?.filePaths.get(entry.fileKey);
-    if (!resolvedPath) return;
-    const key = normalizeFsPathSafe(resolvedPath);
-    // Calculate which element this address corresponds to
-    const byteOffset = (addr & 0xffff) - entry.span.start;
-    // Guard against invalid span data
-    const unitBytes = entry.span.unitBytes > 0 ? entry.span.unitBytes : 1;
-    if (byteOffset < 0 || byteOffset >= entry.span.byteLength) return;
-    const elementIndex = Math.floor(byteOffset / unitBytes);
-    let lineMap = bucket.get(key);
-    if (!lineMap) {
-      lineMap = new Map();
-      bucket.set(key, lineMap);
-    }
-    let elemSet = lineMap.get(entry.line);
-    if (!elemSet) {
-      elemSet = new Set();
-      lineMap.set(entry.line, elemSet);
-    }
-    elemSet.add(elementIndex);
-  };
-  const readElements = new Map<string, Map<number, Set<number>>>();
-  const writeElements = new Map<string, Map<number, Set<number>>>();
-  // TODO: improve performance and UI information by using value. Currently we ignore it.
-  snapshot.reads.forEach((value, addr) => accumulate(addr, readElements));
-  snapshot.writes.forEach((value, addr) => accumulate(addr, writeElements));
-  for (const editor of vscode.window.visibleTextEditors) {
-    const key = normalizeFsPathSafe(editor.document.uri.fsPath);
-    const readMap = readElements.get(key);
-    const writeMap = writeElements.get(key);
-    if (dataReadDecoration) editor.setDecorations(dataReadDecoration, readMap ? buildElementRanges(readMap, editor.document) : []);
-    if (dataWriteDecoration) editor.setDecorations(dataWriteDecoration, writeMap ? buildElementRanges(writeMap, editor.document) : []);
-  }
-}
-
-function clearDataLineHighlights() {
-  if (!highlightContext) return;
-  for (const editor of vscode.window.visibleTextEditors) {
-    if (dataReadDecoration) editor.setDecorations(dataReadDecoration, []);
-    if (dataWriteDecoration) editor.setDecorations(dataWriteDecoration, []);
-  }
-}
-
-function refreshDataLineHighlights(hardware?: Hardware | null) {
-  // TODO: check if it is useful
-  if (!hardware) {
-    clearDataLineHighlights();
-    lastDataAccessLog = null;
-    return;
-  }
-  const snapshotAccessLog = hardware.Request(HardwareReq.DEBUG_MEM_ACCESS_LOG_GET)['data'] as MemoryAccessLog | undefined;
-  applyDataLineHighlightsFromSnapshot(snapshotAccessLog);
-}
-
-type DirectiveValueRange = { start: number; end: number };
-
-function extractDataDirectiveInfo(lineText: string): { directive: 'byte' | 'word'; ranges: DirectiveValueRange[] } | undefined {
-  if (!lineText.trim()) return undefined;
-  const commentMatch = lineText.search(/(;|\/\/)/);
-  const workingText = commentMatch >= 0 ? lineText.slice(0, commentMatch) : lineText;
-  const directiveRegex = /(?:^|[\s\t])((?:\.?(?:db|byte))|(?:\.?(?:dw|word)))\b/i;
-  const match = directiveRegex.exec(workingText);
-  if (!match || match.index === undefined) return undefined;
-  const token = match[1] || '';
-  const directive: 'byte' | 'word' = token.toLowerCase().includes('w') ? 'word' : 'byte';
-  const matchText = match[0];
-  const tokenStart = (match.index ?? 0) + matchText.lastIndexOf(token);
-  const valuesOffset = tokenStart + token.length;
-  const valuesSegment = workingText.slice(valuesOffset);
-  const ranges = splitArgsWithRanges(valuesSegment, valuesOffset);
-  if (!ranges.length) return undefined;
-  return { directive, ranges };
-}
-
-function splitArgsWithRanges(text: string, offset: number): DirectiveValueRange[] {
-  const ranges: DirectiveValueRange[] = [];
-  let depth = 0;
-  let inSingle = false;
-  let inDouble = false;
-  let tokenStart = -1;
-  const pushToken = (endIndex: number) => {
-    if (tokenStart === -1) return;
-    let startIdx = tokenStart;
-    let endIdx = endIndex;
-    while (startIdx < endIdx && /\s/.test(text[startIdx]!)) startIdx++;
-    while (endIdx > startIdx && /\s/.test(text[endIdx - 1]!)) endIdx--;
-    if (startIdx < endIdx) {
-      ranges.push({ start: offset + startIdx, end: offset + endIdx });
-    }
-    tokenStart = -1;
-  };
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]!;
-    const prev = i > 0 ? text[i - 1]! : '';
-    if (!inDouble && ch === '\'' && prev !== '\\') {
-      if (tokenStart === -1) tokenStart = i;
-      inSingle = !inSingle;
-      continue;
-    }
-    if (!inSingle && ch === '"' && prev !== '\\') {
-      if (tokenStart === -1) tokenStart = i;
-      inDouble = !inDouble;
-      continue;
-    }
-    if (inSingle || inDouble) continue;
-    if (ch === '(') {
-      if (tokenStart === -1) tokenStart = i;
-      depth++;
-      continue;
-    }
-    if (ch === ')' && depth > 0) {
-      depth--;
-      continue;
-    }
-    if (ch === ',' && depth === 0) {
-      pushToken(i);
-      continue;
-    }
-    if (tokenStart === -1 && !/\s/.test(ch)) {
-      tokenStart = i;
-    }
-  }
-  pushToken(text.length);
-  return ranges;
-}
-
-// unitBytes is 1 for byte, 2 for word
-function readMemoryValueForSpan(hardware: Hardware | undefined | null, addr: number, unitBytes: number): number | undefined {
-  if (!hardware) return undefined;
-
-  const normalizedAddr = addr & 0xffff;
-  const bytes = hardware.Request(HardwareReq.GET_MEM_RANGE, {"addr": normalizedAddr, "length": unitBytes})['data'] as number[];
-
-  if (unitBytes === 1) return bytes[0];
-
-  const word = (bytes[1] << 8) | bytes[0];
-  return word;
-}
-
-function parseDataLiteralValue(text: string, unitBytes: number): number | undefined {
-  if (!text) return undefined;
-  const trimmed = text.trim();
-  if (!trimmed.length) return undefined;
-  let value: number | undefined;
-  const normalizeUnderscore = (s: string) => s.replace(/_/g, '');
-  if (/^0x[0-9a-fA-F_]+$/.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(2)), 16);
-  else if (/^\$[0-9a-fA-F_]+$/.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(1)), 16);
-  else if (/^0b[01_]+$/i.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(2)), 2);
-  else if (/^b[01_]+$/i.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(1)), 2);
-  else if (/^%[01_]+$/.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(1)), 2);
-  else if (/^[-+]?[0-9]+$/.test(trimmed)) value = parseInt(trimmed, 10);
-  else if (/^'(.|\\.)'$/.test(trimmed)) {
-    const inner = trimmed.slice(1, trimmed.length - 1);
-    value = inner.length === 1 ? inner.charCodeAt(0) : inner.charCodeAt(inner.length - 1);
-  }
-  if (value === undefined || Number.isNaN(value)) return undefined;
-  const mask = unitBytes >= 4 ? 0xffffffff : ((1 << (unitBytes * 8)) >>> 0) - 1;
-  return value & mask;
 }

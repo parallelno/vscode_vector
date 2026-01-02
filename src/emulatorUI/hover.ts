@@ -17,6 +17,19 @@ export type SymbolCacheLookup = {
   lineAddresses: Map<string, Map<number, number[]>>;
 };
 
+export type DataLineSpan = { start: number; byteLength: number; unitBytes: number };
+export type DataAddressEntry = { fileKey: string; line: number; span: DataLineSpan };
+export type DirectiveValueRange = { start: number; end: number };
+
+export type DataDirectiveHoverInfo = {
+  value: number;
+  address: number;
+  unitBytes: number;
+  directive: 'byte' | 'word';
+  range: vscode.Range;
+  sourceValue?: number;
+};
+
 export const lxiRegisterByOpcode: Record<number, string> = {
   0x01: 'b',
   0x11: 'd',
@@ -165,4 +178,154 @@ export function resolveHoverSymbol(
     }
   }
   return undefined;
+}
+
+export function extractDataDirectiveInfo(lineText: string): { directive: 'byte' | 'word'; ranges: DirectiveValueRange[] } | undefined {
+  if (!lineText.trim()) return undefined;
+  const commentMatch = lineText.search(/(;|\/\/)/);
+  const workingText = commentMatch >= 0 ? lineText.slice(0, commentMatch) : lineText;
+  const directiveRegex = /(?:^|[\s\t])((?:\.?(?:db|byte))|(?:\.?(?:dw|word)))\b/i;
+  const match = directiveRegex.exec(workingText);
+  if (!match || match.index === undefined) return undefined;
+  const token = match[1] || '';
+  const directive: 'byte' | 'word' = token.toLowerCase().includes('w') ? 'word' : 'byte';
+  const matchText = match[0];
+  const tokenStart = (match.index ?? 0) + matchText.lastIndexOf(token);
+  const valuesOffset = tokenStart + token.length;
+  const valuesSegment = workingText.slice(valuesOffset);
+  const ranges = splitArgsWithRanges(valuesSegment, valuesOffset);
+  if (!ranges.length) return undefined;
+  return { directive, ranges };
+}
+
+export function splitArgsWithRanges(text: string, offset: number): DirectiveValueRange[] {
+  const ranges: DirectiveValueRange[] = [];
+  let depth = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let tokenStart = -1;
+  const pushToken = (endIndex: number) => {
+    if (tokenStart === -1) return;
+    let startIdx = tokenStart;
+    let endIdx = endIndex;
+    while (startIdx < endIdx && /\s/.test(text[startIdx]!)) startIdx++;
+    while (endIdx > startIdx && /\s/.test(text[endIdx - 1]!)) endIdx--;
+    if (startIdx < endIdx) {
+      ranges.push({ start: offset + startIdx, end: offset + endIdx });
+    }
+    tokenStart = -1;
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    const prev = i > 0 ? text[i - 1]! : '';
+    if (!inDouble && ch === '\'' && prev !== '\\') {
+      if (tokenStart === -1) tokenStart = i;
+      inSingle = !inSingle;
+      continue;
+    }
+    if (!inSingle && ch === '"' && prev !== '\\') {
+      if (tokenStart === -1) tokenStart = i;
+      inDouble = !inDouble;
+      continue;
+    }
+    if (inSingle || inDouble) continue;
+    if (ch === '(') {
+      if (tokenStart === -1) tokenStart = i;
+      depth++;
+      continue;
+    }
+    if (ch === ')' && depth > 0) {
+      depth--;
+      continue;
+    }
+    if (ch === ',' && depth === 0) {
+      pushToken(i);
+      continue;
+    }
+    if (tokenStart === -1 && !/\s/.test(ch)) {
+      tokenStart = i;
+    }
+  }
+  pushToken(text.length);
+  return ranges;
+}
+
+export function resolveDataDirectiveHoverForMemory(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+  hardware: Hardware | null | undefined,
+  isToolbarRunning: boolean,
+  dataLineSpanCache: Map<string, Map<number, DataLineSpan>> | null | undefined)
+  : DataDirectiveHoverInfo | undefined
+{
+  if (!hardware || isToolbarRunning) return undefined;
+  if (!dataLineSpanCache || dataLineSpanCache.size === 0) return undefined;
+  const fileKey = normalizeFileKey(document.uri.fsPath);
+  if (!fileKey) return undefined;
+  const lineSpans = dataLineSpanCache.get(fileKey);
+  if (!lineSpans) return undefined;
+  const lineNumber = position.line + 1;
+  const span = lineSpans.get(lineNumber);
+  if (!span) return undefined;
+  const lineText = document.lineAt(position.line).text;
+  const directiveInfo = extractDataDirectiveInfo(lineText);
+  if (!directiveInfo) return undefined;
+  const { directive, ranges } = directiveInfo;
+  if ((directive === 'byte' && span.unitBytes !== 1) || (directive === 'word' && span.unitBytes !== 2)) {
+    // directive mismatch; fallback to unitBytes to infer
+  }
+  const matchIndex = ranges.findIndex(
+    (range: DirectiveValueRange) =>
+      position.character >= range.start && position.character < range.end);
+  if (matchIndex < 0) return undefined;
+  const byteOffset = matchIndex * span.unitBytes;
+  if (byteOffset >= span.byteLength) return undefined;
+  const addr = (span.start + byteOffset) & 0xffff;
+  const value = readMemoryValueForSpan(hardware, addr, span.unitBytes);
+  if (value === undefined) return undefined;
+  const tokenRange = ranges[matchIndex];
+  const literalRange = new vscode.Range(position.line, tokenRange.start, position.line, tokenRange.end);
+  const literalText = document.getText(literalRange);
+  const sourceValue = parseDataLiteralValue(literalText, span.unitBytes);
+  return {
+    value,
+    address: addr,
+    unitBytes: span.unitBytes,
+    directive,
+    range: literalRange,
+    sourceValue
+  };
+}
+
+function readMemoryValueForSpan(hardware: Hardware | undefined | null, addr: number, unitBytes: number): number | undefined {
+  if (!hardware) return undefined;
+
+  const normalizedAddr = addr & 0xffff;
+  const bytes = hardware.Request(HardwareReq.GET_MEM_RANGE, { "addr": normalizedAddr, "length": unitBytes })['data'] as number[];
+
+  if (unitBytes === 1) return bytes[0];
+
+  const word = (bytes[1] << 8) | bytes[0];
+  return word;
+}
+
+export function parseDataLiteralValue(text: string, unitBytes: number): number | undefined {
+  if (!text) return undefined;
+  const trimmed = text.trim();
+  if (!trimmed.length) return undefined;
+  let value: number | undefined;
+  const normalizeUnderscore = (s: string) => s.replace(/_/g, '');
+  if (/^0x[0-9a-fA-F_]+$/.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(2)), 16);
+  else if (/^\$[0-9a-fA-F_]+$/.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(1)), 16);
+  else if (/^0b[01_]+$/i.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(2)), 2);
+  else if (/^b[01_]+$/i.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(1)), 2);
+  else if (/^%[01_]+$/.test(trimmed)) value = parseInt(normalizeUnderscore(trimmed.slice(1)), 2);
+  else if (/^[-+]?[0-9]+$/.test(trimmed)) value = parseInt(trimmed, 10);
+  else if (/^'(.|\\.)'$/.test(trimmed)) {
+    const inner = trimmed.slice(1, trimmed.length - 1);
+    value = inner.length === 1 ? inner.charCodeAt(0) : inner.charCodeAt(inner.length - 1);
+  }
+  if (value === undefined || Number.isNaN(value)) return undefined;
+  const mask = unitBytes >= 4 ? 0xffffffff : ((1 << (unitBytes * 8)) >>> 0) - 1;
+  return value & mask;
 }
