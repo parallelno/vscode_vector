@@ -975,7 +975,7 @@ export function assemble(
     const textAddrRef = { value: addr };
 
     if (op === '.TEXT') {
-      addr = handleTextDirective(
+      handleTextDirective(
         line,
         origins[i],
         srcLine,
@@ -986,6 +986,7 @@ export function assemble(
         out,
         textAddrRef
       );
+      addr = textAddrRef.value; // advance by emitted .text bytes
       continue;
     }
 
