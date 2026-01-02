@@ -1,9 +1,20 @@
+import * as vscode from 'vscode';
+import { Hardware } from '../emulator/hardware';
+import { HardwareReq } from '../emulator/hardware_reqs';
+import { normalizeFileKey } from './breakpoints';
+
 export type HoverSymbolInfo = { value: number; kind: 'label' | 'const' | 'line' };
 
 export type InstructionHoverInfo = {
   display: string;
   address: number;
   bytes: number[];
+};
+
+export type SymbolCacheLookup = {
+  byName: Map<string, { value: number; kind: 'label' | 'const' }>;
+  byLowerCase: Map<string, { value: number; kind: 'label' | 'const' }>;
+  lineAddresses: Map<string, Map<number, number[]>>;
 };
 
 export const lxiRegisterByOpcode: Record<number, string> = {
@@ -110,4 +121,48 @@ export function formatInstructionHoverText(opcode: number, bytes: number[], sour
   const sanitized = stripAsmComment(sourceLine);
   if (sanitized.length) return sanitized;
   return `opcode 0x${opcode.toString(16).toUpperCase().padStart(2, '0')}`;
+}
+
+export function resolveInstructionHoverForMemory(
+  hardware: Hardware | null | undefined,
+  document: vscode.TextDocument,
+  position: vscode.Position,
+  address: number,
+  isToolbarRunning: boolean)
+  : InstructionHoverInfo | undefined
+{
+  if (!hardware || isToolbarRunning) return undefined;
+
+  const normalizedAddr = address & 0xffff;
+  const instr = hardware.Request(HardwareReq.GET_INSTR, { addr: normalizedAddr })['data'] as number[];
+  const opcode = instr[0];
+  const bytes = instr;
+
+  const sourceLine = document.lineAt(position.line).text;
+  const display = formatInstructionHoverText(opcode, bytes, sourceLine);
+  return { display, address: normalizedAddr, bytes };
+}
+
+export function resolveHoverSymbol(
+  identifier: string,
+  location: { filePath?: string; line?: number } | undefined,
+  symbolCache: SymbolCacheLookup | null | undefined)
+  : HoverSymbolInfo | undefined
+{
+  if (!symbolCache) return undefined;
+  const token = (identifier || '').trim();
+  if (token) {
+    const exact = symbolCache.byName.get(token) || symbolCache.byLowerCase.get(token.toLowerCase());
+    if (exact) return exact;
+  }
+  if (location?.filePath && location.line !== undefined) {
+    const fileKey = normalizeFileKey(location.filePath);
+    const perLine = fileKey ? symbolCache.lineAddresses.get(fileKey) : undefined;
+    const addrs = perLine?.get(location.line);
+    const addr = addrs && addrs.length ? addrs[0] : undefined;
+    if (addr !== undefined) {
+      return { value: addr, kind: 'line' };
+    }
+  }
+  return undefined;
 }

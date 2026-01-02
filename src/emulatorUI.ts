@@ -4,7 +4,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Hardware } from './emulator/hardware';
 import { HardwareReq } from './emulator/hardware_reqs';
-import { BpStatus } from './emulator/breakpoint';
 import { ACTIVE_AREA_H, ACTIVE_AREA_W, BORDER_LEFT, FRAME_H, FRAME_W, SCAN_ACTIVE_AREA_TOP } from './emulator/display';
 import { getWebviewContent } from './emulatorUI/webviewContent';
 import { getDebugLine } from './emulatorUI/debugOutput';
@@ -27,14 +26,10 @@ import {
 import {
   HoverSymbolInfo,
   InstructionHoverInfo,
-  lxiRegisterByOpcode,
-  mviRegisterByOpcode,
-  jumpMnemonicByOpcode,
-  callMnemonicByOpcode,
-  byteImmediateMnemonicByOpcode,
-  wordAddressMnemonicByOpcode,
   formatInstructionHoverText,
   formatHexByte,
+  resolveInstructionHoverForMemory,
+  resolveHoverSymbol,
 } from './emulatorUI/hover';
 
 // set to true to enable instruction logging to file
@@ -697,37 +692,11 @@ export function resolveInstructionHover(
   address: number)
   : InstructionHoverInfo | undefined
 {
-  if (!lastBreakpointSource?.hardware || currentToolbarIsRunning) return undefined;
-
-  let hardware = lastBreakpointSource.hardware;
-
-  const normalizedAddr = address & 0xffff;
-  const instr = hardware.Request(HardwareReq.GET_INSTR, { "addr": normalizedAddr })['data'] as number[];
-  const opcode = instr[0];
-  const bytes = instr;
-
-  const sourceLine = document.lineAt(position.line).text;
-  const display = formatInstructionHoverText(opcode, bytes, sourceLine);
-  return { display, address: normalizedAddr, bytes };
+  return resolveInstructionHoverForMemory(lastBreakpointSource?.hardware, document, position, address, currentToolbarIsRunning);
 }
 
 export function resolveEmulatorHoverSymbol(identifier: string, location?: { filePath?: string; line?: number }): HoverSymbolInfo | undefined {
-  if (!lastSymbolCache) return undefined;
-  const token = (identifier || '').trim();
-  if (token) {
-    const exact = lastSymbolCache.byName.get(token) || lastSymbolCache.byLowerCase.get(token.toLowerCase());
-    if (exact) return exact;
-  }
-  if (location?.filePath && location.line !== undefined) {
-    const fileKey = normalizeFileKey(location.filePath);
-    const perLine = fileKey ? lastSymbolCache.lineAddresses.get(fileKey) : undefined;
-    const addrs = perLine?.get(location.line);
-    const addr = addrs && addrs.length ? addrs[0] : undefined;
-    if (addr !== undefined) {
-      return { value: addr, kind: 'line' };
-    }
-  }
-  return undefined;
+  return resolveHoverSymbol(identifier, location, lastSymbolCache);
 }
 
 export function resolveSymbolDefinition(identifier: string): { filePath: string; line: number } | undefined {
