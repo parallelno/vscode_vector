@@ -697,6 +697,10 @@ export function isEmulatorPanelPaused(): boolean {
   return !!currentPanelController && !currentToolbarIsRunning;
 }
 
+export function isEmulatorRunning(): boolean {
+  return !!currentPanelController && currentToolbarIsRunning;
+}
+
 export function resolveDataDirectiveHover(document: vscode.TextDocument, position: vscode.Position): DataDirectiveHoverInfo | undefined {
   return resolveDataDirectiveHoverForMemory(
     document,
