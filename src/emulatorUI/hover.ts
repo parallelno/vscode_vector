@@ -65,3 +65,49 @@ export const wordAddressMnemonicByOpcode: Record<number, string> = {
   0x22: 'shld',
   0x2A: 'lhld'
 };
+
+function stripAsmComment(text: string): string {
+  return text.replace(/\/\/.*$|;.*$/, '').trim();
+}
+
+export function formatHexByte(value: number): string {
+  return '0x' + (value & 0xff).toString(16).toUpperCase().padStart(2, '0');
+}
+
+function formatHexWord(value: number): string {
+  return '0x' + (value & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+}
+
+export function formatInstructionHoverText(opcode: number, bytes: number[], sourceLine: string): string {
+  const byteImm = bytes.length >= 2 ? bytes[1] & 0xff : undefined;
+  const wordImm = bytes.length >= 3 ? ((bytes[1] & 0xff) | ((bytes[2] & 0xff) << 8)) & 0xffff : undefined;
+
+  if (opcode in lxiRegisterByOpcode && wordImm !== undefined) {
+    return `lxi ${lxiRegisterByOpcode[opcode]}, ${formatHexWord(wordImm)}`;
+  }
+  if (opcode in mviRegisterByOpcode && byteImm !== undefined) {
+    return `mvi ${mviRegisterByOpcode[opcode]}, ${formatHexByte(byteImm)}`;
+  }
+  if (opcode in wordAddressMnemonicByOpcode && wordImm !== undefined) {
+    return `${wordAddressMnemonicByOpcode[opcode]} ${formatHexWord(wordImm)}`;
+  }
+  if (opcode in jumpMnemonicByOpcode && wordImm !== undefined) {
+    return `${jumpMnemonicByOpcode[opcode]} ${formatHexWord(wordImm)}`;
+  }
+  if (opcode in callMnemonicByOpcode && wordImm !== undefined) {
+    return `${callMnemonicByOpcode[opcode]} ${formatHexWord(wordImm)}`;
+  }
+  if (opcode === 0xD3 && byteImm !== undefined) {
+    return `out ${formatHexByte(byteImm)}`;
+  }
+  if (opcode === 0xDB && byteImm !== undefined) {
+    return `in ${formatHexByte(byteImm)}`;
+  }
+  if (opcode in byteImmediateMnemonicByOpcode && byteImm !== undefined) {
+    return `${byteImmediateMnemonicByOpcode[opcode]} ${formatHexByte(byteImm)}`;
+  }
+
+  const sanitized = stripAsmComment(sourceLine);
+  if (sanitized.length) return sanitized;
+  return `opcode 0x${opcode.toString(16).toUpperCase().padStart(2, '0')}`;
+}
