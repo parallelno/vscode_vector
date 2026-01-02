@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { Hardware } from '../emulator/hardware';
 import { HardwareReq } from '../emulator/hardware_reqs';
 import { normalizeFileKey } from './breakpoints';
@@ -15,6 +16,8 @@ export type SymbolCacheLookup = {
   byName: Map<string, { value: number; kind: 'label' | 'const' }>;
   byLowerCase: Map<string, { value: number; kind: 'label' | 'const' }>;
   lineAddresses: Map<string, Map<number, number[]>>;
+  projectDir?: string;
+  filePaths?: Map<string, string>;
 };
 
 export type DataLineSpan = { start: number; byteLength: number; unitBytes: number };
@@ -169,8 +172,18 @@ export function resolveHoverSymbol(
     if (exact) return exact;
   }
   if (location?.filePath && location.line !== undefined) {
-    const fileKey = normalizeFileKey(location.filePath);
-    const perLine = fileKey ? symbolCache.lineAddresses.get(fileKey) : undefined;
+    let fileKey = normalizeFileKey(location.filePath, symbolCache.projectDir);
+    let perLine = fileKey ? symbolCache.lineAddresses.get(fileKey) : undefined;
+    if ((!perLine || perLine.size === 0) && symbolCache.filePaths) {
+      const normalizedPath = path.normalize(location.filePath);
+      for (const [key, resolvedPath] of symbolCache.filePaths.entries()) {
+        if (path.normalize(resolvedPath) === normalizedPath) {
+          fileKey = key;
+          perLine = symbolCache.lineAddresses.get(key);
+          break;
+        }
+      }
+    }
     const addrs = perLine?.get(location.line);
     const addr = addrs && addrs.length ? addrs[0] : undefined;
     if (addr !== undefined) {

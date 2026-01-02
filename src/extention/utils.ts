@@ -274,13 +274,54 @@ export const openDocument = async (logChannel: vscode.OutputChannel, uri: vscode
 };
 
 
+export function resolveProjectDirFromTokens(tokens: any, tokenPath?: string): string | undefined {
+  if (!tokens) return undefined;
+  const dirRaw = typeof tokens.projectDir === 'string' ? tokens.projectDir : undefined;
+  const baseDir = tokenPath ? path.dirname(tokenPath) : undefined;
+  if (dirRaw) {
+    if (path.isAbsolute(dirRaw)) return path.normalize(dirRaw);
+    if (baseDir) return path.normalize(path.resolve(baseDir, dirRaw));
+    const workspaceDir = process.cwd();
+    return path.normalize(path.resolve(workspaceDir, dirRaw));
+  }
+  const projectFile = typeof tokens.projectFile === 'string' ? tokens.projectFile : undefined;
+  if (projectFile) {
+    if (path.isAbsolute(projectFile)) return path.dirname(path.normalize(projectFile));
+    if (baseDir) return path.dirname(path.resolve(baseDir, projectFile));
+    return path.dirname(path.resolve(process.cwd(), projectFile));
+  }
+  return baseDir;
+}
+
+export function normalizeDebugFileKey(filePath: string, projectDir?: string): string | undefined {
+  if (!filePath) return undefined;
+  const normalized = path.normalize(filePath);
+  if (projectDir) {
+    const absolute = path.isAbsolute(normalized) ? normalized : path.resolve(projectDir, normalized);
+    const relative = path.relative(projectDir, absolute).replace(/\\/g, '/').toLowerCase();
+    if (relative) return relative;
+  }
+  const base = path.basename(normalized).toLowerCase();
+  return base || undefined;
+}
+
+
 function lookupLineAddress(
-  tokens: any, filePath: string, line: number)
+  tokens: any, filePath: string, line: number, tokenPath?: string)
   : string | string[] | undefined
 {
   if (!tokens || !tokens.lineAddresses) return undefined;
-  const base = path.basename(filePath).toLowerCase();
-  const perFile = tokens.lineAddresses[base];
+  const projectDir = resolveProjectDirFromTokens(tokens, tokenPath);
+  const candidates = new Set<string>();
+  const primary = normalizeDebugFileKey(filePath, projectDir);
+  const fallback = normalizeDebugFileKey(filePath, undefined);
+  if (primary) candidates.add(primary);
+  if (fallback) candidates.add(fallback);
+  let perFile: any;
+  for (const key of candidates) {
+    perFile = tokens.lineAddresses[key];
+    if (perFile) break;
+  }
   if (!perFile) return undefined;
   const normalizeValues = (value: any): string[] => {
     const out: string[] = [];
@@ -315,10 +356,10 @@ function lookupLineAddress(
 };
 
 export function attachAddressFromTokens(
-  tokens: any, filePath: string, line: number, entry: Record<string, any>)
+  tokens: any, filePath: string, line: number, entry: Record<string, any>, tokenPath?: string)
 {
   if (!entry || entry.addr) return;
-  const addr = lookupLineAddress(tokens, filePath, line);
+  const addr = lookupLineAddress(tokens, filePath, line, tokenPath);
   if (addr) entry.addr = addr;
 };
 
@@ -428,12 +469,14 @@ export async function writeBreakpointsForActiveEditor()
     if (!fs.existsSync(tokenPath2)) return;
     const tokenText2 = fs.readFileSync(tokenPath2, 'utf8');
     const tokens2 = JSON.parse(tokenText2);
+    const projectDir = resolveProjectDirFromTokens(tokens2, tokenPath2) || path.dirname(mainPath2);
     tokens2.breakpoints = {};
-    const basenameToPaths = new Map<string, Set<string>>();
+    const fileKeyToPaths = new Map<string, Set<string>>();
     for (const f of Array.from(included)) {
-      const b = path.basename(f);
-      let s = basenameToPaths.get(b);
-      if (!s) { s = new Set(); basenameToPaths.set(b, s); }
+      const key = normalizeDebugFileKey(f, projectDir);
+      if (!key) continue;
+      let s = fileKeyToPaths.get(key);
+      if (!s) { s = new Set(); fileKeyToPaths.set(key, s); }
       s.add(path.resolve(f));
     }
     const allBps2 = vscode.debug.breakpoints;
@@ -443,16 +486,17 @@ export async function writeBreakpointsForActiveEditor()
         const uri = srcBp.location.uri;
         if (!uri || uri.scheme !== 'file') continue;
         const bpPath = path.resolve(uri.fsPath);
-        const bpBase = path.basename(bpPath);
-        if (!basenameToPaths.has(bpBase)) continue;
-        const pathsForBase = basenameToPaths.get(bpBase)!;
+        const bpKey = normalizeDebugFileKey(bpPath, projectDir);
+        if (!bpKey || !fileKeyToPaths.has(bpKey)) continue;
+        const pathsForBase = fileKeyToPaths.get(bpKey)!;
         if (!pathsForBase.has(bpPath)) continue;
         const lineNum = srcBp.location.range.start.line + 1;
         const entry = { line: lineNum, enabled: !!bp.enabled } as any;
         if (tokens2.labels) {
           for (const [labelName, labInfo] of Object.entries(tokens2.labels)) {
             try {
-              if ((labInfo as any).src && (labInfo as any).src === bpBase && (labInfo as any).line === lineNum) {
+              const labelKey = normalizeDebugFileKey((labInfo as any).src, projectDir);
+              if (labelKey && labelKey === bpKey && (labInfo as any).line === lineNum) {
                 entry.label = labelName;
                 entry.addr = (labInfo as any).addr;
                 break;
@@ -460,9 +504,9 @@ export async function writeBreakpointsForActiveEditor()
             } catch (e) {}
           }
         }
-        attachAddressFromTokens(tokens2, bpPath, lineNum, entry);
-        if (!tokens2.breakpoints[bpBase]) tokens2.breakpoints[bpBase] = [];
-        tokens2.breakpoints[bpBase].push(entry);
+        attachAddressFromTokens(tokens2, bpPath, lineNum, entry, tokenPath2);
+        if (!tokens2.breakpoints[bpKey]) tokens2.breakpoints[bpKey] = [];
+        tokens2.breakpoints[bpKey].push(entry);
       }
     }
     fs.writeFileSync(tokenPath2, JSON.stringify(tokens2, null, 4), 'utf8');

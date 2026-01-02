@@ -22,8 +22,8 @@ export function registerLabel(
   if (!name) return;
 
   const srcName = origin && origin.file
-    ? path.basename(origin.file)
-    : (sourcePath ? path.basename(sourcePath) : undefined);
+    ? path.normalize(origin.file)
+    : (sourcePath ? path.normalize(sourcePath) : undefined);
 
   if (name[0] === '@') {
     // Local label

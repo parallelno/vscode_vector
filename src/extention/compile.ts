@@ -25,13 +25,15 @@ export async function updateBreakpointsInDebugFile(
     const includedFiles = new Set<string>(Array.from(ext_utils.findIncludedFiles(srcPath, contents)));
     const tokenText = fs.readFileSync(debugPath, 'utf8');
     const tokens = JSON.parse(tokenText);
+    const projectDir = ext_utils.resolveProjectDirFromTokens(tokens, debugPath) || path.dirname(srcPath);
     tokens.breakpoints = {};
-    
-    const basenameToPaths = new Map<string, Set<string>>();
+
+    const fileKeyToPaths = new Map<string, Set<string>>();
     for (const f of Array.from(includedFiles)) {
-      const b = path.basename(f);
-      let s = basenameToPaths.get(b);
-      if (!s) { s = new Set(); basenameToPaths.set(b, s); }
+      const key = ext_utils.normalizeDebugFileKey(f, projectDir);
+      if (!key) continue;
+      let s = fileKeyToPaths.get(key);
+      if (!s) { s = new Set(); fileKeyToPaths.set(key, s); }
       s.add(path.resolve(f));
     }
 
@@ -42,29 +44,30 @@ export async function updateBreakpointsInDebugFile(
         const uri = srcBp.location.uri;
         if (!uri || uri.scheme !== 'file') continue;
         const bpPath = path.resolve(uri.fsPath);
-        const bpBase = path.basename(bpPath);
-        if (!basenameToPaths.has(bpBase)) continue;
-        const pathsForBase = basenameToPaths.get(bpBase)!;
+        const bpKey = ext_utils.normalizeDebugFileKey(bpPath, projectDir);
+        if (!bpKey || !fileKeyToPaths.has(bpKey)) continue;
+        const pathsForBase = fileKeyToPaths.get(bpKey)!;
         if (!pathsForBase.has(bpPath)) continue;
         const lineNum = srcBp.location.range.start.line + 1;
         const entry = { line: lineNum, enabled: !!bp.enabled } as any;
         if (tokens.labels) {
           for (const [labelName, labInfo] of Object.entries(tokens.labels)) {
             try {
-              if ((labInfo as any).src && (labInfo as any).src === bpBase && (labInfo as any).line === lineNum) {
+              const labelKey = ext_utils.normalizeDebugFileKey((labInfo as any).src, projectDir);
+              if (labelKey && labelKey === bpKey && (labInfo as any).line === lineNum) {
                 entry.label = labelName;
                 entry.addr = (labInfo as any).addr;
                 break;
               }
             } catch (e) {}
           }
-          ext_utils.attachAddressFromTokens(tokens, bpPath, lineNum, entry);
+          ext_utils.attachAddressFromTokens(tokens, bpPath, lineNum, entry, debugPath);
         }
-        if (!tokens.breakpoints[bpBase]) tokens.breakpoints[bpBase] = [];
-        tokens.breakpoints[bpBase].push(entry);
+        if (!tokens.breakpoints[bpKey]) tokens.breakpoints[bpKey] = [];
+        tokens.breakpoints[bpKey].push(entry);
       }
     }
-    
+
     fs.writeFileSync(debugPath, JSON.stringify(tokens, null, 4), 'utf8');
     let cnt = 0;
     for (const v of Object.values(tokens.breakpoints || {})) cnt += (v as any[]).length;
@@ -128,12 +131,14 @@ export async function compileAsmSource(
       try {
         const tokenText = fs.readFileSync(tokenPath, 'utf8');
         const tokens = JSON.parse(tokenText);
+        const projectDir = ext_utils.resolveProjectDirFromTokens(tokens, tokenPath) || (projectFile ? path.dirname(projectFile) : path.dirname(srcPath));
         tokens.breakpoints = {};
-        const basenameToPaths = new Map<string, Set<string>>();
+        const fileKeyToPaths = new Map<string, Set<string>>();
         for (const f of Array.from(includedFiles)) {
-          const b = path.basename(f);
-          let s = basenameToPaths.get(b);
-          if (!s) { s = new Set(); basenameToPaths.set(b, s); }
+          const key = ext_utils.normalizeDebugFileKey(f, projectDir);
+          if (!key) continue;
+          let s = fileKeyToPaths.get(key);
+          if (!s) { s = new Set(); fileKeyToPaths.set(key, s); }
           s.add(path.resolve(f));
         }
 
@@ -144,26 +149,27 @@ export async function compileAsmSource(
             const uri = srcBp.location.uri;
             if (!uri || uri.scheme !== 'file') continue;
             const bpPath = path.resolve(uri.fsPath);
-            const bpBase = path.basename(bpPath);
-            if (!basenameToPaths.has(bpBase)) continue;
-            const pathsForBase = basenameToPaths.get(bpBase)!;
+            const bpKey = ext_utils.normalizeDebugFileKey(bpPath, projectDir);
+            if (!bpKey || !fileKeyToPaths.has(bpKey)) continue;
+            const pathsForBase = fileKeyToPaths.get(bpKey)!;
             if (!pathsForBase.has(bpPath)) continue;
             const lineNum = srcBp.location.range.start.line + 1;
             const entry = { line: lineNum, enabled: !!bp.enabled } as any;
             if (tokens.labels) {
               for (const [labelName, labInfo] of Object.entries(tokens.labels)) {
                 try {
-                  if ((labInfo as any).src && (labInfo as any).src === bpBase && (labInfo as any).line === lineNum) {
+                  const labelKey = ext_utils.normalizeDebugFileKey((labInfo as any).src, projectDir);
+                  if (labelKey && labelKey === bpKey && (labInfo as any).line === lineNum) {
                     entry.label = labelName;
                     entry.addr = (labInfo as any).addr;
                     break;
                   }
                 } catch (e) {}
               }
-              ext_utils.attachAddressFromTokens(tokens, bpPath, lineNum, entry);
+              ext_utils.attachAddressFromTokens(tokens, bpPath, lineNum, entry, tokenPath);
             }
-            if (!tokens.breakpoints[bpBase]) tokens.breakpoints[bpBase] = [];
-            tokens.breakpoints[bpBase].push(entry);
+            if (!tokens.breakpoints[bpKey]) tokens.breakpoints[bpKey] = [];
+            tokens.breakpoints[bpKey].push(entry);
           }
         }
         try {

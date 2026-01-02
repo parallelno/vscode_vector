@@ -21,6 +21,7 @@ import {
   normalizeFileKey,
   formatFileLineKey,
   coerceAddressList,
+  setNormalizeFileKeyProjectDir,
 } from './emulatorUI/breakpoints';
 import {
   DataAddressEntry,
@@ -59,6 +60,7 @@ type SymbolCache = {
   byLowerCase: Map<string, SymbolMeta>;
   lineAddresses: Map<string, Map<number, number[]>>;
   filePaths: Map<string, string>;
+  projectDir?: string;
 };
 
 type DataLineCache = Map<string, Map<number, DataLineSpan>>;
@@ -626,23 +628,17 @@ function printDebugState(
   }
 }
 
-
-
 export function pauseEmulatorPanel() {
   if (currentPanelController) currentPanelController.pause();
-  else vscode.window.showWarningMessage('Emulator panel not open');
 }
 
 export function resumeEmulatorPanel() {
   if (currentPanelController) currentPanelController.resume();
-  else vscode.window.showWarningMessage('Emulator panel not open');
 }
 
 export function stepFramePanel() {
   if (currentPanelController && currentPanelController.stepFrame) {
     currentPanelController.stepFrame();
-  } else {
-    vscode.window.showWarningMessage('Emulator panel not open');
   }
 }
 
@@ -651,15 +647,12 @@ export function performEmulatorDebugAction(action: DebugAction): boolean {
     currentPanelController.performDebugAction(action);
     return true;
   }
-  vscode.window.showWarningMessage('Emulator panel not open');
   return false;
 }
 
 export function stopAndCloseEmulatorPanel(): void {
   if (currentPanelController) {
     currentPanelController.stopAndClose();
-  } else {
-    vscode.window.showWarningMessage('Emulator panel not open');
   }
 }
 
@@ -714,10 +707,28 @@ export function resolveDataDirectiveHover(document: vscode.TextDocument, positio
   );
 }
 
-function resolveTokenFileReference(tokenPath: string | undefined, fileKey: string): string {
+function resolveProjectDirFromTokens(tokens: any, tokenPath?: string): string | undefined {
+  const projectDirRaw = typeof tokens?.projectDir === 'string' ? tokens.projectDir : undefined;
+  if (projectDirRaw) {
+    if (path.isAbsolute(projectDirRaw)) return path.normalize(projectDirRaw);
+    if (tokenPath) return path.resolve(path.dirname(tokenPath), projectDirRaw);
+    const workspaceDir = process.cwd();
+    return path.normalize(path.resolve(workspaceDir, projectDirRaw));
+  }
+  const projectFile = typeof tokens?.projectFile === 'string' ? tokens.projectFile : undefined;
+  if (projectFile) {
+    const resolved = path.isAbsolute(projectFile)
+      ? path.normalize(projectFile)
+      : tokenPath ? path.resolve(path.dirname(tokenPath), projectFile) : path.resolve(process.cwd(), projectFile);
+    return path.dirname(resolved);
+  }
+  return tokenPath ? path.dirname(tokenPath) : undefined;
+}
+
+function resolveTokenFileReference(tokenPath: string | undefined, fileKey: string, projectDir?: string): string {
   if (!fileKey) return fileKey;
   if (path.isAbsolute(fileKey)) return path.normalize(fileKey);
-  const baseDir = tokenPath ? path.dirname(tokenPath) : process.cwd();
+  const baseDir = projectDir || (tokenPath ? path.dirname(tokenPath) : process.cwd());
   return path.normalize(path.resolve(baseDir, fileKey));
 }
 
@@ -725,6 +736,7 @@ function clearSymbolMetadataCache() {
   lastSymbolCache = null;
   dataLineSpanCache = null;
   dataAddressLookup = null;
+  setNormalizeFileKeyProjectDir(undefined);
 }
 
 function loadSymbolCacheFromDebugFile(tokenPath: string): boolean {
@@ -773,6 +785,9 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
     clearSymbolMetadataCache();
     return;
   }
+  const projectDir = resolveProjectDirFromTokens(tokens, tokenPath);
+
+  setNormalizeFileKeyProjectDir(projectDir);
   const byName = new Map<string, SymbolMeta>();
   const byLowerCase = new Map<string, SymbolMeta>();
   const filePaths = new Map<string, string>();
@@ -793,11 +808,11 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
       const info: any = rawInfo;
       const addr = parseAddressLike(info?.addr ?? info?.address);
       if (addr === undefined) continue;
-      const srcKey = normalizeFileKey(info?.src);
+      const srcKey = normalizeFileKey(info?.src, projectDir);
       const lineNum = typeof info?.line === 'number' ? info.line : undefined;
       const source: SymbolSource | undefined = (srcKey && lineNum) ? { fileKey: srcKey, line: lineNum } : undefined;
       if (srcKey && info?.src) {
-        const resolvedPath = resolveTokenFileReference(tokenPath, info.src);
+        const resolvedPath = resolveTokenFileReference(tokenPath, info.src, projectDir);
         if (resolvedPath) registerFilePath(srcKey, resolvedPath);
       }
       registerSymbol(labelName, { value: addr, kind: 'label', source });
@@ -815,12 +830,12 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
         } else {
           resolved = parseAddressLike(rawValue.value);
         }
-        const srcKey = normalizeFileKey(rawValue.src);
+        const srcKey = normalizeFileKey(rawValue.src, projectDir);
         const lineNum = typeof rawValue.line === 'number' ? rawValue.line : undefined;
         if (srcKey && lineNum) {
           source = { fileKey: srcKey, line: lineNum };
           if (rawValue.src) {
-            const resolvedPath = resolveTokenFileReference(tokenPath, rawValue.src);
+            const resolvedPath = resolveTokenFileReference(tokenPath, rawValue.src, projectDir);
             if (resolvedPath) registerFilePath(srcKey, resolvedPath);
           }
         }
@@ -838,9 +853,9 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
   if (tokens.lineAddresses && typeof tokens.lineAddresses === 'object') {
     for (const [fileKeyRaw, entries] of Object.entries(tokens.lineAddresses as Record<string, any>)) {
       if (!entries || typeof entries !== 'object') continue;
-      const normalizedKey = normalizeFileKey(fileKeyRaw);
+      const normalizedKey = normalizeFileKey(fileKeyRaw, projectDir);
       if (!normalizedKey) continue;
-      const resolvedPath = resolveTokenFileReference(tokenPath, fileKeyRaw);
+      const resolvedPath = resolveTokenFileReference(tokenPath, fileKeyRaw, projectDir);
       if (resolvedPath) registerFilePath(normalizedKey, resolvedPath);
       const perLine = new Map<number, number[]>();
       for (const [lineKey, addrRaw] of Object.entries(entries as Record<string, any>)) {
@@ -865,9 +880,9 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
   if (tokens.dataLines && typeof tokens.dataLines === 'object') {
     for (const [fileKeyRaw, entries] of Object.entries(tokens.dataLines as Record<string, any>)) {
       if (!entries || typeof entries !== 'object') continue;
-      const normalizedKey = normalizeFileKey(fileKeyRaw);
+      const normalizedKey = normalizeFileKey(fileKeyRaw, projectDir);
       if (!normalizedKey) continue;
-      const resolvedPath = resolveTokenFileReference(tokenPath, fileKeyRaw);
+      const resolvedPath = resolveTokenFileReference(tokenPath, fileKeyRaw, projectDir);
       if (resolvedPath) registerFilePath(normalizedKey, resolvedPath);
       let perLine = dataLines.get(normalizedKey);
       if (!perLine) {
@@ -896,7 +911,7 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
     }
   }
 
-  lastSymbolCache = { byName, byLowerCase, lineAddresses, filePaths };
+  lastSymbolCache = { byName, byLowerCase, lineAddresses, filePaths, projectDir };
   dataLineSpanCache = dataLines.size ? dataLines : null;
   dataAddressLookup = addressLookup.size ? addressLookup : null;
 }

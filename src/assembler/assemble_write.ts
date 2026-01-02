@@ -16,6 +16,33 @@ export function createAssembleAndWrite(assemble: AssembleFn, projectFile?: strin
   {
     const startTime = Date.now();
 
+    const resolvedProjectFile = projectFile ? path.resolve(projectFile) : undefined;
+    const projectDir = resolvedProjectFile ? path.dirname(resolvedProjectFile) : undefined;
+    const workspaceDir = projectDir || (sourcePath ? path.dirname(path.resolve(sourcePath)) : process.cwd());
+    const toWorkspaceRelative = (filePath?: string): string | undefined => {
+      if (!filePath) return undefined;
+      const absolute = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(workspaceDir, filePath);
+      const rel = path.relative(workspaceDir, absolute).replace(/\\/g, '/');
+      if (!rel.startsWith('..') && !path.isAbsolute(rel)) return rel || '.';
+      return absolute.replace(/\\/g, '/');
+    };
+    const toProjectRelative = (filePath?: string): string | undefined => {
+      if (!filePath) return undefined;
+      const normalized = path.normalize(filePath);
+      if (projectDir) {
+        const absolute = path.isAbsolute(normalized) ? normalized : path.resolve(projectDir, normalized);
+        const relative = path.relative(projectDir, absolute).replace(/\\/g, '/');
+        return relative || undefined;
+      }
+      return normalized.replace(/\\/g, '/');
+    };
+    const toFileKey = (filePath?: string): string | undefined => {
+      const projectRelative = toProjectRelative(filePath);
+      if (projectRelative) return projectRelative.toLowerCase();
+      const base = filePath ? path.basename(filePath) : '';
+      return base ? base.toLowerCase() : undefined;
+    };
+
     const res = assemble(source, sourcePath, projectFile);
 
     if (!res.success || !res.output) {
@@ -125,11 +152,19 @@ export function createAssembleAndWrite(assemble: AssembleFn, projectFile?: strin
         labels: {},
         consts: {}
       };
+      if (resolvedProjectFile) {
+        tokens.projectFile = toWorkspaceRelative(resolvedProjectFile);
+        const projectDirRel = toWorkspaceRelative(projectDir);
+        if (projectDirRel && projectDirRel !== '.') {
+          tokens.projectDir = projectDirRel;
+        }
+      }
       if (res.labels) {
         for (const [name, info] of Object.entries(res.labels)) {
+          const srcPathRel = toProjectRelative(info.src) || toProjectRelative(sourcePath);
           tokens.labels[name] = {
             addr: '0x' + info.addr.toString(16).toUpperCase().padStart(4, '0'),
-            src: info.src || (sourcePath ? path.basename(sourcePath) : undefined),
+            src: srcPathRel,
             line: info.line
           };
         }
@@ -139,11 +174,12 @@ export function createAssembleAndWrite(assemble: AssembleFn, projectFile?: strin
         for (const [name, value] of Object.entries(res.consts)) {
           const normalized = ((value % 0x10000) + 0x10000) % 0x10000;
           const origin = originInfo[name];
+          const originSrc = origin?.src || sourcePath;
           tokens.consts[name] = {
             value,
             hex: '0x' + normalized.toString(16).toUpperCase().padStart(4, '0'),
             line: origin?.line,
-            src: origin?.src ? path.basename(origin.src) : (sourcePath ? path.basename(sourcePath) : undefined)
+            src: toProjectRelative(originSrc)
           };
         }
       }
@@ -156,7 +192,8 @@ export function createAssembleAndWrite(assemble: AssembleFn, projectFile?: strin
           if (!origin || typeof origin.line !== 'number') continue;
           const originFile = (origin.file || sourcePath);
           if (!originFile) continue;
-          const base = path.basename(originFile).toLowerCase();
+          const base = toFileKey(originFile);
+          if (!base) continue;
           if (!tokens.lineAddresses[base]) tokens.lineAddresses[base] = {};
           const addrHex = '0x' + (addrVal & 0xffff).toString(16).toUpperCase().padStart(4, '0');
           const existing = tokens.lineAddresses[base][origin.line];
@@ -178,7 +215,8 @@ export function createAssembleAndWrite(assemble: AssembleFn, projectFile?: strin
           if (!origin || typeof origin.line !== 'number') continue;
           const originFile = origin.file || sourcePath;
           if (!originFile) continue;
-          const base = path.basename(originFile).toLowerCase();
+          const base = toFileKey(originFile);
+          if (!base) continue;
           if (!tokens.dataLines[base]) tokens.dataLines[base] = {};
           tokens.dataLines[base][origin.line] = {
             addr: '0x' + (span.start & 0xffff).toString(16).toUpperCase().padStart(4, '0'),

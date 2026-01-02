@@ -10,9 +10,25 @@ import { DEBUG_FILE_SUFFIX } from '../extention/consts';
 export type SourceLineRef = { file: string; line: number };
 export type BreakpointMeta = { enabled?: boolean };
 
-export function normalizeFileKey(filePath?: string): string | undefined {
+let currentProjectDirForKeys: string | undefined;
+
+export function setNormalizeFileKeyProjectDir(projectDir?: string): void {
+  currentProjectDirForKeys = projectDir ? path.normalize(projectDir) : undefined;
+}
+
+export function normalizeFileKey(filePath?: string, projectDir?: string): string | undefined {
   if (!filePath) return undefined;
-  return path.basename(filePath).toLowerCase();
+  const baseDir = projectDir ?? currentProjectDirForKeys;
+  const normalizedInput = path.normalize(filePath);
+  if (baseDir) {
+    const absolute = path.isAbsolute(normalizedInput) ? normalizedInput : path.resolve(baseDir, normalizedInput);
+    const relative = path.relative(baseDir, absolute).replace(/\\/g, '/').toLowerCase();
+    if (relative) return relative;
+  }
+  const lowered = normalizedInput.replace(/\\/g, '/').toLowerCase();
+  const baseOnly = path.basename(normalizedInput).toLowerCase();
+  if (baseOnly && baseOnly !== lowered) return baseOnly;
+  return lowered;
 }
 
 export function formatFileLineKey(fileKey: string, line: number): string {
@@ -42,7 +58,25 @@ export function deriveTokenPath(romPath: string, debugPath?: string): string {
   return romPath + DEBUG_FILE_SUFFIX;
 }
 
-export function collectBreakpointAddresses(tokens: any): Map<number, BreakpointMeta> {
+function deriveProjectDirFromTokens(tokens: any, tokenPath?: string): string | undefined {
+  const dirRaw = typeof tokens?.projectDir === 'string' ? tokens.projectDir : undefined;
+  if (dirRaw) {
+    if (path.isAbsolute(dirRaw)) return path.normalize(dirRaw);
+    if (tokenPath) return path.resolve(path.dirname(tokenPath), dirRaw);
+    const workspaceDir = process.cwd();
+    return path.normalize(path.resolve(workspaceDir, dirRaw));
+  }
+  const projectFile = typeof tokens?.projectFile === 'string' ? tokens.projectFile : undefined;
+  if (projectFile) {
+    const resolved = path.isAbsolute(projectFile)
+      ? path.normalize(projectFile)
+      : tokenPath ? path.resolve(path.dirname(tokenPath), projectFile) : path.resolve(process.cwd(), projectFile);
+    return path.dirname(resolved);
+  }
+  return tokenPath ? path.dirname(tokenPath) : undefined;
+}
+
+export function collectBreakpointAddresses(tokens: any, projectDir?: string): Map<number, BreakpointMeta> {
   const resolved = new Map<number, BreakpointMeta>();
   if (!tokens || typeof tokens !== 'object') return resolved;
 
@@ -55,7 +89,7 @@ export function collectBreakpointAddresses(tokens: any): Map<number, BreakpointM
       const addr = parseAddressLike(info?.addr ?? info?.address);
       if (addr === undefined) continue;
       labelAddrByName.set(labelName, addr);
-      const srcBase = normalizeFileKey(typeof info?.src === 'string' ? info.src : undefined);
+      const srcBase = normalizeFileKey(typeof info?.src === 'string' ? info.src : undefined, projectDir);
       const lineNum = typeof info?.line === 'number' ? info.line : undefined;
       if (srcBase && lineNum !== undefined) {
         lineAddrByFileLine.set(formatFileLineKey(srcBase, lineNum), [addr & 0xffff]);
@@ -66,7 +100,7 @@ export function collectBreakpointAddresses(tokens: any): Map<number, BreakpointM
   if (tokens.lineAddresses && typeof tokens.lineAddresses === 'object') {
     for (const [fileKeyRaw, entries] of Object.entries(tokens.lineAddresses)) {
       if (!entries || typeof entries !== 'object') continue;
-      const normalizedFileKey = typeof fileKeyRaw === 'string' ? fileKeyRaw.toLowerCase() : undefined;
+      const normalizedFileKey = typeof fileKeyRaw === 'string' ? normalizeFileKey(fileKeyRaw, projectDir) : undefined;
       if (!normalizedFileKey) continue;
       for (const [lineKey, addrRaw] of Object.entries(entries as Record<string, any>)) {
         const lineNum = Number(lineKey);
@@ -121,7 +155,7 @@ export function collectBreakpointAddresses(tokens: any): Map<number, BreakpointM
   };
 
   const processEntry = (entry: any, fileKey?: string) => {
-    const normalizedFile = fileKey ? normalizeFileKey(fileKey) : undefined;
+    const normalizedFile = fileKey ? normalizeFileKey(fileKey, projectDir) : undefined;
     const addresses = resolveAddresses(entry, normalizedFile);
     if (!addresses.length) return;
     const enabled = resolveEnabled(entry);
@@ -207,7 +241,7 @@ export function syncEditorBreakpointsFromHardware(hardware: Hardware | undefined
   }
 }
 
-export function buildAddressToSourceMap(tokens: any, tokenPath: string): Map<number, SourceLineRef> | null {
+export function buildAddressToSourceMap(tokens: any, tokenPath: string, projectDir?: string): Map<number, SourceLineRef> | null {
   if (!tokens || typeof tokens !== 'object') return null;
   const map = new Map<number, SourceLineRef>();
   const linesByFile = tokens.lineAddresses;
@@ -219,7 +253,7 @@ export function buildAddressToSourceMap(tokens: any, tokenPath: string): Map<num
     normalizedEntries.set(rawKey, perLine);
   }
   if (!normalizedEntries.size) return map;
-  const baseDir = tokenPath ? path.dirname(tokenPath) : '';
+  const baseDir = projectDir || (tokenPath ? path.dirname(tokenPath) : '');
   for (const [fileKey, perLine] of normalizedEntries.entries()) {
     if (!perLine || typeof perLine !== 'object') continue;
     const resolvedPath = path.isAbsolute(fileKey) ? path.normalize(fileKey) : path.resolve(baseDir, fileKey);
@@ -273,8 +307,11 @@ export function loadBreakpointsFromToken(
     return { applied: 0, addressSourceMap: null };
   }
 
-  const addressSourceMap = buildAddressToSourceMap(tokens, tokenPath);
-  const desired = collectBreakpointAddresses(tokens);
+  const projectDir = deriveProjectDirFromTokens(tokens, tokenPath);
+  setNormalizeFileKeyProjectDir(projectDir);
+
+  const addressSourceMap = buildAddressToSourceMap(tokens, tokenPath, projectDir);
+  const desired = collectBreakpointAddresses(tokens, projectDir);
 
   hardware.Request(HardwareReq.DEBUG_BREAKPOINT_DEL_ALL);
 
