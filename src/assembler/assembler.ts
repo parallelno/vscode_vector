@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as fs from 'fs';
 import {
   AssembleResult,
   ExpressionEvalContext,
@@ -36,7 +37,8 @@ import { handleIncbinFirstPass,
   IncbinContext } from './incbin';
 import { handleFilesizeDirectiveFirstPass } from './filesize';
 import {
-  InstructionContext
+  InstructionContext,
+  normalizeInstructionTokens
 } from './instructions';
 import { AssemblyEvalState,
   evaluateExpressionValue,
@@ -46,6 +48,7 @@ import { AlignDirectiveEntry, handleAlignFirstPass, handleAlignSecondPass } from
 import { handleOrgFirstPass, handleOrgSecondPass } from './org';
 import { INSTR_SIZES } from './first_pass_instr';
 import { INSTR_OPCODES, instructionEncoding } from './second_pass_instr';
+import { CpuType, DEFAULT_CPU, normalizeCpu } from '../cpu';
 
 type AssemblerSettingValue = string | number | boolean;
 type AssemblerSettings = Record<string, AssemblerSettingValue>;
@@ -145,6 +148,22 @@ function coerceSettingToBoolean(value: AssemblerSettingValue | undefined, defaul
   return defaultValue;
 }
 
+function resolveProjectCpu(projectFile: string | undefined, errors: string[]): CpuType {
+  if (!projectFile) return DEFAULT_CPU;
+  try {
+    const text = fs.readFileSync(projectFile, 'utf8');
+    const parsed = JSON.parse(text);
+    const normalized = normalizeCpu((parsed as any)?.cpu);
+    if (normalized) return normalized;
+    if ((parsed as any)?.cpu !== undefined) {
+      errors.push(`Unsupported cpu value '${(parsed as any).cpu}' in project file ${projectFile}`);
+    }
+  } catch (err: any) {
+    errors.push(`Failed to read cpu from project file ${projectFile}: ${err?.message || String(err)}`);
+  }
+  return DEFAULT_CPU;
+}
+
 export function assemble(
   source: string,
   sourcePath?: string,
@@ -214,6 +233,7 @@ export function assemble(
   let addr = 0;
   const errors: string[] = [];
   const warnings: string[] = [];
+  const cpu: CpuType = resolveProjectCpu(projectFile, errors);
   const printMessages: PrintMessage[] = [];
   const ifStack: IfFrame[] = [];
 
@@ -368,7 +388,7 @@ export function assemble(
 
     // Tokenize early so we can detect scope boundaries before registering labels
     const tokenized = tokenize(line);
-    const tokens = tokenized.tokens;
+    let tokens = tokenized.tokens;
     const tokenOffsets = tokenized.offsets;
     if (!tokens.length) {
       scopes[i] = makeScopeKey(origins[i]);
@@ -587,7 +607,14 @@ export function assemble(
       tokenOffsets.shift();
     }
 
-    const op = tokens[0].toUpperCase();
+    let op = tokens[0].toUpperCase();
+
+    const normalized = normalizeInstructionTokens(tokens, cpu, origins[i], i + 1, errors);
+    if (normalized === null) continue;
+    if (normalized) {
+      tokens = normalized.tokens;
+      op = tokens[0].toUpperCase();
+    }
 
     if (op === 'DB' || op === '.BYTE') {
       addr += handleDB(line, tokens, tokenOffsets, i + 1, origins[i], sourcePath, dataCtx, undefined, { defer: true });
@@ -851,7 +878,7 @@ export function assemble(
     }
 
     const tokenizedSecond = tokenize(line);
-    const tokens = tokenizedSecond.tokens;
+    let tokens = tokenizedSecond.tokens;
     const tokenOffsets = tokenizedSecond.offsets;
     let leadingLabel: string | null = null;
     if (!tokens.length) continue;
@@ -902,7 +929,14 @@ export function assemble(
       continue;
     }
 
-    const op = tokens[0].toUpperCase();
+    let op = tokens[0].toUpperCase();
+
+    const normalized = normalizeInstructionTokens(tokens, cpu, origins[i], srcLine, errors);
+    if (normalized === null) continue;
+    if (normalized) {
+      tokens = normalized.tokens;
+      op = tokens[0].toUpperCase();
+    }
 
     if (op === 'DB' || op === '.BYTE') {
       const emitted = handleDB(line, tokens, tokenOffsets, srcLine, origins[i], sourcePath, dataCtxSecond, out);
