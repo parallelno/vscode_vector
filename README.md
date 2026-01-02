@@ -93,6 +93,7 @@ All projects start with creating a `.project.json` file that declares the projec
 - **fddContentPath**: (Optional) Folder whose files are packed into a fresh FDD image at `fddPath` after each successful ROM compile. Paths are resolved relative to the project file unless absolute; files are added recursively.
 - **fddTemplatePath**: (Optional) Template FDD image to start from when building the output at `fddPath`. If it contains the `"rds308.fdd"` string, the built-in template (comes with this extension) is used; other values resolve relative to the project file unless absolute.
 - **romAlign**: Optional ROM size alignment in bytes (e.g., `2` to force even length).
+- **cpu**: (Optional) Target CPU for the assembler, either `"i8080"` (default) or `"z80"`.
 - **dependentProjectsDir**: (Optional) Directory containing dependent `*.project.json` files. Paths resolved relative to the current project file unless absolute. Use **Devector: Compile Dependencies** command or a context menu in Explorer to compile every `*.project.json` in that directory in alphabetical order.
 - **settings**: (Optional) Per-project emulator preferences (see below).
 

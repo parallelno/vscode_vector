@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as ext_consts from './consts';
 import * as ext_utils from './utils';
+import { CpuType, DEFAULT_CPU, normalizeCpu } from '../cpu';
 
 // Project file structure
 export class ProjectInfo {
@@ -24,6 +25,8 @@ export class ProjectInfo {
   fddContentPath: string | undefined = undefined;
   /** Optional directory that contains dependent project files to compile first */
   dependentProjectsDir: string | undefined = undefined;
+  /** Target CPU for assembler */
+  cpu: CpuType = DEFAULT_CPU;
   /** Project settings */
   settings: ProjectSettings = new ProjectSettings();
   /** project absolute path. this setting is not stored to project file */
@@ -48,6 +51,7 @@ export class ProjectInfo {
         this.name = this.nameFromPath!;
       }
     }
+    this.cpu = normalizeCpu(this.cpu) ?? DEFAULT_CPU;
   }
 
   save(): void {
@@ -84,6 +88,7 @@ export class ProjectInfo {
       return;
     }
     Object.assign(this, obj);
+    this.cpu = normalizeCpu(this.cpu) ?? DEFAULT_CPU;
   }
 
 
@@ -108,6 +113,7 @@ export class ProjectInfo {
     }
 
     Object.assign(project, obj);
+    project.cpu = normalizeCpu(project.cpu) ?? DEFAULT_CPU;
     return project;
   }
 

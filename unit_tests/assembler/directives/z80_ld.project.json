@@ -1,0 +1,5 @@
+{
+    "name": "z80_ld_test",
+    "asmPath": "z80_ld_basic.asm",
+    "cpu": "z80"
+}

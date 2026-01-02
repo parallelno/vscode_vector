@@ -37,6 +37,7 @@ type DirectiveTestCase = {
     sourceFile: string;
     description?: string;
     expect: DirectiveTestExpectations;
+    projectFile?: string;
 };
 
 type DirectiveTestResult = {
@@ -626,6 +627,23 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
+        name: 'LD requires Z80 cpu setting',
+        sourceFile: 'ld_requires_z80.asm',
+        expect: {
+            success: false,
+            errorsContains: ['LD']
+        }
+    },
+    {
+        name: 'Z80 LD aliases to i8080 equivalents when cpu=z80',
+        sourceFile: 'z80_ld_basic.asm',
+        projectFile: 'z80_ld.project.json',
+        expect: {
+            bytes: [0x0A, 0x12, 0x2A, 0x34, 0x12, 0x22, 0x78, 0x56, 0xF9, 0x41, 0x36, 0x9A, 0x11, 0x11, 0x11, 0x3A, 0xBC, 0x9A, 0x32, 0xBC, 0x9A, 0x7E, 0x77],
+            noWarnings: true
+        }
+    },
+    {
         name: '.error directive emits user-defined message and stops assembly',
         sourceFile: 'error_basic.asm',
         expect: {
@@ -1024,8 +1042,12 @@ function comparePrintMessages(actual: AssembleResult['printMessages'], expected:
         throw new Error(`Test source not found: ${test.sourceFile}`);
     }
     const source = fs.readFileSync(filePath, 'utf8');
+    const projectPath = test.projectFile ? path.join(directivesDir, test.projectFile) : undefined;
+    if (projectPath && !fs.existsSync(projectPath)) {
+        throw new Error(`Project file not found: ${test.projectFile}`);
+    }
     const start = Date.now();
-    const result = assemble(source, filePath);
+    const result = assemble(source, filePath, projectPath);
     const durationMs = Date.now() - start;
     const details: string[] = [];
     const expectSuccess = test.expect.success !== false;

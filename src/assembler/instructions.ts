@@ -2,6 +2,7 @@ import { ExpressionEvalContext, SourceOrigin } from './types';
 import { parseNumberFull, describeOrigin, formatMacroCallStack } from './utils';
 import { resolveLocalLabelKey, resolveScopedConst } from './labels';
 import { evaluateExpression } from './expression';
+import { CpuType } from '../cpu';
 
 export type InstructionContext = {
   labels: Map<string, { addr: number; line: number; src?: string }>;
@@ -129,5 +130,153 @@ export function resolveAddressToken(
   } catch (err) {
     // swallow so caller can emit a contextual error
   }
+  return null;
+}
+
+type NormalizedInstruction =
+  | { tokens: string[] }
+  | null
+  | undefined;
+
+function normalizeRegister(token: string): string | null {
+  const upper = token.toUpperCase();
+  if (upper === '(HL)') return 'M';
+  if (upper === 'A' || upper === 'B' || upper === 'C' ||
+      upper === 'D' || upper === 'E' || upper === 'H' || upper === 'L') {
+    return upper;
+  }
+  return null;
+}
+
+function normalizeRegisterPair(token: string): 'B' | 'D' | 'H' | 'SP' | null {
+  const upper = token.toUpperCase();
+  if (upper === 'BC') return 'B';
+  if (upper === 'DE') return 'D';
+  if (upper === 'HL') return 'H';
+  if (upper === 'SP') return 'SP';
+  return null;
+}
+
+function stripParens(token: string): string {
+  let out = token.trim();
+  if (out.startsWith('(')) out = out.slice(1);
+  if (out.endsWith(')')) out = out.slice(0, -1);
+  return out;
+}
+
+function unwrapParenTokens(tokens: string[]): string[] {
+  if (!tokens.length) return tokens;
+  const out = tokens.slice();
+  out[0] = stripParens(out[0]);
+  if (out.length > 1) {
+    const last = out.length - 1;
+    out[last] = stripParens(out[last]);
+  }
+  return out;
+}
+
+export function normalizeInstructionTokens(
+  tokens: string[],
+  cpu: CpuType,
+  origin: SourceOrigin | undefined,
+  srcLine: number,
+  errors: string[]
+): NormalizedInstruction {
+  if (cpu !== 'z80') return undefined;
+  if (!tokens.length) return undefined;
+  const op = tokens[0].toUpperCase();
+  if (op !== 'LD') return undefined;
+
+  if (tokens.length < 3) {
+    const stack = formatMacroCallStack(origin);
+    errors.push(`Unsupported LD form at ${describeOrigin(origin, srcLine)}${stack}`);
+    return null;
+  }
+
+  const destRaw = tokens[1];
+  const destReg = normalizeRegister(destRaw);
+  const destPair = normalizeRegisterPair(destRaw);
+  const destMemPair = normalizeRegisterPair(stripParens(destRaw));
+  const srcTokens = tokens.slice(2);
+  const srcReg = srcTokens.length === 1 ? normalizeRegister(srcTokens[0]) : null;
+  const srcPair = srcTokens.length === 1 ? normalizeRegisterPair(srcTokens[0]) : null;
+  const srcMemPair = srcTokens.length === 1 ? normalizeRegisterPair(stripParens(srcTokens[0])) : null;
+  const srcParens = srcTokens.length > 0 && srcTokens[0].trim().startsWith('(');
+  const srcLastReg = srcTokens.length ? normalizeRegister(srcTokens[srcTokens.length - 1]) : null;
+  const srcLastPair = srcTokens.length ? normalizeRegisterPair(srcTokens[srcTokens.length - 1]) : null;
+  const stack = formatMacroCallStack(origin);
+
+  // LD r, r' / LD (HL), r' / LD r, (HL)
+  if (destReg) {
+    if (srcReg) {
+      return { tokens: ['MOV', destReg, srcReg] };
+    }
+
+    // LD A, (BC)/(DE)
+    if (destReg === 'A' && srcMemPair && (srcMemPair === 'B' || srcMemPair === 'D')) {
+      return { tokens: ['LDAX', srcMemPair] };
+    }
+
+    // LD A, (nn)
+    if (destReg === 'A' && srcParens) {
+      return { tokens: ['LDA', ...unwrapParenTokens(srcTokens)] };
+    }
+
+    // Immediate: LD r, n / LD (HL), n
+    if (srcParens) {
+      errors.push(`Unsupported LD source operand at ${describeOrigin(origin, srcLine)}${stack}`);
+      return null;
+    }
+    if (srcPair || srcMemPair) {
+      errors.push(`Unsupported LD source operand at ${describeOrigin(origin, srcLine)}${stack}`);
+      return null;
+    }
+    return { tokens: ['MVI', destReg, ...srcTokens] };
+  }
+
+  // LD rp, rp' / LD rp, nn
+  if (destPair) {
+    if (destPair === 'SP' && srcPair === 'H') {
+      return { tokens: ['SPHL'] };
+    }
+
+    if (destPair === 'H' && srcParens) {
+      return { tokens: ['LHLD', ...unwrapParenTokens(srcTokens)] };
+    }
+
+    if (srcParens) {
+      errors.push(`Unsupported LD source operand at ${describeOrigin(origin, srcLine)}${stack}`);
+      return null;
+    }
+    if (srcPair) {
+      errors.push(`Unsupported LD source operand at ${describeOrigin(origin, srcLine)}${stack}`);
+      return null;
+    }
+
+    return { tokens: ['LXI', destPair, ...srcTokens] };
+  }
+
+  // LD (BC)/(DE), A
+  if (destMemPair && (destMemPair === 'B' || destMemPair === 'D') && srcReg === 'A') {
+    return { tokens: ['STAX', destMemPair] };
+  }
+
+  // LD (nn), HL / LD (nn), A
+  if (destRaw.trim().startsWith('(')) {
+    const addressTokens = unwrapParenTokens(tokens.slice(1, tokens.length - 1));
+    if (!addressTokens.length) {
+      addressTokens.push(stripParens(destRaw));
+    }
+
+    if (srcLastPair === 'H') {
+      return { tokens: ['SHLD', ...addressTokens] };
+    }
+    if (srcLastReg === 'A') {
+      return { tokens: ['STA', ...addressTokens] };
+    }
+  }
+
+  const originDesc = describeOrigin(origin, srcLine);
+  errors.push(`Unsupported LD form at ${originDesc}${stack}`);
   return null;
 }
