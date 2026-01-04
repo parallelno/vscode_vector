@@ -276,6 +276,16 @@ Expressions can reference:
 lxi h, * + 1 ; hl => $101
 ```
 
+**Reserved identifiers (cannot be labels)**
+
+Register names and their indirect forms are treated as operands, so they are not valid label names. Avoid using any of these as labels:
+
+`A`,`B`,`C`,`D`,`E`,`H`,`L`,
+`BC`,`DE`,`HL`,`SP`,`AF`, `AF'`, `PSW`,
+`(A)`,`(B)`,`(C)`,`(D)`,`(E)`,`(H)`,`(L)`, `M`,
+`(BC)`, `(DE)`, `(HL)`, `(SP)`,
+`IX`, `IY`, `(IX)`, `(IY)`, `IXH`, `IXL`, `IYH`, `IYL`, `I`, `R`
+
 **Operator Precedence** (highest to lowest)
 
 1. Parentheses `()`
