@@ -55,8 +55,8 @@ export const INSTR_I8080: Record<string, [number, number, number]> = {
   'SUB H': [0x94, 1, 0], 'SUB L': [0x95, 1, 0], 'SUB M': [0x96, 1, 0], 'SUB A': [0x97, 1, 0],
   'SBB B': [0x98, 1, 0], 'SBB C': [0x99, 1, 0], 'SBB D': [0x9A, 1, 0], 'SBB E': [0x9B, 1, 0],
   'SBB H': [0x9C, 1, 0], 'SBB L': [0x9D, 1, 0], 'SBB M': [0x9E, 1, 0], 'SBB A': [0x9F, 1, 0],
-  'AND B': [0xA0, 1, 0], 'AND C': [0xA1, 1, 0], 'AND D': [0xA2, 1, 0], 'AND E': [0xA3, 1, 0],
-  'AND H': [0xA4, 1, 0], 'AND L': [0xA5, 1, 0], 'AND M': [0xA6, 1, 0], 'AND A': [0xA7, 1, 0],
+  'ANA B': [0xA0, 1, 0], 'ANA C': [0xA1, 1, 0], 'ANA D': [0xA2, 1, 0], 'ANA E': [0xA3, 1, 0],
+  'ANA H': [0xA4, 1, 0], 'ANA L': [0xA5, 1, 0], 'ANA M': [0xA6, 1, 0], 'ANA A': [0xA7, 1, 0],
   'XRA B': [0xA8, 1, 0], 'XRA C': [0xA9, 1, 0], 'XRA D': [0xAA, 1, 0], 'XRA E': [0xAB, 1, 0],
   'XRA H': [0xAC, 1, 0], 'XRA L': [0xAD, 1, 0], 'XRA M': [0xAE, 1, 0], 'XRA A': [0xAF, 1, 0],
   'ORA B': [0xB0, 1, 0], 'ORA C': [0xB1, 1, 0], 'ORA D': [0xB2, 1, 0], 'ORA E': [0xB3, 1, 0],
@@ -217,11 +217,13 @@ export const OPERANDS = [
   '(BC)', '(DE)', '(HL)', '(SP)',
   'IX', 'IY', '(IX)', '(IY)', 'IXH', 'IXL', 'IYH', 'IYL', 'I', 'R'];
 
-type InstructionInfo = {opcode: number ; size: number, immSize: number, imm: string | null } | null;
 export function getInstructionInfo(
   tokens: string[],
   cpu: CpuType)
-  : InstructionInfo | undefined
+  : {opcode: number ;
+    size: number,
+    immSize: number,
+    imm: string | undefined } | undefined
 {
   const {instrKey, immOperand} = tokensToInstrKey(tokens);
   const instrMap = cpu === 'i8080' ? INSTR_I8080 : INSTR_Z80;

@@ -6,7 +6,7 @@
   "publisher": "AlexFedotovskikh",
   "icon": "images/icon.png",
   "engines": {
-    "vscode": "^1.70.0"
+    "vscode": "^1.75.0"
   },
   "repository": {
     "type": "git",
@@ -30,11 +30,6 @@
     "pngjs": "^7.0.0"
   },
   "activationEvents": [
-    "onLanguage:asm",
-    "onCommand:devector.compileProject",
-    "onCommand:devector.compileDependencies",
-    "onCommand:devector.runProject",
-    "onCommand:devector.createProject",
     "onDebug"
   ],
   "contributes": {

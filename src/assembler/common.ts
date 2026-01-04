@@ -10,22 +10,34 @@ export function tokenize(lineText: string)
 {
   if (!lineText.length) return { tokens: [], offsets: [] };
 
-  // Split by whitespace and commas
-  const rawTokens = lineText.split(/[\s,]+/);
+  // Tokenize while respecting quoted strings so `' '` stays intact.
   const tokens: string[] = [];
   const offsets: number[] = [];
-  // Calculate offsets of each token. Offset is the index in lineText where the token starts.
-  let cursor = 0;
-  for (const rawToken of rawTokens) {
-    if (rawToken.length === 0) {
-      cursor += 1; // Skip empty tokens, but move cursor forward
-      continue;
+
+  const isSeparator = (ch: string) => /[\s,]/.test(ch);
+
+  let i = 0;
+  while (i < lineText.length) {
+    // Skip separators
+    while (i < lineText.length && isSeparator(lineText[i])) i++;
+    if (i >= lineText.length) break;
+
+    const start = i;
+    const quote = lineText[i] === '\'' || lineText[i] === '"' ? lineText[i] : null;
+
+    if (quote) {
+      // Consume quoted string as a single token (including quotes)
+      i++; // skip opening quote
+      while (i < lineText.length && lineText[i] !== quote) i++;
+      if (i < lineText.length) i++; // include closing quote if present
+    } else {
+      // Regular token until next separator
+      while (i < lineText.length && !isSeparator(lineText[i])) i++;
     }
-    const idx = lineText.indexOf(rawToken, cursor);
-    const start = idx >= 0 ? idx : cursor;
-    tokens.push(rawToken);
+
+    const token = lineText.slice(start, i);
+    tokens.push(token);
     offsets.push(start);
-    cursor = start + rawToken.length;
   }
   return { tokens, offsets };
 }

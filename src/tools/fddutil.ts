@@ -178,4 +178,7 @@ function main(): void {
     }
 }
 
-main();
+// Run CLI only when executed directly (not when imported by the extension)
+if (require.main === module) {
+    main();
+}
