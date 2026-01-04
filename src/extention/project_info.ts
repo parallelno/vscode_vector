@@ -4,6 +4,9 @@ import * as fs from 'fs';
 import * as ext_consts from './consts';
 import * as ext_utils from './utils';
 
+export type CpuType = 'i8080' | 'z80';
+export const DEFAULT_CPU: CpuType = 'i8080';
+
 // Project file structure
 export class ProjectInfo {
   /** Project name. Used as the base name for output ROM files */
@@ -24,6 +27,8 @@ export class ProjectInfo {
   fddContentPath: string | undefined = undefined;
   /** Optional directory that contains dependent project files to compile first */
   dependentProjectsDir: string | undefined = undefined;
+  /** Target CPU for assembler */
+  cpu: CpuType = DEFAULT_CPU;
   /** Project settings */
   settings: ProjectSettings = new ProjectSettings();
   /** project absolute path. this setting is not stored to project file */
@@ -69,44 +74,45 @@ export class ProjectInfo {
     }
   }
 
-  load(): void {
-    if (!this.absolute_path ||
-      !path.isAbsolute(this.absolute_path) ||
-      !fs.existsSync(this.absolute_path))
-    {
-        this.error = `Project load error: absolute_path is not set, invalid or file does not exist: ${this.absolute_path}`;
-        return;
-    }
-    const { obj, error } = loadProjectObj(this.absolute_path);
-
-    if (error) {
-      this.error = error;
-      return;
-    }
-    Object.assign(this, obj);
-  }
-
 
   static async createFromFile(
     projectAbsolutePath: string)
-    : Promise<ProjectInfo>  {
-
+    : Promise<ProjectInfo>
+  {
     let project = new ProjectInfo(projectAbsolutePath);
     if (project.error){
       return project;
     }
-
     if (!fs.existsSync(projectAbsolutePath)) {
         project.error = `Project file does not exist: ${projectAbsolutePath}`;
         return project;
     }
-
-    const { obj, error } = loadProjectObj(projectAbsolutePath);
+    const { obj, error } = await loadProjectObj(projectAbsolutePath);
     project.error = error;
     if (error) {
       return project;
     }
+    Object.assign(project, obj);
+    return project;
+  }
 
+  static createFromFileSync(
+    projectAbsolutePath: string)
+    : ProjectInfo
+  {
+    let project = new ProjectInfo(projectAbsolutePath);
+    if (project.error){
+      return project;
+    }
+    if (!fs.existsSync(projectAbsolutePath)) {
+        project.error = `Project file does not exist: ${projectAbsolutePath}`;
+        return project;
+    }
+    const { obj, error } = loadProjectObjSync(projectAbsolutePath);
+    project.error = error;
+    if (error) {
+      return project;
+    }
     Object.assign(project, obj);
     return project;
   }
@@ -210,34 +216,55 @@ export class ProjectInfo {
   }
 };
 
-function loadProjectObj(
+async function loadProjectObj(
+  projectAbsolutePath: string)
+  : Promise<{ obj : any, error: string }>
+{
+  let text: string = '';
+  try {
+    text = await fs.promises.readFile(projectAbsolutePath, 'utf8');
+  } catch (err) {
+    const error = `Devector: Failed to load ${projectAbsolutePath}: ${err instanceof Error ? err.message : String(err)}`;
+    return { obj: undefined, error };
+  }
+  return parseProjectFile(text, projectAbsolutePath);
+}
+
+function loadProjectObjSync(
   projectAbsolutePath: string)
   : { obj : any, error: string }
 {
   let text: string = '';
-  let error: string = '';
   try {
     text = fs.readFileSync(projectAbsolutePath, 'utf8');
   } catch (err) {
-    error = `Devector: Failed to load ${projectAbsolutePath}: ${err instanceof Error ? err.message : String(err)}`;
+    const error = `Devector: Failed to load ${projectAbsolutePath}: ${err instanceof Error ? err.message : String(err)}`;
     return { obj: undefined, error };
   }
+  return parseProjectFile(text, projectAbsolutePath);
+}
 
-  if (!text || !text.trim().length) {
+
+function parseProjectFile(
+  projectStr: string,
+  projectAbsolutePath: string)
+  : { obj : any, error: string }
+{
+  let error: string = '';
+  if (!projectStr || !projectStr.trim().length) {
     error = `Devector: Project file is empty: ${projectAbsolutePath}`;
     return { obj: undefined, error };
   }
 
   let rawInfo: any;
   try {
-    rawInfo = JSON.parse(text);
+    rawInfo = JSON.parse(projectStr);
   } catch (err) {
     error = `Failed to parse ${projectAbsolutePath}: ${err instanceof Error ? err.message : String(err)}`;
     return { obj: undefined, error };
   }
   return { obj: rawInfo, error: error };
 }
-
 
 
 export class ProjectSettings {

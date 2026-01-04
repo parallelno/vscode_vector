@@ -1,4 +1,3 @@
-import * as path from 'path';
 import {
   AssembleResult,
   ExpressionEvalContext,
@@ -39,13 +38,12 @@ import {
   InstructionContext
 } from './instructions';
 import { AssemblyEvalState,
-  evaluateExpressionValue,
   processVariableAssignment } from './pass_helpers';
 import { createAssembleAndWrite } from './assemble_write';
 import { AlignDirectiveEntry, handleAlignFirstPass, handleAlignSecondPass } from './align';
 import { handleOrgFirstPass, handleOrgSecondPass } from './org';
-import { INSTR_SIZES } from './first_pass_instr';
-import { INSTR_OPCODES, instructionEncoding } from './second_pass_instr';
+import { getInstructionInfo, instructionEncoding } from './instr_decode';
+import { CpuType, DEFAULT_CPU, ProjectInfo } from '../extention/project_info';
 
 type AssemblerSettingValue = string | number | boolean;
 type AssemblerSettings = Record<string, AssemblerSettingValue>;
@@ -151,6 +149,14 @@ export function assemble(
   projectFile?: string)
   : AssembleResult
 {
+  let cpu: CpuType = DEFAULT_CPU;
+  if (projectFile) {
+    const project = ProjectInfo.createFromFileSync(projectFile);
+    if (!project.error) {
+      cpu = project.cpu;
+    }
+  }
+
   let expanded: { lines: string[]; origins: SourceOrigin[] };
 
   try {
@@ -676,8 +682,9 @@ export function assemble(
     }
 
     // Instruction size lookup
-    if (INSTR_SIZES.hasOwnProperty(op)) {
-      addr += INSTR_SIZES[op];
+    const instrInfo = getInstructionInfo(tokens, cpu);
+    if (instrInfo) {
+      addr += instrInfo.size;
       continue;
     }
 
@@ -997,8 +1004,8 @@ export function assemble(
     }
 
     // Instruction encoding
-    if (INSTR_OPCODES.hasOwnProperty(op) === true) {
-      const emitted = instructionEncoding(tokens, srcLine, origins[i], instrCtx, out);
+    const emitted = instructionEncoding(tokens, cpu, srcLine, origins[i], instrCtx, out);
+    if (emitted > 0) {
       addr += emitted;
       continue;
     }
