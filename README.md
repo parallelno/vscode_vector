@@ -94,6 +94,7 @@ All projects start with creating a `.project.json` file that declares the projec
 - **fddTemplatePath**: (Optional) Template FDD image to start from when building the output at `fddPath`. If it contains the `"rds308.fdd"` string, the built-in template (comes with this extension) is used; other values resolve relative to the project file unless absolute.
 - **romAlign**: Optional ROM size alignment in bytes (e.g., `2` to force even length).
 - **dependentProjectsDir**: (Optional) Directory containing dependent `*.project.json` files. Paths resolved relative to the current project file unless absolute. Use **Devector: Compile Dependencies** command or a context menu in Explorer to compile every `*.project.json` in that directory in alphabetical order.
+- **cpu**: (Optional) Target CPU for the assembler: `"i8080"` (default) or `"z80"`. Z80 mode accepts only the i8080-compatible subset of Z80 mnemonics (e.g., `LD`, `ADD A,`, `JP`, `CALL`, port I/O forms like `OUT (N),A`). IX/IY and other Z80-only extensions are intentionally not supported.
 - **settings**: (Optional) Per-project emulator preferences (see below).
 
 ### Settings
@@ -162,6 +163,8 @@ Adding, removing, or toggling breakpoints in the open ASM file syncs immediately
 The emulator view now embeds a **Memory Dump** panel under the frame preview. It streams a 16x16 hexdump that automatically tracks the current PC (both the hex bytes and ASCII column highlight the byte that will execute next). Uncheck **Follow PC** to freeze the window on a specific address, type any hex/decimal start value, or use the +/-0x10 and +/-0x100 buttons plus **Refresh** to nudge through RAM manually.
 
 ## Assembler
+
+By default the assembler targets the Intel 8080 instruction set. If a project sets `"cpu": "z80"`, it enables a compatibility subset of Zilog Z80 mnemonics that map 1:1 to the 8080 instruction encodings (including Z80 aliases like `LD (N),A` and `ADD HL,BC`). Pure Z80-only features such as IX/IY indexed addressing are not supported.
 
 ### Comments
 
