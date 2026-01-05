@@ -62,6 +62,7 @@ export class ProjectInfo {
         this.name = this.nameFromPath!;
       }
     }
+    this.settings = normalizeProjectSettings(this.settings);
   }
 
   save(): void {
@@ -102,6 +103,7 @@ export class ProjectInfo {
       return project;
     }
     Object.assign(project, obj);
+    project.settings = normalizeProjectSettings(project.settings);
     return project;
   }
 
@@ -123,6 +125,7 @@ export class ProjectInfo {
       return project;
     }
     Object.assign(project, obj);
+    project.settings = normalizeProjectSettings(project.settings);
     return project;
   }
 
@@ -291,6 +294,8 @@ export class ProjectSettings {
   private _autoBoot?: boolean | undefined = undefined;
   /** Open FDD in read-only mode */
   private _fddReadOnly?: boolean | undefined = undefined;
+  /** Enable ROM hot reloading when emulator panel is open */
+  private _romHotReload?: boolean | undefined = undefined;
 
   get speed(): number | 'max' {
     return this._speed ?? 1;
@@ -334,6 +339,25 @@ export class ProjectSettings {
   set fddReadOnly(value: boolean) {
     this._fddReadOnly = value;
   }
+  get romHotReload(): boolean {
+    return this._romHotReload ?? false;
+  }
+  set romHotReload(value: boolean) {
+    this._romHotReload = value;
+  }
+}
+
+function normalizeProjectSettings(raw: any): ProjectSettings {
+  if (raw instanceof ProjectSettings) return raw;
+  const normalized = new ProjectSettings();
+  if (!raw || typeof raw !== 'object') return normalized;
+  const legacyHotReload = typeof raw._romHotReload === 'boolean' ? raw._romHotReload : undefined;
+  const hasRomHotReload = Object.prototype.hasOwnProperty.call(raw, 'romHotReload');
+  Object.assign(normalized, raw);
+  if (!hasRomHotReload && legacyHotReload !== undefined) {
+    normalized.romHotReload = legacyHotReload;
+  }
+  return normalized;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
