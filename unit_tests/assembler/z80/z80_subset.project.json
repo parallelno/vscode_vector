@@ -1,0 +1,5 @@
+{
+    "name": "z80_subset_fixture",
+    "cpu": "z80",
+    "main": "z80_basic.asm"
+}

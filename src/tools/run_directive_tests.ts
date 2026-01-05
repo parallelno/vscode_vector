@@ -36,6 +36,7 @@ type DirectiveTestCase = {
     name: string;
     sourceFile: string;
     description?: string;
+    projectFile?: string;
     expect: DirectiveTestExpectations;
 };
 
@@ -908,6 +909,46 @@ const tests: DirectiveTestCase[] = [
             ],
             noWarnings: true
         }
+    },
+    {
+        name: 'Z80 subset encodes aliases',
+        sourceFile: '../z80/z80_basic.asm',
+        projectFile: '../z80/z80_subset.project.json',
+        expect: {
+            bytes: [
+                0x01, 0x34, 0x12,
+                0x11, 0x78, 0x56,
+                0x21, 0xBC, 0x9A,
+                0x31, 0xF0, 0xDE,
+                0x02, 0x12, 0x0A, 0x1A,
+                0x22, 0x00, 0x20,
+                0x2A, 0x00, 0x20,
+                0x32, 0x00, 0x21,
+                0x3A, 0x00, 0x21,
+                0x03, 0x0B,
+                0x34, 0x35,
+                0x36, 0x42,
+                0x07, 0x17, 0x37, 0x3F,
+                0x67, 0x70, 0x7E, 0x76,
+                0x86, 0x8D, 0x96, 0x9C,
+                0xA3, 0xAA, 0xB1, 0xBE,
+                0xC0,
+                0xC2, 0x34, 0x12,
+                0xC4, 0x56, 0x34,
+                0xD3, 0x10,
+                0xDB, 0x10
+            ],
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Z80 unsupported instructions are rejected',
+        sourceFile: '../z80/z80_unsupported.asm',
+        projectFile: '../z80/z80_subset.project.json',
+        expect: {
+            success: false,
+            errorsContains: ['unsupported opcode', 'ix']
+        }
     }
 ];
 
@@ -1023,9 +1064,19 @@ function comparePrintMessages(actual: AssembleResult['printMessages'], expected:
     if (!fs.existsSync(filePath)) {
         throw new Error(`Test source not found: ${test.sourceFile}`);
     }
+
+    const projectPath = test.projectFile
+        ? (path.isAbsolute(test.projectFile)
+            ? test.projectFile
+            : path.join(directivesDir, test.projectFile))
+        : undefined;
+    if (projectPath && !fs.existsSync(projectPath)) {
+        throw new Error(`Project file not found: ${test.projectFile}`);
+    }
+
     const source = fs.readFileSync(filePath, 'utf8');
     const start = Date.now();
-    const result = assemble(source, filePath);
+    const result = assemble(source, filePath, projectPath);
     const durationMs = Date.now() - start;
     const details: string[] = [];
     const expectSuccess = test.expect.success !== false;

@@ -183,7 +183,7 @@ export const INSTR_Z80: Record<string, [number, number, number]> = {
   // JMP
   'JP N': [0xC3, 3, 2],
   // OUT, IN
-  'OUT (N), A': [0xD3, 2, 1], 'IN A,(N)': [0xDB, 2, 1],
+  'OUT (N),A': [0xD3, 2, 1], 'IN A,(N)': [0xDB, 2, 1],
   // XTHL
   'EX (SP),HL': [0xE3, 1, 0],
   // DI, EI
@@ -203,19 +203,20 @@ export const INSTR_Z80: Record<string, [number, number, number]> = {
   // PCHL
   'JP (HL)': [0xE9, 1, 0],
   // SPHL
-  'LD SP, HL': [0xF9, 1, 0],
+  'LD SP,HL': [0xF9, 1, 0],
   // XCHG
-  'EX DE, HL': [0xEB, 1, 0],
+  'EX DE,HL': [0xEB, 1, 0],
   // ACI, SBI, XRI, CPI
   'ADC A,N': [0xCE, 2, 1], 'SBC A,N': [0xDE, 2, 1], 'XOR N': [0xEE, 2, 1], 'CP N': [0xFE, 2, 1],
 }
 
-export const OPERANDS = [
+export const OPERANDS = new Set([
   'A','B','C','D','E','H','L',
   'BC','DE','HL','SP','AF', "AF'", 'PSW',
   '(A)','(B)','(C)','(D)','(E)','(H)','(L)', 'M',
   '(BC)', '(DE)', '(HL)', '(SP)',
-  'IX', 'IY', '(IX)', '(IY)', 'IXH', 'IXL', 'IYH', 'IYL', 'I', 'R'];
+  'IX', 'IY', '(IX)', '(IY)', 'IXH', 'IXL', 'IYH', 'IYL', 'I', 'R',
+  'NZ', 'Z', 'NC', 'C', 'PO', 'PE', 'P']);
 
 export function getInstructionInfo(
   tokens: string[],
@@ -227,10 +228,11 @@ export function getInstructionInfo(
 {
   const {instrKey, immOperand} = tokensToInstrKey(tokens);
   const instrMap = cpu === 'i8080' ? INSTR_I8080 : INSTR_Z80;
+  const info = instrMap[instrKey];
 
-  if (instrMap.hasOwnProperty(instrKey)) {
-    return {opcode: instrMap[instrKey][0], size: instrMap[instrKey][1], immSize: instrMap[instrKey][2], imm: immOperand};
-  }
+  if (info) {
+    return { opcode: info[0], size: info[1], immSize: info[2], imm: immOperand };
+ }
   return undefined;
 }
 
@@ -243,13 +245,15 @@ function tokensToInstrKey(tokens: string[]): { instrKey: string; immOperand: str
 
   for (const operand of operands) {
     const opUpper = operand.toUpperCase();
-    if (OPERANDS.includes(opUpper)) {
+    if (OPERANDS.has(opUpper)) {
       keyParts.push(opUpper);
-    } else {
-      // Add immediate marker 'N' once for the first immediate part
-      if (immParts.length === 0) keyParts.push('N');
-      immParts.push(operand);
+      continue;
     }
+    const hasParens = operand.startsWith('(');
+    // Add immediate marker once for the first immediate part and preserve
+    // parentheses to differentiate memory-immediate forms like (N)
+    if (immParts.length === 0) keyParts.push(hasParens ? '(N)' : 'N');
+    immParts.push(operand);
   }
 
   const instrKey = operands.length ? `${instr} ${keyParts.join(',')}` : instr;
