@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Hardware } from './emulator/hardware';
 import { HardwareReq } from './emulator/hardware_reqs';
+import { ROM_LOAD_ADDR } from './emulator/memory';
 import { ACTIVE_AREA_H, ACTIVE_AREA_W, BORDER_LEFT, FRAME_H, FRAME_W, SCAN_ACTIVE_AREA_TOP } from './emulator/display';
 import { getWebviewContent } from './emulatorUI/webviewContent';
 import { getDebugLine } from './emulatorUI/debugOutput';
@@ -701,6 +702,10 @@ export function isEmulatorRunning(): boolean {
   return !!currentPanelController && currentToolbarIsRunning;
 }
 
+export function isEmulatorPanelOpen(): boolean {
+  return !!currentPanelController;
+}
+
 export function resolveDataDirectiveHover(document: vscode.TextDocument, position: vscode.Position): DataDirectiveHoverInfo | undefined {
   return resolveDataDirectiveHoverForMemory(
     document,
@@ -918,4 +923,89 @@ function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
   lastSymbolCache = { byName, byLowerCase, lineAddresses, filePaths, projectDir };
   dataLineSpanCache = dataLines.size ? dataLines : null;
   dataAddressLookup = addressLookup.size ? addressLookup : null;
+}
+
+export function applyRomDiffToActiveHardware(
+  oldRom: Uint8Array,
+  newRom: Uint8Array,
+  logChannel?: vscode.OutputChannel,
+  hardwareOverride?: Hardware)
+: { patched: number; bytes: number }
+{
+  const hardware = hardwareOverride ?? lastBreakpointSource?.hardware;
+  if (!hardware) {
+    if (logChannel) {
+      try { logChannel.appendLine('Devector: ROM hot reload skipped: emulator hardware is not available'); } catch (e) {}
+    }
+    return { patched: 0, bytes: 0 };
+  }
+
+  const formatError = (err: unknown) => err instanceof Error ? err.message : String(err);
+
+  let wasRunning = false;
+  try {
+    const state = hardware.Request(HardwareReq.IS_RUNNING);
+    wasRunning = !!state?.isRunning;
+  } catch (err) {
+    if (logChannel) {
+      try { logChannel.appendLine('Devector: Failed to query emulator state for ROM hot reload: ' + formatError(err)); } catch { /* ignore logging errors */ }
+    }
+  }
+
+  try { hardware.Request(HardwareReq.STOP); } catch (err) {
+    if (logChannel) {
+      try { logChannel.appendLine('Devector: Failed to pause emulator before ROM hot reload: ' + formatError(err)); } catch { /* ignore logging errors */ }
+    }
+  }
+
+  const maxLen = Math.max(oldRom.length, newRom.length);
+  let patched = 0;
+  let bytes = 0;
+  let offset = 0;
+
+  while (offset < maxLen) {
+    const oldByte = offset < oldRom.length ? oldRom[offset] : 0;
+    const newByte = offset < newRom.length ? newRom[offset] : 0;
+    if (oldByte === newByte) {
+      offset++;
+      continue;
+    }
+
+    const start = offset;
+    const chunk: number[] = [];
+    while (offset < maxLen) {
+      const o = offset < oldRom.length ? oldRom[offset] : 0;
+      const n = offset < newRom.length ? newRom[offset] : 0;
+      if (o === n) break;
+      chunk.push(n);
+      offset++;
+    }
+
+    if (chunk.length) {
+      const payload = new Uint8Array(chunk);
+      try {
+        hardware.Request(HardwareReq.SET_MEM, { addr: ROM_LOAD_ADDR + start, data: payload });
+        if (logChannel) {
+          const addrLabel = '0x' + (ROM_LOAD_ADDR + start).toString(16).toUpperCase();
+          logChannel.appendLine(`Devector: Applying ROM diff at ${addrLabel} (${payload.length} byte(s))`);
+        }
+        patched++;
+        bytes += payload.length;
+      } catch (e) {
+        if (logChannel) {
+          try { logChannel.appendLine('Devector: Failed to apply ROM diff: ' + (e instanceof Error ? e.message : String(e))); } catch (_) {}
+        }
+      }
+    }
+  }
+
+  if (wasRunning) {
+    try { hardware.Request(HardwareReq.RUN); } catch (err) {
+      if (logChannel) {
+        try { logChannel.appendLine('Devector: Failed to resume emulator after ROM hot reload: ' + formatError(err)); } catch { /* ignore logging errors */ }
+      }
+    }
+  }
+
+  return { patched, bytes };
 }

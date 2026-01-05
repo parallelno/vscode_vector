@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import * as ext_utils from './extention/utils';
 import * as ext_prg from './extention/project';
 import * as ext_consts from './extention/consts';
@@ -19,8 +20,12 @@ import {
   performEmulatorDebugAction,
   resumeEmulatorPanel,
   stopAndCloseEmulatorPanel,
-  onEmulatorPanelClosed
+  onEmulatorPanelClosed,
+  applyRomDiffToActiveHardware,
+  isEmulatorPanelOpen
 } from './emulatorUI';
+import { collectIncludeFiles } from './assembler/includes';
+import { ProjectInfo } from './extention/project_info';
 
 type DebugRequestMessage = { seq: number; type: 'request'; command: string; arguments?: any };
 type OutgoingMessage =
@@ -177,6 +182,7 @@ export function activate(context: vscode.ExtensionContext)
 {
   const pendingBreakpointAsmPaths = new Set<string>();
   let breakpointCompilePromise: Promise<void> = Promise.resolve();
+  let romHotReloadPromise: Promise<void> = Promise.resolve();
 
   let suppressBreakpointValidation = false;
   const devectorOutput = vscode.window.createOutputChannel('Devector');
@@ -336,6 +342,140 @@ export function activate(context: vscode.ExtensionContext)
           (err instanceof Error ? err.message : String(err)));
       });
   }));
+
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      if (!isEmulatorPanelOpen()) return;
+      if (doc.isUntitled) return;
+      if (doc.uri.scheme !== 'file') return;
+      const ext = path.extname(doc.fileName).toLowerCase();
+      if (ext !== '.asm') return;
+      const savedPath = doc.uri.fsPath;
+      romHotReloadPromise = romHotReloadPromise.then(async () => {
+        await handleRomHotReload(devectorOutput, savedPath);
+      }).catch((err) => {
+        ext_utils.logOutput(
+          devectorOutput,
+          'Devector: ROM hot reload failed: ' +
+          (err instanceof Error ? err.message : String(err)));
+      });
+    })
+  );
+}
+
+async function handleRomHotReload(
+  devectorOutput: vscode.OutputChannel,
+  savedPath: string)
+{
+  if (!vscode.workspace.workspaceFolders || !vscode.workspace.workspaceFolders.length) return;
+  const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+  const projects = await ext_prg.loadAllProjects(devectorOutput, workspaceRoot, { silent: true });
+  if (!projects.length) return;
+
+  const normalizedTarget = ext_utils.normalizeFsPath(savedPath);
+
+  for (const project of projects) {
+    if (!project.settings.romHotReload) continue;
+    project.init_asm_path();
+    project.init_rom_path();
+    const mainAsm = project.absolute_asm_path;
+    if (!mainAsm || !fs.existsSync(mainAsm)) continue;
+
+    let source: string;
+    try {
+      source = fs.readFileSync(mainAsm, 'utf8');
+    } catch (err) {
+      ext_utils.logOutput(
+        devectorOutput,
+        `Devector: ROM hot reload skipped for ${project.name}: ` +
+        (err instanceof Error ? err.message : String(err)));
+      continue;
+    }
+
+    let includes: Set<string>;
+    try {
+      includes = collectIncludeFiles(source, mainAsm, mainAsm, project.absolute_path);
+    } catch (err) {
+      ext_utils.logOutput(
+        devectorOutput,
+        `Devector: ROM hot reload include scan failed for ${project.name}: ` +
+        (err instanceof Error ? err.message : String(err)));
+      continue;
+    }
+    includes.add(mainAsm);
+    const normalizedIncludes = new Set(Array.from(includes).map(ext_utils.normalizeFsPath));
+    if (!normalizedIncludes.has(normalizedTarget)) continue;
+
+    await performRomHotReload(devectorOutput, project);
+  }
+}
+
+async function performRomHotReload(
+  devectorOutput: vscode.OutputChannel,
+  project: ProjectInfo)
+{
+  project.init_rom_path();
+  project.init_debug_path();
+  const romPath = project.absolute_rom_path;
+  if (!romPath) {
+    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped for ${project.name}: ROM path is not set`);
+    return;
+  }
+
+  ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload triggered for ${project.name}`);
+
+  let oldRom = new Uint8Array();
+  if (fs.existsSync(romPath)) {
+    try {
+      ext_utils.logOutput(devectorOutput, `Devector: Reading existing ROM from ${romPath} for comparison`);
+      oldRom = fs.readFileSync(romPath);
+    } catch (err) {
+      ext_utils.logOutput(
+        devectorOutput,
+        `Devector: Failed to read existing ROM for ${project.name}: ` +
+        (err instanceof Error ? err.message : String(err)));
+      return;
+    }
+  } else {
+    ext_utils.logOutput(devectorOutput, `Devector: No existing ROM found for ${project.name}; treating as empty before rebuild`);
+  }
+
+  ext_utils.logOutput(devectorOutput, `Devector: Compiling updated ROM for hot reload...`);
+  const compiled = await ext_prg.compileProjectFile(devectorOutput, project, {
+    silent: true,
+    reason: 'ROM hot reload',
+    includeDependencies: false,
+    skipMain: false,
+  });
+  if (!compiled) {
+    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped for ${project.name}: compilation failed`);
+    return;
+  }
+  if (!fs.existsSync(romPath)) {
+    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped: compiled ROM not found at ${romPath}`);
+    return;
+  }
+
+  let newRom: Uint8Array;
+  try {
+    newRom = fs.readFileSync(romPath);
+  } catch (err) {
+    ext_utils.logOutput(
+      devectorOutput,
+      `Devector: Failed to read compiled ROM for ${project.name}: ` +
+      (err instanceof Error ? err.message : String(err)));
+    return;
+  }
+
+  ext_utils.logOutput(devectorOutput, `Devector: Comparing ROM images and applying diff...`);
+  const result = applyRomDiffToActiveHardware(oldRom, newRom, devectorOutput);
+  if (result.patched === 0) {
+    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload found no differences to apply for ${project.name}`);
+  } else {
+    ext_utils.logOutput(
+      devectorOutput,
+      `Devector: ROM hot reload applied ${result.patched} diff chunk(s), ${result.bytes} byte(s) updated for ${project.name}`);
+  }
 }
 
 export function deactivate() {}
