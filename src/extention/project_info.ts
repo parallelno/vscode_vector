@@ -1,11 +1,20 @@
 import path from 'path';
-import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as ext_consts from './consts';
 import * as ext_utils from './utils';
 
 export type CpuType = 'i8080' | 'z80';
 export const DEFAULT_CPU: CpuType = 'i8080';
+
+// vscode is optional when running tests outside the extension host
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const vscode: typeof import('vscode') | undefined = (() => {
+  try {
+    return require('vscode');
+  } catch {
+    return undefined;
+  }
+})();
 
 // Project file structure
 export class ProjectInfo {
@@ -204,9 +213,9 @@ export class ProjectInfo {
     return path.dirname(this.absolute_path);
   }
   get relative_path(): string | undefined {
-    return this.absolute_path
-      ? path.relative(vscode.workspace.workspaceFolders?.[0].uri.fsPath || '', this.absolute_path)
-      : undefined;
+    if (!this.absolute_path) return undefined;
+    const workspaceRoot = vscode?.workspace?.workspaceFolders?.[0]?.uri.fsPath;
+    return workspaceRoot ? path.relative(workspaceRoot, this.absolute_path) : this.absolute_path;
   }
 
   get nameFromPath(): string | undefined {

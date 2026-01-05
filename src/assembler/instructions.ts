@@ -33,8 +33,9 @@ export function ensureImmediateRange(
   const max = bits === 8 ? 0xff : 0xffff;
   const min = bits === 8 ? -0xff : -0xffff;
   if (value < min || value > max) {
+    const op = opLabel.toUpperCase();
     const stack = formatMacroCallStack(origin);
-    errors.push(`${operandLabel} (${formatSignedHex(value)}) does not fit in ${bits}-bit operand for ${opLabel} at ${describeOrigin(origin, line)}${stack}`);
+    errors.push(`${operandLabel} (${formatSignedHex(value)}) does not fit in ${bits}-bit operand for ${op} at ${describeOrigin(origin, line)}${stack}`);
     return false;
   }
   return true;

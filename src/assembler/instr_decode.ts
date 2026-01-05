@@ -226,7 +226,7 @@ export function getInstructionInfo(
     immSize: number,
     imm: string | undefined } | undefined
 {
-  const {instrKey, immOperand} = tokensToInstrKey(tokens);
+  const {instrKey, immOperand} = tokensToInstrKey(tokens, cpu);
   const instrMap = cpu === 'i8080' ? INSTR_I8080 : INSTR_Z80;
   const info = instrMap[instrKey];
 
@@ -237,7 +237,9 @@ export function getInstructionInfo(
 }
 
 
-function tokensToInstrKey(tokens: string[]): { instrKey: string; immOperand: string } {
+function tokensToInstrKey(tokens: string[], cpu: CpuType)
+: { instrKey: string; immOperand: string }
+{
   const instr = tokens[0].toUpperCase();
   const operands = tokens.slice(1);
   const keyParts: string[] = [];
@@ -251,8 +253,8 @@ function tokensToInstrKey(tokens: string[]): { instrKey: string; immOperand: str
     }
     const hasParens = operand.startsWith('(');
     // Add immediate marker once for the first immediate part and preserve
-    // parentheses to differentiate memory-immediate forms like (N)
-    if (immParts.length === 0) keyParts.push(hasParens ? '(N)' : 'N');
+    // parentheses to differentiate memory-immediate forms like (N) for Z80.
+    if (immParts.length === 0) keyParts.push(hasParens && cpu === 'z80' ? '(N)' : 'N');
     immParts.push(operand);
   }
 
