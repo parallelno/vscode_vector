@@ -911,6 +911,16 @@ const tests: DirectiveTestCase[] = [
         }
     },
     {
+        name: 'i8080 RST encodes vectors',
+        sourceFile: 'rst_i8080.asm',
+        expect: {
+            bytes: [0xC7, 0xCF, 0xD7, 0xDF, 0xE7, 0xEF, 0xF7, 0xFF,
+                    0xC7, 0xCF, 0xD7, 0xDF, 0xE7, 0xEF, 0xF7, 0xFF,
+                    0xC7, 0xCF, 0xD7, 0xDF, 0xE7, 0xEF, 0xF7, 0xFF],
+            noWarnings: true
+        }
+    },
+    {
         name: 'Z80 subset encodes aliases',
         sourceFile: '../z80/z80_basic.asm',
         projectFile: '../z80/z80_subset.project.json',
@@ -938,6 +948,17 @@ const tests: DirectiveTestCase[] = [
                 0xD3, 0x10,
                 0xDB, 0x10
             ],
+            noWarnings: true
+        }
+    },
+    {
+        name: 'Z80 RST accepts vector operands',
+        sourceFile: '../z80/z80_rst_vectors.asm',
+        projectFile: '../z80/z80_subset.project.json',
+        expect: {
+            bytes: [0xC7, 0xCF, 0xD7, 0xDF, 0xE7, 0xEF, 0xF7, 0xFF,
+                    0xC7, 0xCF, 0xD7, 0xDF, 0xE7, 0xEF, 0xF7, 0xFF,
+                    0xC7, 0xCF, 0xD7, 0xDF, 0xE7, 0xEF, 0xF7, 0xFF],
             noWarnings: true
         }
     },

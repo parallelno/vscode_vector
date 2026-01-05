@@ -78,8 +78,7 @@ export const INSTR_I8080: Record<string, [number, number, number]> = {
   'CALL N': [0xCD, 3, 2],
   'PUSH B': [0xC5, 1, 0], 'PUSH D': [0xD5, 1, 0], 'PUSH H': [0xE5, 1, 0], 'PUSH PSW': [0xF5, 1, 0],
   'ADI N': [0xC6, 2, 1], 'SUI N': [0xD6, 2, 1], 'ANI N': [0xE6, 2, 1], 'ORI N': [0xF6, 2, 1],
-  'RST 0': [0xC7, 1, 1], 'RST 1': [0xCF, 1, 1], 'RST 2': [0xD7, 1, 1], 'RST 3': [0xDF, 1, 1],
-  'RST 4': [0xE7, 1, 1], 'RST 5': [0xEF, 1, 1], 'RST 6': [0xF7, 1, 1], 'RST 7': [0xFF, 1, 1],
+  'RST N': [0xC7, 1, 1],
   'PCHL': [0xE9, 1, 0],
   'SPHL': [0xF9, 1, 0],
   'XCHG': [0xEB, 1, 0],
@@ -231,11 +230,37 @@ export function getInstructionInfo(
   const info = instrMap[instrKey];
 
   if (info) {
+    // RST needs further processing of the immediate operand
+    if (tokens[0].toUpperCase() === 'RST') return getRstInfo(info[0], immOperand, cpu);
     return { opcode: info[0], size: info[1], immSize: info[2], imm: immOperand };
- }
+  }
   return undefined;
 }
 
+function getRstInfo(opcode: number, imm: string | undefined, cpu: CpuType)
+  : {opcode: number ;
+    size: number,
+    immSize: number,
+    imm: string | undefined } | undefined
+{
+  if (!imm) return undefined;
+  // Parse immediate as number
+  let immText = imm.toUpperCase();
+  if (immText.endsWith('H')) {
+    immText = '0X' + immText.slice(0, -1);
+  }
+  else if (immText.startsWith('$')){
+    immText = '0X' + immText.slice(1);
+  }
+  let rstVector = parseInt(immText);
+  if (isNaN(rstVector)) return undefined;
+  // Validate vector rst number
+  rstVector = cpu === 'i8080' ? rstVector : rstVector >> 3;
+  if (rstVector < 0 || rstVector > 7) return undefined;
+  // Compute final opcode
+  const rstOpcode = opcode + (rstVector<<3);
+  return { opcode: rstOpcode, size: 1, immSize: 0, imm: undefined };
+}
 
 function tokensToInstrKey(tokens: string[], cpu: CpuType)
 : { instrKey: string; immOperand: string }
