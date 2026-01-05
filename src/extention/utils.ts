@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import type { PrintMessage } from '../assembler/types';
 import * as ext_types from './project_info';
 import * as ext_consts from './consts';
+import { resolveIncludePath } from '../assembler/utils';
 
 
 export function readTemplateMainAsm(
@@ -190,35 +191,38 @@ export function emitWarnings(
 
 // gather included files (resolve .include recursively)
 export function findIncludedFiles(
-  srcPath: string, content: string, out = new Set<string>(), depth = 0)
+  srcPath: string,
+  content: string,
+  out = new Set<string>(),
+  depth = 0,
+  mainAsm?: string,
+  projectFile?: string)
   : Set<string>
 {
-	if (!srcPath) return out;
-	if (depth > 16) return out;
-	out.add(path.resolve(srcPath));
-	const lines = content.split(/\r?\n/);
-	for (let li = 0; li < lines.length; li++) {
-		const raw = lines[li];
-		// strip comments
-		const trimmed = raw.replace(/\/\/.*$|;.*$/, '').trim();
-		const m = trimmed.match(/^\.include\s+["']([^"']+)["']/i);
-		if (m) {
-			let incPath = m[1];
-			if (!path.isAbsolute(incPath)) {
-				incPath = path.resolve(path.dirname(srcPath), incPath);
-			}
-			if (!out.has(path.resolve(incPath))) {
-				// read file and recurse
-				try {
-					const incText = fs.readFileSync(incPath, 'utf8');
-					findIncludedFiles(incPath, incText, out, depth + 1);
-				} catch (err) {
-					// ignore missing include here; assembler would've reported it.
-				}
-			}
-		}
-	}
-	return out;
+  if (!srcPath) return out;
+  if (depth > 16) return out;
+  const mainPath = mainAsm ?? srcPath;
+  out.add(path.resolve(srcPath));
+  const lines = content.split(/\r?\n/);
+  for (let li = 0; li < lines.length; li++) {
+    const raw = lines[li];
+    // strip comments
+    const trimmed = raw.replace(/\/\/.*$|;.*$/, '').trim();
+    const m = trimmed.match(/^\.include\s+["']([^"']+)["']/i);
+    if (!m) continue;
+
+    const incPath = resolveIncludePath(m[1], srcPath, mainPath, projectFile);
+    if (!incPath) continue;
+    const resolvedInc = path.resolve(incPath);
+    if (out.has(resolvedInc)) continue;
+    try {
+      const incText = fs.readFileSync(resolvedInc, 'utf8');
+      findIncludedFiles(resolvedInc, incText, out, depth + 1, mainPath, projectFile);
+    } catch (err) {
+      // ignore missing include here; assembler would've reported it.
+    }
+  }
+  return out;
 }
 
 export function reportInvalidBreakpointLine()
@@ -291,6 +295,17 @@ export function resolveProjectDirFromTokens(tokens: any, tokenPath?: string): st
     return path.dirname(path.resolve(process.cwd(), projectFile));
   }
   return baseDir;
+}
+
+export function resolveProjectFileFromTokens(tokens: any, tokenPath?: string): string | undefined {
+  if (!tokens) return undefined;
+  const projectFile = typeof tokens.projectFile === 'string' ? tokens.projectFile : undefined;
+  if (!projectFile) return undefined;
+  if (path.isAbsolute(projectFile)) return path.normalize(projectFile);
+  const projectDir = resolveProjectDirFromTokens(tokens, tokenPath);
+  if (projectDir) return path.normalize(path.resolve(projectDir, projectFile));
+  const baseDir = tokenPath ? path.dirname(tokenPath) : process.cwd();
+  return path.normalize(path.resolve(baseDir, projectFile));
 }
 
 export function normalizeDebugFileKey(filePath: string, projectDir?: string): string | undefined {
@@ -461,7 +476,6 @@ export async function writeBreakpointsForActiveEditor()
   const src2 = doc2.getText();
   const mainPath2 = doc2.fileName;
   try {
-    const included = findIncludedFiles(mainPath2, src2, new Set<string>());
     let tokenPath2: string;
     const outPath2 = mainPath2.replace(/\.asm$/i, '.rom');
     if (/\.[^/.]+$/.test(outPath2)) tokenPath2 = outPath2.replace(/\.[^/.]+$/, ext_consts.DEBUG_FILE_SUFFIX);
@@ -470,6 +484,8 @@ export async function writeBreakpointsForActiveEditor()
     const tokenText2 = fs.readFileSync(tokenPath2, 'utf8');
     const tokens2 = JSON.parse(tokenText2);
     const projectDir = resolveProjectDirFromTokens(tokens2, tokenPath2) || path.dirname(mainPath2);
+    const projectFile = resolveProjectFileFromTokens(tokens2, tokenPath2);
+    const included = findIncludedFiles(mainPath2, src2, new Set<string>(), 0, mainPath2, projectFile);
     tokens2.breakpoints = {};
     const fileKeyToPaths = new Map<string, Set<string>>();
     for (const f of Array.from(included)) {

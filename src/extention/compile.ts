@@ -22,10 +22,12 @@ export async function updateBreakpointsInDebugFile(
   if (!fs.existsSync(debugPath)) return false;
 
   try {
-    const includedFiles = new Set<string>(Array.from(ext_utils.findIncludedFiles(srcPath, contents)));
     const tokenText = fs.readFileSync(debugPath, 'utf8');
     const tokens = JSON.parse(tokenText);
     const projectDir = ext_utils.resolveProjectDirFromTokens(tokens, debugPath) || path.dirname(srcPath);
+    const projectFile = ext_utils.resolveProjectFileFromTokens(tokens, debugPath);
+    const includedFiles = new Set<string>(Array.from(
+      ext_utils.findIncludedFiles(srcPath, contents, new Set<string>(), 0, srcPath, projectFile)));
     tokens.breakpoints = {};
 
     const fileKeyToPaths = new Map<string, Set<string>>();
@@ -118,7 +120,8 @@ export async function compileAsmSource(
   const timeMsg = (writeRes as any).timeMs !== undefined ? `${(writeRes as any).timeMs}` : '';
   ext_utils.logOutput(devectorOutput, `Devector: Compilation succeeded to ${path.basename(outPath)} in ${timeMsg} ms`, true);
   try {
-    const includedFiles = new Set<string>(Array.from(ext_utils.findIncludedFiles(srcPath, contents)));
+    const includedFiles = new Set<string>(Array.from(
+      ext_utils.findIncludedFiles(srcPath, contents, new Set<string>(), 0, srcPath, projectFile)));
     let tokenPath: string;
     if (debugPath) {
       tokenPath = debugPath;
