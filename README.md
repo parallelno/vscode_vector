@@ -1,6 +1,6 @@
 # Intel 8080 Assembler + Debugger (Minimal)
 
-This repository contains a VS Code extension with key features: a two-pass Intel 8080 assembler, a tiny Vector 06c emulator, and a debugger, along with quality of life VS Code functionality to improve the Vector 06c development process.
+This repository contains a VS Code extension with key features: a two-pass Intel 8080/Z80 assembler, a Vector 06c emulator, and a debugger, along with quality of life VS Code functionality to improve the Vector 06c development process.
 
 ## Table of Contents
 
@@ -106,6 +106,7 @@ All projects start with creating a `.project.json` file that declares the projec
 - **fddIdx**: (Optional): Floppy drive index to load fdd (0-3).
 - **autoBoot**: (Optional): Automatically boot FDD if pfddPath is set.
 - **fddReadOnly**: (Optional): Open FDD in read-only mode.
+- **romHotReload**: (Optional): When `true`, saving any included `.asm` file triggers a background recompilation of the main project (excluding `dependentProjectsDir`) and applies a memory diff patch. If code located before the currently executing address grows in size, or if data structures change significantly, the execution flow may be disrupted.
 
 
 ## VS Code editor helpers
@@ -334,7 +335,7 @@ Value = 3
 .endif
 ```
 
-- `.loop` / `.endloop`: repeat a block of source lines `LoopCount` times (maximum per loop: 100,000). Loop counts are evaluated with the same expression engine as `.if`, so you can reference previously defined constants or simple expressions. Loop bodies can nest other `.loop` or `.if` blocks, and any constant assignments inside the block execute on each iteration because the assembler expands the body inline:
+- `.loop` / `.endloop` (short: `.endl`): repeat a block of source lines `LoopCount` times (maximum per loop: 100,000). Loop counts are evaluated with the same expression engine as `.if`, so you can reference previously defined constants or simple expressions. Loop bodies can nest other `.loop` or `.if` blocks, and any constant assignments inside the block execute on each iteration because the assembler expands the body inline:
 
 ```
 Value = 0
@@ -343,7 +344,7 @@ Step  = 4
 .loop (Step / 2)
   db Value
   Value = Value + 1
-.endloop
+.endl
 ```
 
 The example above emits `Value` three times (0, 1, 2) and leaves `Value` set to 3 for subsequent code.

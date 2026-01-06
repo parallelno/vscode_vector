@@ -62,7 +62,6 @@ export class ProjectInfo {
         this.name = this.nameFromPath!;
       }
     }
-    this.settings = normalizeProjectSettings(this.settings);
   }
 
   save(): void {
@@ -103,7 +102,6 @@ export class ProjectInfo {
       return project;
     }
     Object.assign(project, obj);
-    project.settings = normalizeProjectSettings(project.settings);
     return project;
   }
 
@@ -125,7 +123,6 @@ export class ProjectInfo {
       return project;
     }
     Object.assign(project, obj);
-    project.settings = normalizeProjectSettings(project.settings);
     return project;
   }
 
@@ -153,8 +150,8 @@ export class ProjectInfo {
     return this;
   }
   init_ram_disk_path(): ProjectInfo {
-    if (!this.settings.ramDiskPath){
-      this.settings.ramDiskPath = path.basename(this.name) + ext_consts.RAM_DISK_FILE_SUFFIX;
+    if (!this.settings.RamDiskPath){
+      this.settings.RamDiskPath = path.basename(this.name) + ext_consts.RAM_DISK_FILE_SUFFIX;
     }
     return this;
   }
@@ -200,10 +197,10 @@ export class ProjectInfo {
       : path.join(this.projectDir!, this.fddContentPath);
   }
   get absolute_ram_disk_path(): string | undefined {
-    if (!this.absolute_path || !this.settings.ramDiskPath) return undefined;
-    return path.isAbsolute(this.settings.ramDiskPath)
-      ? this.settings.ramDiskPath
-      : path.join(this.projectDir!, this.settings.ramDiskPath);
+    if (!this.absolute_path || !this.settings.RamDiskPath) return undefined;
+    return path.isAbsolute(this.settings.RamDiskPath)
+      ? this.settings.RamDiskPath
+      : path.join(this.projectDir!, this.settings.RamDiskPath);
   }
   get absolute_dependent_projects_dir(): string | undefined {
     if (!this.absolute_path || !this.dependentProjectsDir) return undefined;
@@ -281,83 +278,70 @@ function parseProjectFile(
 
 export class ProjectSettings {
   /** Emulation speed multiplier (e.g., 1, 2, 4) or 'max' for maximum speed */
-  private _speed?: number | 'max' = undefined;
+  private speed?: number | 'max' = undefined;
   /** View mode for display rendering: 'full' (768×312) or 'noBorder' (256×256 4:3 aspect) */
-  private _viewMode?: 'full' | 'noBorder' = undefined;
+  private viewMode?: 'full' | 'noBorder' = undefined;
   /** Path to the RAM disk data file for persistence */
-  private _ramDiskPath?: string = undefined;
+  private ramDiskPath?: string = undefined;
   /** Save RAM disk data on emulator restart */
-  private _saveRamDiskOnRestart?: boolean | undefined = undefined;
+  private saveRamDiskOnRestart?: boolean | undefined = undefined;
   /** Floppy drive index to load fdd (0-3) */
-  private _fddIdx?: number | undefined = undefined;
+  private fddIdx?: number | undefined = undefined;
   /** Automatically boot FDD if pfddPath is set */
-  private _autoBoot?: boolean | undefined = undefined;
+  private autoBoot?: boolean | undefined = undefined;
   /** Open FDD in read-only mode */
-  private _fddReadOnly?: boolean | undefined = undefined;
+  private fddReadOnly?: boolean | undefined = undefined;
   /** Enable ROM hot reloading when emulator panel is open */
-  private _romHotReload?: boolean | undefined = undefined;
+  private romHotReload?: boolean | undefined = undefined;
 
-  get speed(): number | 'max' {
-    return this._speed ?? 1;
+  get Speed(): number | 'max' {
+    return this.speed ?? 1;
   }
-  get viewMode(): 'full' | 'noBorder' {
-    return this._viewMode ?? 'noBorder';
+  get ViewMode(): 'full' | 'noBorder' {
+    return this.viewMode ?? 'noBorder';
   }
-  get ramDiskPath(): string | undefined {
-    return this._ramDiskPath ?? undefined;
+  get RamDiskPath(): string | undefined {
+    return this.ramDiskPath ?? undefined;
   }
-  get saveRamDiskOnRestart(): boolean {
-    return this._saveRamDiskOnRestart ?? false;
+  get SaveRamDiskOnRestart(): boolean {
+    return this.saveRamDiskOnRestart ?? false;
   }
-  get fddIdx(): number {
-    return this._fddIdx ?? 0;
+  get FddIdx(): number {
+    return this.fddIdx ?? 0;
   }
-  get autoBoot(): boolean {
-    return this._autoBoot ?? true;
+  get AutoBoot(): boolean {
+    return this.autoBoot ?? true;
   }
-  get fddReadOnly(): boolean {
-    return this._fddReadOnly ?? true;
+  get FddReadOnly(): boolean {
+    return this.fddReadOnly ?? true;
   }
-  set speed(value: number | 'max') {
-    this._speed = value;
+  set Speed(value: number | 'max') {
+    this.speed = value;
   }
-  set viewMode(value: 'full' | 'noBorder') {
-    this._viewMode = value;
+  set ViewMode(value: 'full' | 'noBorder') {
+    this.viewMode = value;
   }
-  set ramDiskPath(value: string | undefined) {
-    this._ramDiskPath = value;
+  set RamDiskPath(value: string | undefined) {
+    this.ramDiskPath = value;
   }
-  set saveRamDiskOnRestart(value: boolean) {
-    this._saveRamDiskOnRestart = value;
+  set SaveRamDiskOnRestart(value: boolean) {
+    this.saveRamDiskOnRestart = value;
   }
-  set fddIdx(value: number) {
-    this._fddIdx = value;
+  set FddIdx(value: number) {
+    this.fddIdx = value;
   }
-  set autoBoot(value: boolean) {
-    this._autoBoot = value;
+  set AutoBoot(value: boolean) {
+    this.autoBoot = value;
   }
-  set fddReadOnly(value: boolean) {
-    this._fddReadOnly = value;
+  set FddReadOnly(value: boolean) {
+    this.fddReadOnly = value;
   }
-  get romHotReload(): boolean {
-    return this._romHotReload ?? false;
+  get RomHotReload(): boolean {
+    return this.romHotReload ?? false;
   }
-  set romHotReload(value: boolean) {
-    this._romHotReload = value;
+  set RomHotReload(value: boolean) {
+    this.romHotReload = value;
   }
-}
-
-function normalizeProjectSettings(raw: any): ProjectSettings {
-  if (raw instanceof ProjectSettings) return raw;
-  const normalized = new ProjectSettings();
-  if (!raw || typeof raw !== 'object') return normalized;
-  const legacyHotReload = typeof raw._romHotReload === 'boolean' ? raw._romHotReload : undefined;
-  const hasRomHotReload = Object.prototype.hasOwnProperty.call(raw, 'romHotReload');
-  Object.assign(normalized, raw);
-  if (!hasRomHotReload && legacyHotReload !== undefined) {
-    normalized.romHotReload = legacyHotReload;
-  }
-  return normalized;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

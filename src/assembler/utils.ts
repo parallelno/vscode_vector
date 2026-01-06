@@ -449,6 +449,8 @@ export function parseTextLiteralToBytes(part: string, encoding: TextEncodingType
   return { error: `Invalid .text value '${trimmed}' - expected string or character literal` };
 }
 
+// Resolve the path of an included file based on the current file,
+// main assembly file, project file, workspace root, and CWD.
 export function resolveIncludePath(
   includedFile: string,
   currentAsm?: string,

@@ -84,6 +84,7 @@ let currentPanelController: {
   stepFrame: () => void;
   performDebugAction: (action: DebugAction) => void;
   stopAndClose: () => void;
+  getProjectInfo: () => ProjectInfo | undefined;
 } | null = null;
 
 // View modes for display rendering
@@ -188,13 +189,13 @@ export async function openEmulatorPanel(
 
 
   try {
-    panel.webview.postMessage({ type: 'setSpeed', speed: project.settings.speed });
+    panel.webview.postMessage({ type: 'setSpeed', speed: project.settings.Speed });
   } catch (e) {}
   try {
-    panel.webview.postMessage({ type: 'setViewMode', viewMode: project.settings.viewMode });
+    panel.webview.postMessage({ type: 'setViewMode', viewMode: project.settings.ViewMode });
   } catch (e) {}
   try {
-    panel.webview.postMessage({ type: 'setRamDiskSaveOnRestart', value: project.settings.saveRamDiskOnRestart });
+    panel.webview.postMessage({ type: 'setRamDiskSaveOnRestart', value: project.settings.SaveRamDiskOnRestart });
   } catch (e) {}
 
 
@@ -206,7 +207,7 @@ export async function openEmulatorPanel(
       try { emu.hardware?.Request(HardwareReq.STOP); } catch (e) {}
       if (emu.hardware) {
         // Save the RAM Disk
-        if (project && project.settings && project.settings.saveRamDiskOnRestart)
+        if (project && project.settings && project.settings.SaveRamDiskOnRestart)
         {
           // Ensure the RAM Disk path is initialized
           if (!project.absolute_ram_disk_path) project.init_ram_disk_path();
@@ -225,7 +226,7 @@ export async function openEmulatorPanel(
                 defaultUri: vscode.Uri.file(project.absolute_ram_disk_path!)
               });
               if (saveUri) {
-                  project!.settings.ramDiskPath = path.relative(project!.projectDir!, saveUri.fsPath);
+                  project!.settings.RamDiskPath = path.relative(project!.projectDir!, saveUri.fsPath);
                   project!.save();
               }
             }
@@ -471,6 +472,9 @@ export async function openEmulatorPanel(
       try { emu.hardware?.Request(HardwareReq.STOP); } catch (e) {}
       emitToolbarState(false);
       try { panel.dispose(); } catch (e) {}
+    },
+    getProjectInfo: () => {
+      return project;
     }
   };
 
@@ -497,11 +501,11 @@ export async function openEmulatorPanel(
     else if (msg && msg.type === 'speedChange') {
       const speedValue = msg.speed;
       if (speedValue === 'max') {
-        project!.settings.speed = 'max';
+        project!.settings.Speed = 'max';
       } else {
         const parsed = parseFloat(speedValue);
         if (!isNaN(parsed) && parsed > 0) {
-          project!.settings.speed = parsed;
+          project!.settings.Speed = parsed;
         }
       }
     }
@@ -515,7 +519,7 @@ export async function openEmulatorPanel(
     }
     else if (msg && msg.type === 'ramDiskSaveOnRestartChange') {
       let enable = !!msg.value;
-      project!.settings.saveRamDiskOnRestart = enable;
+      project!.settings.SaveRamDiskOnRestart = enable;
     }
   }, undefined, context.subscriptions);
 
@@ -526,13 +530,13 @@ export async function openEmulatorPanel(
       // that may have been discarded while the tab was hidden
       sendFrameToWebview();
       try {
-        panel.webview.postMessage({ type: 'setSpeed', speed: project!.settings.speed });
+        panel.webview.postMessage({ type: 'setSpeed', speed: project!.settings.Speed });
       } catch (e) {}
       try {
         panel.webview.postMessage({ type: 'setViewMode', viewMode: currentViewMode });
       } catch (e) {}
       try {
-        panel.webview.postMessage({ type: 'setRamDiskSaveOnRestart', value: project!.settings.saveRamDiskOnRestart });
+        panel.webview.postMessage({ type: 'setRamDiskSaveOnRestart', value: project!.settings.SaveRamDiskOnRestart });
       } catch (e) {}
     }
   }, null, context.subscriptions);
@@ -567,10 +571,10 @@ export async function openEmulatorPanel(
       // throttle to approx real-time, adjusted by emulation speed
       const elapsed = performance.now() - startTime;
       let delay: number;
-      if (project!.settings.speed === 'max') {
+      if (project!.settings.Speed === 'max') {
         delay = 0; // no delay for max speed
       } else {
-        const targetFrameTime = (1000 / 60) / project!.settings.speed;
+        const targetFrameTime = (1000 / 60) / project!.settings.Speed;
         delay = Math.max(0, targetFrameTime - elapsed);
       }
       await new Promise(resolve => setTimeout(resolve, delay));
@@ -702,8 +706,8 @@ export function isEmulatorRunning(): boolean {
   return !!currentPanelController && currentToolbarIsRunning;
 }
 
-export function isEmulatorPanelOpen(): boolean {
-  return !!currentPanelController;
+export function getRunningProjectInfo(): ProjectInfo | undefined {
+  return currentPanelController?.getProjectInfo();
 }
 
 export function resolveDataDirectiveHover(document: vscode.TextDocument, position: vscode.Position): DataDirectiveHoverInfo | undefined {

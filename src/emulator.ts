@@ -52,7 +52,7 @@ export class Emulator {
       result.addWarning(`Cannot load Boot ROM file: ${bootRomPath}`);
     }
     const ramDisk = this.LoadRamDisk(this._project.absolute_ram_disk_path!);
-    if (this._project.settings.ramDiskPath && !ramDisk) {
+    if (this._project.settings.RamDiskPath && !ramDisk) {
       result.addWarning(`Cannot load RAM disk file: ${this._project.absolute_ram_disk_path!}`);
     }
     this._hardware = new Hardware(bootRom, ramDisk);
@@ -76,8 +76,8 @@ export class Emulator {
       if (!fs.existsSync(this._project.absolute_fdd_path)) {
         return result.addError(`Invalid FDD filepath: ${this._project.absolute_fdd_path}`);
       }
-      const fddIdx = this._project.settings.fddIdx || 0;
-      const autoBoot = this._project.settings.autoBoot || true;
+      const fddIdx = this._project.settings.FddIdx || 0;
+      const autoBoot = this._project.settings.AutoBoot || true;
       result.add(this.LoadFdd(this._project.absolute_fdd_path!, fddIdx, autoBoot));
     }
     // If no FDD image, load ROM file
@@ -147,7 +147,7 @@ export class Emulator {
     const old_img = this._hardware?.Request(
       HardwareReq.DISMOUNT_FDD, {"fddIdx": fddIdx}).data as FdcDiskImage;
     // save old fdd to the disk
-    if (old_img && old_img.path && !this._project.settings.fddReadOnly) {
+    if (old_img && old_img.path && !this._project.settings.FddReadOnly) {
       fs.writeFileSync(old_img.path, old_img.data);
       result.addPrintMessage(`Saved old FDD image to path: ${old_img.path}`);
     }
@@ -226,7 +226,7 @@ export class Emulator {
     let result = new type.EmulatorResult();
     if (!this._project) return result.addError("Settings was not inited");
 
-    if (this._project.settings.saveRamDiskOnRestart && this._project.settings.ramDiskPath)
+    if (this._project.settings.SaveRamDiskOnRestart && this._project.settings.RamDiskPath)
     {
       const ramDisk = this._hardware?.Request(HardwareReq.GET_RAM_DISK)["data"] as Uint8Array | undefined;
       if (ramDisk)

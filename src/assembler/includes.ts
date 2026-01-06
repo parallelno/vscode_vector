@@ -1,4 +1,3 @@
-import * as path from 'path';
 import * as fs from 'fs';
 import { SourceOrigin } from './types';
 import * as ext_utils from './utils';
@@ -11,22 +10,29 @@ export type IncludeResult = {
 const MAX_INCLUDE_DEPTH = 16;
 
 /**
- * Expand .include directives and build an origin map so we can report
+ * Recursively expands .include directives and build an origin map so we can report
  * errors/warnings that reference the original file and line number.
+ * @param content The file content to process.
+ * @param file The current file path.
+ * @param sourcePath The original source path.
+ * @param projectFile The project file path.
+ * @param depth Current recursion depth.
+ * @returns An object containing the processed lines and their origins.
  */
 export function processIncludes(
   content: string,
   file?: string,
   sourcePath?: string,
   projectFile?: string,
-  depth = 0
-): IncludeResult {
+  depth = 0)
+: IncludeResult
+{
   if (depth > MAX_INCLUDE_DEPTH) {
     throw new Error(`Include recursion too deep (>${MAX_INCLUDE_DEPTH}) when processing ${file || '<memory>'}`);
   }
 
   const outLines: string[] = [];
-  const origins: Array<{ file?: string; line: number }> = [];
+  const origins: Array<SourceOrigin> = [];
   // Strip multiline comments before splitting into lines
   const cleanedContent = ext_utils.stripMultilineComments(content);
   const srcLines = cleanedContent.split(/\r?\n/);
@@ -67,7 +73,18 @@ export function processIncludes(
   return { lines: outLines, origins };
 }
 
-// Recursively collect all included files
+/**
+ * Recursively collects all files included via .include directives.
+ * Returns a Set of absolute file paths.
+ *
+ * @param content The file content to scan for includes.
+ * @param file The current file path.
+ * @param sourcePath The original source path.
+ * @param projectFile The project file path.
+ * @param depth Current recursion depth.
+ * @param collected Set of already collected include file paths.
+ * @returns Set of all included file paths.
+ */
 export function collectIncludeFiles(
   content: string,
   file?: string,

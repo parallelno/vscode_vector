@@ -2,7 +2,7 @@
   "name": "devector",
   "displayName": "Vector 06c Asm + Debugger",
   "description": "Assemble and run Intel 8080 asm on a Vector 06c VM with debugger.",
-  "version": "1.1.3",
+  "version": "1.2.395",
   "publisher": "AlexFedotovskikh",
   "icon": "images/icon.png",
   "engines": {

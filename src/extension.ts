@@ -22,7 +22,7 @@ import {
   stopAndCloseEmulatorPanel,
   onEmulatorPanelClosed,
   applyRomDiffToActiveHardware,
-  isEmulatorPanelOpen
+  getRunningProjectInfo
 } from './emulatorUI';
 import { collectIncludeFiles } from './assembler/includes';
 import { ProjectInfo } from './extention/project_info';
@@ -345,14 +345,15 @@ export function activate(context: vscode.ExtensionContext)
 
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (!isEmulatorPanelOpen()) return;
+      const projectInfo = getRunningProjectInfo();
+      if (!projectInfo) return;
       if (doc.isUntitled) return;
       if (doc.uri.scheme !== 'file') return;
       const ext = path.extname(doc.fileName).toLowerCase();
       if (ext !== '.asm') return;
       const savedPath = doc.uri.fsPath;
       romHotReloadPromise = romHotReloadPromise.then(async () => {
-        await handleRomHotReload(devectorOutput, savedPath);
+        await handleRomHotReload(devectorOutput, savedPath, projectInfo);
       }).catch((err) => {
         ext_utils.logOutput(
           devectorOutput,
@@ -365,49 +366,41 @@ export function activate(context: vscode.ExtensionContext)
 
 async function handleRomHotReload(
   devectorOutput: vscode.OutputChannel,
-  savedPath: string)
+  savedPath: string,
+  project: ProjectInfo | undefined)
 {
   if (!vscode.workspace.workspaceFolders || !vscode.workspace.workspaceFolders.length) return;
-  const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
-  const projects = await ext_prg.loadAllProjects(devectorOutput, workspaceRoot, { silent: true });
-  if (!projects.length) return;
-
   const normalizedTarget = ext_utils.normalizeFsPath(savedPath);
+  if (!project?.settings.RomHotReload) return;
+  const mainAsm = project.absolute_asm_path;
+  if (!mainAsm || !fs.existsSync(mainAsm)) return;
 
-  for (const project of projects) {
-    if (!project.settings.romHotReload) continue;
-    project.init_asm_path();
-    project.init_rom_path();
-    const mainAsm = project.absolute_asm_path;
-    if (!mainAsm || !fs.existsSync(mainAsm)) continue;
-
-    let source: string;
-    try {
-      source = fs.readFileSync(mainAsm, 'utf8');
-    } catch (err) {
-      ext_utils.logOutput(
-        devectorOutput,
-        `Devector: ROM hot reload skipped for ${project.name}: ` +
-        (err instanceof Error ? err.message : String(err)));
-      continue;
-    }
-
-    let includes: Set<string>;
-    try {
-      includes = collectIncludeFiles(source, mainAsm, mainAsm, project.absolute_path);
-    } catch (err) {
-      ext_utils.logOutput(
-        devectorOutput,
-        `Devector: ROM hot reload include scan failed for ${project.name}: ` +
-        (err instanceof Error ? err.message : String(err)));
-      continue;
-    }
-    includes.add(mainAsm);
-    const normalizedIncludes = new Set(Array.from(includes).map(ext_utils.normalizeFsPath));
-    if (!normalizedIncludes.has(normalizedTarget)) continue;
-
-    await performRomHotReload(devectorOutput, project);
+  let source: string;
+  try {
+    source = fs.readFileSync(mainAsm!, 'utf8');
+  } catch (err) {
+    ext_utils.logOutput(
+      devectorOutput,
+      `Devector: ROM hot reload skipped for ${project.name}: ` +
+      (err instanceof Error ? err.message : String(err)));
+    return;
   }
+
+  let includes: Set<string>;
+  try {
+    includes = collectIncludeFiles(source, mainAsm!, mainAsm!, project.absolute_path);
+  } catch (err) {
+    ext_utils.logOutput(
+      devectorOutput,
+      `Devector: ROM hot reload include scan failed for ${project.name}: ` +
+      (err instanceof Error ? err.message : String(err)));
+    return;
+  }
+  includes.add(mainAsm!);
+  const normalizedIncludes = new Set(Array.from(includes).map(ext_utils.normalizeFsPath));
+  if (!normalizedIncludes.has(normalizedTarget)) return;
+
+  await performRomHotReload(devectorOutput, project);
 }
 
 async function performRomHotReload(

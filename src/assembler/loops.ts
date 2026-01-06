@@ -68,7 +68,7 @@ export function expandLoopDirectives(lines: string[], origins: SourceOrigin[], s
       const innerTrimmed = stripInlineComment(lines[i]).trim();
       if (!innerTrimmed) continue;
       if (/^\.loop\b/i.test(innerTrimmed)) depth++;
-      else if (/^\.endloop\b/i.test(innerTrimmed)) {
+      else if (/^\.endl\b/i.test(innerTrimmed) || /^\.endloop\b/i.test(innerTrimmed) ) {
         depth--;
         if (depth === 0) return i;
       }
