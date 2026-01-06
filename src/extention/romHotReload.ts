@@ -6,10 +6,13 @@ import * as ext_prg from './project';
 import { collectIncludeFiles } from '../assembler/includes';
 import { ProjectInfo } from './project_info';
 import { HardwareReq } from '../emulator/hardware_reqs';
-import { applyRomDiffToActiveHardware, getActiveHardware, getRunningProjectInfo } from '../emulatorUI';
+import { getActiveHardware, getRunningProjectInfo } from '../emulatorUI';
+import { Hardware } from '../emulator/hardware';
+import { ROM_LOAD_ADDR } from '../emulator/memory';
 
 const LABEL_SEARCH_RADIUS = 100;
 const PC_MASK = 0xffff;
+
 
 type ExecutionSnapshot = {
   pc: number | undefined;
@@ -17,6 +20,8 @@ type ExecutionSnapshot = {
   oldDebugData: any;
 };
 
+
+// Register the ROM hot reload feature in the extension
 export function registerRomHotReload(
   context: vscode.ExtensionContext,
   devectorOutput: vscode.OutputChannel)
@@ -44,6 +49,8 @@ export function registerRomHotReload(
   context.subscriptions.push(disposable);
 }
 
+
+// Handle ROM hot reload when a source file is saved
 async function handleRomHotReload(
   devectorOutput: vscode.OutputChannel,
   savedPath: string,
@@ -83,6 +90,96 @@ async function handleRomHotReload(
   await performRomHotReload(devectorOutput, project);
 }
 
+
+// Main function to perform ROM hot reload
+async function performRomHotReload(
+  devectorOutput: vscode.OutputChannel,
+  project: ProjectInfo)
+{
+  const romPath = project.absolute_rom_path;
+  if (!romPath) {
+    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped for ${project.name}: ROM path is not set`);
+    return;
+  }
+
+  ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload triggered for ${project.name}`);
+
+  const snapshot = captureExecutionSnapshot(devectorOutput, project);
+
+  let oldRom = new Uint8Array();
+  if (fs.existsSync(romPath)) {
+    try {
+      ext_utils.logOutput(devectorOutput, `Devector: Reading existing ROM from ${romPath} for comparison`);
+      oldRom = fs.readFileSync(romPath);
+    } catch (err) {
+      ext_utils.logOutput(
+        devectorOutput,
+        `Devector: Failed to read existing ROM for ${project.name}: ` +
+        (err instanceof Error ? err.message : String(err)));
+      return;
+    }
+  } else {
+    ext_utils.logOutput(devectorOutput, `Devector: No existing ROM found for ${project.name}; treating as empty before rebuild`);
+  }
+
+  ext_utils.logOutput(devectorOutput, 'Devector: Compiling updated ROM for hot reload...');
+  const compiled = await ext_prg.compileProjectFile(devectorOutput, project, {
+    silent: true,
+    reason: 'ROM hot reload',
+    includeDependencies: false,
+    skipMain: false,
+  });
+  if (!compiled) {
+    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped for ${project.name}: compilation failed`);
+    return;
+  }
+  if (!fs.existsSync(romPath)) {
+    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped: compiled ROM not found at ${romPath}`);
+    return;
+  }
+
+  let newRom: Uint8Array;
+  try {
+    newRom = fs.readFileSync(romPath);
+  } catch (err) {
+    ext_utils.logOutput(
+      devectorOutput,
+      `Devector: Failed to read compiled ROM for ${project.name}: ` +
+      (err instanceof Error ? err.message : String(err)));
+    return;
+  }
+
+  // stop emulation
+  const hardware = getActiveHardware();
+  if (!hardware) {
+    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped for ${project.name}: hardware not available`);
+    return;
+  }
+  const wasRunning = hardware.Request(HardwareReq.IS_RUNNING).isRunning ?? false;
+  if (wasRunning) {
+    hardware.Request(HardwareReq.STOP);
+  }
+
+  ext_utils.logOutput(devectorOutput, 'Devector: Comparing ROM images and applying diff...');
+  const result = applyRomDiffToActiveHardware(oldRom, newRom, devectorOutput, hardware);
+  if (result.patched === 0) {
+    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload found no differences to apply for ${project.name}`);
+  } else {
+    ext_utils.logOutput(
+      devectorOutput,
+      `Devector: ROM hot reload applied ${result.patched} diff chunk(s), ${result.bytes} byte(s) updated for ${project.name}`);
+  }
+
+  adjustPcAfterReload(devectorOutput, project, snapshot);
+
+  if (wasRunning) {
+    hardware.Request(HardwareReq.RUN);
+  }
+}
+
+
+
+// Capture the current execution state snapshot before ROM hot reload
 function captureExecutionSnapshot(
   devectorOutput: vscode.OutputChannel,
   project: ProjectInfo)
@@ -155,6 +252,60 @@ function captureExecutionSnapshot(
   return snapshot;
 }
 
+
+// Apply a ROM diff by sending memory write requests to the active hardware.
+// Returns the number of patched chunks and total bytes patched.
+// It assumes the emulator is paused.
+export function applyRomDiffToActiveHardware(
+  oldRom: Uint8Array,
+  newRom: Uint8Array,
+  logChannel?: vscode.OutputChannel,
+  hardware?: Hardware)
+: { patched: number; bytes: number }
+{
+  if (!hardware) {
+    return { patched: 0, bytes: 0 };
+  }
+
+  const maxLen = Math.max(oldRom.length, newRom.length);
+  let patched = 0;
+  let bytes = 0;
+  let offset = 0;
+
+  while (offset < maxLen) {
+    const oldByte = offset < oldRom.length ? oldRom[offset] : 0;
+    const newByte = offset < newRom.length ? newRom[offset] : 0;
+    if (oldByte === newByte) {
+      offset++;
+      continue;
+    }
+
+    const start = offset;
+    const chunk: number[] = [];
+    while (offset < maxLen) {
+      const o = offset < oldRom.length ? oldRom[offset] : 0;
+      const n = offset < newRom.length ? newRom[offset] : 0;
+      if (o === n) break;
+      chunk.push(n);
+      offset++;
+    }
+
+    if (chunk.length) {
+      const payload = new Uint8Array(chunk);
+      hardware.Request(HardwareReq.SET_MEM, { addr: ROM_LOAD_ADDR + start, data: payload });
+      if (logChannel) {
+        const addrLabel = '0x' + (ROM_LOAD_ADDR + start).toString(16).toUpperCase();
+        logChannel.appendLine(`Devector: Applying ROM diff at ${addrLabel} (${payload.length} byte(s))`);
+      }
+      patched++;
+      bytes += payload.length;
+    }
+  }
+  return { patched, bytes };
+}
+
+
+// Adjust the PC register based on label address changes after ROM hot reload
 function adjustPcAfterReload(
   devectorOutput: vscode.OutputChannel,
   project: ProjectInfo,
@@ -246,74 +397,4 @@ function adjustPcAfterReload(
 
   ext_utils.logOutput(devectorOutput,
     'Devector: No matching labels found in new debug metadata for PC adjustment');
-}
-
-async function performRomHotReload(
-  devectorOutput: vscode.OutputChannel,
-  project: ProjectInfo)
-{
-  const romPath = project.absolute_rom_path;
-  if (!romPath) {
-    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped for ${project.name}: ROM path is not set`);
-    return;
-  }
-
-  ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload triggered for ${project.name}`);
-
-  const snapshot = captureExecutionSnapshot(devectorOutput, project);
-
-  let oldRom = new Uint8Array();
-  if (fs.existsSync(romPath)) {
-    try {
-      ext_utils.logOutput(devectorOutput, `Devector: Reading existing ROM from ${romPath} for comparison`);
-      oldRom = fs.readFileSync(romPath);
-    } catch (err) {
-      ext_utils.logOutput(
-        devectorOutput,
-        `Devector: Failed to read existing ROM for ${project.name}: ` +
-        (err instanceof Error ? err.message : String(err)));
-      return;
-    }
-  } else {
-    ext_utils.logOutput(devectorOutput, `Devector: No existing ROM found for ${project.name}; treating as empty before rebuild`);
-  }
-
-  ext_utils.logOutput(devectorOutput, 'Devector: Compiling updated ROM for hot reload...');
-  const compiled = await ext_prg.compileProjectFile(devectorOutput, project, {
-    silent: true,
-    reason: 'ROM hot reload',
-    includeDependencies: false,
-    skipMain: false,
-  });
-  if (!compiled) {
-    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped for ${project.name}: compilation failed`);
-    return;
-  }
-  if (!fs.existsSync(romPath)) {
-    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped: compiled ROM not found at ${romPath}`);
-    return;
-  }
-
-  let newRom: Uint8Array;
-  try {
-    newRom = fs.readFileSync(romPath);
-  } catch (err) {
-    ext_utils.logOutput(
-      devectorOutput,
-      `Devector: Failed to read compiled ROM for ${project.name}: ` +
-      (err instanceof Error ? err.message : String(err)));
-    return;
-  }
-
-  ext_utils.logOutput(devectorOutput, 'Devector: Comparing ROM images and applying diff...');
-  const result = applyRomDiffToActiveHardware(oldRom, newRom, devectorOutput);
-  if (result.patched === 0) {
-    ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload found no differences to apply for ${project.name}`);
-  } else {
-    ext_utils.logOutput(
-      devectorOutput,
-      `Devector: ROM hot reload applied ${result.patched} diff chunk(s), ${result.bytes} byte(s) updated for ${project.name}`);
-  }
-
-  adjustPcAfterReload(devectorOutput, project, snapshot);
 }
