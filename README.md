@@ -106,7 +106,7 @@ All projects start with creating a `.project.json` file that declares the projec
 - **fddIdx**: (Optional): Floppy drive index to load fdd (0-3).
 - **autoBoot**: (Optional): Automatically boot FDD if pfddPath is set.
 - **fddReadOnly**: (Optional): Open FDD in read-only mode.
-- **romHotReload**: (Optional): When `true`, saving any included `.asm` file triggers a background recompilation of the main project (excluding `dependentProjectsDir`) and applies a memory diff patch. If code located before the currently executing address grows in size, or if data structures change significantly, the execution flow may be disrupted.
+- **romHotReload**: (Optional): When `true`, saving any included `.asm` file triggers a background recompilation of the main project (excluding `dependentProjectsDir`) and applies a memory diff patch. The system automatically adjusts the PC (Program Counter) register to maintain execution flow: it captures the PC and nearby labels (within 100 bytes) before recompilation, then after recompilation, it matches label addresses and adjusts the PC by the same offset to preserve the execution position. This helps prevent disruption when code before the execution point changes size.
 
 
 ## VS Code editor helpers
