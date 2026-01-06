@@ -58,6 +58,9 @@ export class ProjectInfo {
     }
     else if (typeof input === 'object') {
       Object.assign(this, input);
+      if (input.settings) {
+        this.settings = Object.assign(new ProjectSettings(), input.settings);
+      }
       if (!this.name && this.absolute_path) {
         this.name = this.nameFromPath!;
       }
@@ -102,6 +105,9 @@ export class ProjectInfo {
       return project;
     }
     Object.assign(project, obj);
+    if (obj.settings) {
+      project.settings = Object.assign(new ProjectSettings(), obj.settings);
+    }
     return project;
   }
 
@@ -123,6 +129,9 @@ export class ProjectInfo {
       return project;
     }
     Object.assign(project, obj);
+    if (obj.settings) {
+      project.settings = Object.assign(new ProjectSettings(), obj.settings);
+    }
     return project;
   }
 

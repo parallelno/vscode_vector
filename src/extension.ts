@@ -407,8 +407,6 @@ async function performRomHotReload(
   devectorOutput: vscode.OutputChannel,
   project: ProjectInfo)
 {
-  project.init_rom_path();
-  project.init_debug_path();
   const romPath = project.absolute_rom_path;
   if (!romPath) {
     ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped for ${project.name}: ROM path is not set`);
