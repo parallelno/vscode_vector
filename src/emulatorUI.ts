@@ -710,6 +710,10 @@ export function getRunningProjectInfo(): ProjectInfo | undefined {
   return currentPanelController?.getProjectInfo();
 }
 
+export function getActiveHardware(): Hardware | undefined {
+  return lastBreakpointSource?.hardware ?? undefined;
+}
+
 export function resolveDataDirectiveHover(document: vscode.TextDocument, position: vscode.Position): DataDirectiveHoverInfo | undefined {
   return resolveDataDirectiveHoverForMemory(
     document,

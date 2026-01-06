@@ -22,10 +22,12 @@ import {
   stopAndCloseEmulatorPanel,
   onEmulatorPanelClosed,
   applyRomDiffToActiveHardware,
-  getRunningProjectInfo
+  getRunningProjectInfo,
+  getActiveHardware
 } from './emulatorUI';
 import { collectIncludeFiles } from './assembler/includes';
 import { ProjectInfo } from './extention/project_info';
+import { HardwareReq } from './emulator/hardware_reqs';
 
 type DebugRequestMessage = { seq: number; type: 'request'; command: string; arguments?: any };
 type OutgoingMessage =
@@ -403,6 +405,180 @@ async function handleRomHotReload(
   await performRomHotReload(devectorOutput, project);
 }
 
+type ExecutionSnapshot = {
+  pc: number | undefined;
+  nearbyLabels: Array<{ name: string; addr: number; distance: number }>;
+  oldDebugData: any;
+};
+
+function captureExecutionSnapshot(
+  devectorOutput: vscode.OutputChannel,
+  project: ProjectInfo)
+: ExecutionSnapshot
+{
+  const snapshot: ExecutionSnapshot = {
+    pc: undefined,
+    nearbyLabels: [],
+    oldDebugData: null
+  };
+
+  // Get current PC from running emulator
+  const projectInfo = getRunningProjectInfo();
+  if (projectInfo && projectInfo.absolute_path === project.absolute_path) {
+    try {
+      const hardware = getActiveHardware();
+      if (hardware) {
+        const pcResult = hardware.Request(HardwareReq.GET_REG_PC);
+        snapshot.pc = pcResult?.pc;
+        if (snapshot.pc !== undefined) {
+          ext_utils.logOutput(devectorOutput, `Devector: Captured PC = 0x${snapshot.pc.toString(16).toUpperCase()}`);
+        }
+      }
+    } catch (err) {
+      ext_utils.logOutput(devectorOutput, `Devector: Failed to capture PC: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Load old debug metadata to find nearby labels
+  if (snapshot.pc !== undefined) {
+    const debugPath = project.absolute_debug_path;
+    if (debugPath && fs.existsSync(debugPath)) {
+      try {
+        const debugText = fs.readFileSync(debugPath, 'utf8');
+        snapshot.oldDebugData = JSON.parse(debugText);
+        
+        // Find labels near the PC (within ±100 bytes)
+        const searchRadius = 100;
+        if (snapshot.oldDebugData?.labels) {
+          const labels = snapshot.oldDebugData.labels;
+          for (const [name, info] of Object.entries(labels)) {
+            const labelInfo = info as any;
+            let addr: number | undefined;
+            if (typeof labelInfo === 'number') {
+              addr = labelInfo;
+            } else if (typeof labelInfo?.addr === 'string') {
+              addr = parseInt(labelInfo.addr, 16);
+            } else if (typeof labelInfo?.addr === 'number') {
+              addr = labelInfo.addr;
+            }
+            
+            if (addr !== undefined && !isNaN(addr)) {
+              const distance = Math.abs(addr - snapshot.pc);
+              if (distance <= searchRadius) {
+                snapshot.nearbyLabels.push({ name, addr, distance });
+              }
+            }
+          }
+          
+          // Sort by distance (closest first)
+          snapshot.nearbyLabels.sort((a, b) => a.distance - b.distance);
+          
+          if (snapshot.nearbyLabels.length > 0) {
+            ext_utils.logOutput(devectorOutput, 
+              `Devector: Found ${snapshot.nearbyLabels.length} nearby label(s): ${snapshot.nearbyLabels.map(l => l.name).join(', ')}`);
+          }
+        }
+      } catch (err) {
+        ext_utils.logOutput(devectorOutput, 
+          `Devector: Failed to load old debug metadata: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  return snapshot;
+}
+
+function adjustPcAfterReload(
+  devectorOutput: vscode.OutputChannel,
+  project: ProjectInfo,
+  snapshot: ExecutionSnapshot)
+{
+  if (snapshot.pc === undefined || snapshot.nearbyLabels.length === 0) {
+    return; // No PC captured or no nearby labels to track
+  }
+
+  // Load new debug metadata
+  const debugPath = project.absolute_debug_path;
+  if (!debugPath || !fs.existsSync(debugPath)) {
+    ext_utils.logOutput(devectorOutput, `Devector: Cannot adjust PC: new debug metadata not found`);
+    return;
+  }
+
+  let newDebugData: any;
+  try {
+    const debugText = fs.readFileSync(debugPath, 'utf8');
+    newDebugData = JSON.parse(debugText);
+  } catch (err) {
+    ext_utils.logOutput(devectorOutput, 
+      `Devector: Failed to load new debug metadata for PC adjustment: ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+
+  if (!newDebugData?.labels) {
+    ext_utils.logOutput(devectorOutput, `Devector: No labels in new debug metadata for PC adjustment`);
+    return;
+  }
+
+  // Find the closest label that still exists and compute the offset
+  for (const oldLabel of snapshot.nearbyLabels) {
+    const newLabelInfo = newDebugData.labels[oldLabel.name];
+    if (!newLabelInfo) {
+      continue; // Label no longer exists
+    }
+
+    let newAddr: number | undefined;
+    if (typeof newLabelInfo === 'number') {
+      newAddr = newLabelInfo;
+    } else if (typeof newLabelInfo?.addr === 'string') {
+      newAddr = parseInt(newLabelInfo.addr, 16);
+    } else if (typeof newLabelInfo?.addr === 'number') {
+      newAddr = newLabelInfo.addr;
+    }
+
+    if (newAddr === undefined || isNaN(newAddr)) {
+      continue;
+    }
+
+    // Calculate the address shift
+    const oldAddr = oldLabel.addr;
+    const shift = newAddr - oldAddr;
+
+    if (shift === 0) {
+      ext_utils.logOutput(devectorOutput, 
+        `Devector: No PC adjustment needed (label '${oldLabel.name}' address unchanged)`);
+      return;
+    }
+
+    // Calculate new PC based on the shift
+    const oldPc = snapshot.pc;
+    const newPc = (oldPc + shift) & 0xffff;
+
+    ext_utils.logOutput(devectorOutput, 
+      `Devector: Adjusting PC based on label '${oldLabel.name}': 0x${oldAddr.toString(16).toUpperCase()} -> 0x${newAddr.toString(16).toUpperCase()} (shift: ${shift >= 0 ? '+' : ''}${shift})`);
+    ext_utils.logOutput(devectorOutput, 
+      `Devector: Updating PC: 0x${oldPc.toString(16).toUpperCase()} -> 0x${newPc.toString(16).toUpperCase()}`);
+
+    // Apply the PC adjustment
+    try {
+      const hardware = getActiveHardware();
+      if (hardware) {
+        hardware.Request(HardwareReq.SET_REG_PC, { pc: newPc });
+        ext_utils.logOutput(devectorOutput, `Devector: PC register updated successfully`);
+      } else {
+        ext_utils.logOutput(devectorOutput, `Devector: Cannot adjust PC: hardware not available`);
+      }
+    } catch (err) {
+      ext_utils.logOutput(devectorOutput, 
+        `Devector: Failed to update PC register: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    return; // Use the first valid label match
+  }
+
+  ext_utils.logOutput(devectorOutput, 
+    `Devector: No matching labels found in new debug metadata for PC adjustment`);
+}
+
 async function performRomHotReload(
   devectorOutput: vscode.OutputChannel,
   project: ProjectInfo)
@@ -414,6 +590,9 @@ async function performRomHotReload(
   }
 
   ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload triggered for ${project.name}`);
+
+  // Capture execution snapshot before recompilation
+  const snapshot = captureExecutionSnapshot(devectorOutput, project);
 
   let oldRom = new Uint8Array();
   if (fs.existsSync(romPath)) {
@@ -467,6 +646,9 @@ async function performRomHotReload(
       devectorOutput,
       `Devector: ROM hot reload applied ${result.patched} diff chunk(s), ${result.bytes} byte(s) updated for ${project.name}`);
   }
+
+  // Adjust PC register if needed based on label address changes
+  adjustPcAfterReload(devectorOutput, project, snapshot);
 }
 
 export function deactivate() {}
