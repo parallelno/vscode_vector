@@ -190,11 +190,13 @@ export class Hardware
     case HardwareReq.GET_REG_PC:
       out = {"pc": this._cpu?.pc };
       break;
-    
+
     case HardwareReq.SET_REG_PC:
-      if (this._cpu && data && typeof data["pc"] === "number") {
-        this._cpu.state.regs.pc.word = data["pc"] & 0xffff;
+      const pc: number = data["pc"];
+      if (pc === undefined) {
+        break;
       }
+      this._cpu.state.regs.pc.word = pc;
       break;
 /*
     case HardwareReq.GET_RUSLAT_HISTORY:
