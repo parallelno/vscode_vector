@@ -192,7 +192,7 @@ export class Hardware
       break;
     
     case HardwareReq.SET_REG_PC:
-      if (this._cpu && typeof data["pc"] === "number") {
+      if (this._cpu && data && typeof data["pc"] === "number") {
         this._cpu.state.regs.pc.word = data["pc"] & 0xffff;
       }
       break;

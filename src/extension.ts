@@ -405,6 +405,10 @@ async function handleRomHotReload(
   await performRomHotReload(devectorOutput, project);
 }
 
+// Constants for PC adjustment during hot reload
+const LABEL_SEARCH_RADIUS = 100; // bytes to search for labels around PC
+const PC_MASK = 0xffff; // 16-bit address mask
+
 type ExecutionSnapshot = {
   pc: number | undefined;
   nearbyLabels: Array<{ name: string; addr: number; distance: number }>;
@@ -429,8 +433,8 @@ function captureExecutionSnapshot(
       const hardware = getActiveHardware();
       if (hardware) {
         const pcResult = hardware.Request(HardwareReq.GET_REG_PC);
-        snapshot.pc = pcResult?.pc;
-        if (snapshot.pc !== undefined) {
+        if (pcResult && typeof pcResult.pc === 'number') {
+          snapshot.pc = pcResult.pc;
           ext_utils.logOutput(devectorOutput, `Devector: Captured PC = 0x${snapshot.pc.toString(16).toUpperCase()}`);
         }
       }
@@ -447,8 +451,7 @@ function captureExecutionSnapshot(
         const debugText = fs.readFileSync(debugPath, 'utf8');
         snapshot.oldDebugData = JSON.parse(debugText);
         
-        // Find labels near the PC (within ±100 bytes)
-        const searchRadius = 100;
+        // Find labels near the PC (within search radius)
         if (snapshot.oldDebugData?.labels) {
           const labels = snapshot.oldDebugData.labels;
           for (const [name, info] of Object.entries(labels)) {
@@ -464,7 +467,7 @@ function captureExecutionSnapshot(
             
             if (addr !== undefined && !isNaN(addr)) {
               const distance = Math.abs(addr - snapshot.pc);
-              if (distance <= searchRadius) {
+              if (distance <= LABEL_SEARCH_RADIUS) {
                 snapshot.nearbyLabels.push({ name, addr, distance });
               }
             }
@@ -551,7 +554,7 @@ function adjustPcAfterReload(
 
     // Calculate new PC based on the shift
     const oldPc = snapshot.pc;
-    const newPc = (oldPc + shift) & 0xffff;
+    const newPc = (oldPc + shift) & PC_MASK;
 
     ext_utils.logOutput(devectorOutput, 
       `Devector: Adjusting PC based on label '${oldLabel.name}': 0x${oldAddr.toString(16).toUpperCase()} -> 0x${newAddr.toString(16).toUpperCase()} (shift: ${shift >= 0 ? '+' : ''}${shift})`);
@@ -563,7 +566,15 @@ function adjustPcAfterReload(
       const hardware = getActiveHardware();
       if (hardware) {
         hardware.Request(HardwareReq.SET_REG_PC, { pc: newPc });
-        ext_utils.logOutput(devectorOutput, `Devector: PC register updated successfully`);
+        
+        // Verify the PC was updated correctly
+        const verifyResult = hardware.Request(HardwareReq.GET_REG_PC);
+        if (verifyResult && verifyResult.pc === newPc) {
+          ext_utils.logOutput(devectorOutput, `Devector: PC register updated successfully`);
+        } else {
+          ext_utils.logOutput(devectorOutput, 
+            `Devector: Warning: PC verification mismatch. Expected 0x${newPc.toString(16).toUpperCase()}, got 0x${verifyResult?.pc?.toString(16).toUpperCase() ?? 'undefined'}`);
+        }
       } else {
         ext_utils.logOutput(devectorOutput, `Devector: Cannot adjust PC: hardware not available`);
       }
