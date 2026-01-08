@@ -1,4 +1,4 @@
-import { Hardware } from './hardware';
+import type { Hardware } from './hardware';
 import { HardwareReq } from './hardware_reqs';
 import { CpuState } from './cpu_i8080';
 import { MemState } from './memory';

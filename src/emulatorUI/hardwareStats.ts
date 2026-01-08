@@ -80,10 +80,10 @@ function readStackWord(memory: Memory | undefined | null, addr: number): number 
   }
 }
 
-function collectHardwareStats(hardware: Hardware | undefined | null): HardwareStatsMessage | null {
+async function collectHardwareStats(hardware: Hardware | undefined | null): Promise<HardwareStatsMessage | null> {
   if (!hardware) return null;
 
-  const hwStats = hardware.Request(HardwareReq.GET_HW_MAIN_STATS);
+  const hwStats = await hardware.Request(HardwareReq.GET_HW_MAIN_STATS);
   const cpuState: CpuState = hwStats["cpu_state"];
 
   const now = Date.now();
@@ -93,7 +93,7 @@ function collectHardwareStats(hardware: Hardware | undefined | null): HardwareSt
 
   const stackEntries: StackEntry[] = [];
   const sp = cpuState.regs.sp.word;
-  const stack_sample: number[] = hardware.Request(HardwareReq.GET_STACK_SAMPLE, { "addr": sp })["data"];
+  const stack_sample: number[] = (await hardware.Request(HardwareReq.GET_STACK_SAMPLE, { "addr": sp }))["data"];
   // TODO: optimize top use the request result directly without copying
   for (const offset of STACK_SAMPLE_OFFSETS)
   {
@@ -113,7 +113,7 @@ function collectHardwareStats(hardware: Hardware | undefined | null): HardwareSt
   const displayMode = hwStats["displayMode"] ? '512' : '256';
   const rusLat = hwStats["rusLat"] ?? false;
 
-  const ramDiskState = hardware.Request(HardwareReq.GET_MEMORY_MAPPINGS);
+  const ramDiskState = await hardware.Request(HardwareReq.GET_MEMORY_MAPPINGS);
   const ramdiskIdx = ramDiskState["ramdiskIdx"] as number;
   const ramdiskMappings = ramDiskState["mappings"] as MemMapping[];
 
@@ -181,10 +181,10 @@ export function disposeHardwareStatsTracking(): void {
   hwStatsFrameCountdown = HW_STATS_FRAME_INTERVAL;
 }
 
-export function tryCollectHardwareStats(
+export async function tryCollectHardwareStats(
   hardware: Hardware | undefined | null,
   force = false
-): HardwareStatsMessage | null {
+): Promise<HardwareStatsMessage | null> {
   if (!force) {
     hwStatsFrameCountdown--;
     if (hwStatsFrameCountdown > 0) {

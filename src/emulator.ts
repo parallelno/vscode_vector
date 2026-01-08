@@ -26,19 +26,31 @@ export class Emulator {
     extensionPath: string, project: ProjectInfo)
   {
     this._project = project;
-    this.result.add(this.HardwareInit(extensionPath));
+  }
+
+  static async create(
+    extensionPath: string,
+    project: ProjectInfo): Promise<Emulator>
+  {
+    const emu = new Emulator(extensionPath, project);
+    await emu.initialize(extensionPath);
+    return emu;
+  }
+
+  private async initialize(extensionPath: string): Promise<void> {
+    this.result.add(await this.HardwareInit(extensionPath));
     if (!this.result.success) return;
-    this.result.add(this.Load());
+    this.result.add(await this.Load());
   }
 
-  Destructor(){
-    this._hardware?.Destructor();
-    this.SaveRamDisk();
-    this.SaveFdds();
+  async Destructor(){
+    await this._hardware?.Destructor();
+    await this.SaveRamDisk();
+    await this.SaveFdds();
   }
 
 
-    private HardwareInit(extensionPath: string): type.EmulatorResult
+    private async HardwareInit(extensionPath: string): Promise<type.EmulatorResult>
   {
     let result = new type.EmulatorResult();
 
@@ -51,7 +63,7 @@ export class Emulator {
     if (!bootRom) {
       result.addWarning(`Cannot load Boot ROM file: ${bootRomPath}`);
     }
-    const ramDisk = this.LoadRamDisk(this._project.absolute_ram_disk_path!);
+    const ramDisk = await this.LoadRamDisk(this._project.absolute_ram_disk_path!);
     if (this._project.settings.RamDiskPath && !ramDisk) {
       result.addWarning(`Cannot load RAM disk file: ${this._project.absolute_ram_disk_path!}`);
     }
@@ -63,7 +75,7 @@ export class Emulator {
 
 
   // Extension thread. HW thread must be stopped before calling this
-  Load(): type.EmulatorResult
+  async Load(): Promise<type.EmulatorResult>
   {
     let result = new type.EmulatorResult();
 
@@ -78,14 +90,14 @@ export class Emulator {
       }
       const fddIdx = this._project.settings.FddIdx || 0;
       const autoBoot = this._project.settings.AutoBoot || true;
-      result.add(this.LoadFdd(this._project.absolute_fdd_path!, fddIdx, autoBoot));
+      result.add(await this.LoadFdd(this._project.absolute_fdd_path!, fddIdx, autoBoot));
     }
     // If no FDD image, load ROM file
     else if (this._project.absolute_rom_path){
       if (!fs.existsSync(this._project.absolute_rom_path!)) {
         return result.addError(`Invalid ROM filepath: ${this._project.absolute_rom_path!}`);
       }
-      result.add(this.LoadRom(this._project.absolute_rom_path!));
+      result.add(await this.LoadRom(this._project.absolute_rom_path!));
     }
     return result;
   }
@@ -104,14 +116,14 @@ export class Emulator {
 
 
   // Extension thread
-  private LoadRom(path: string): type.EmulatorResult
+  private async LoadRom(path: string): Promise<type.EmulatorResult>
   {
     let result = new type.EmulatorResult();
     if (!path || !fs.existsSync(path)) return result.addError(`Invalid ROM filepath: ${path}`);
 
-    this._hardware?.Request(HardwareReq.STOP);
-    this._hardware?.Request(HardwareReq.RESET);
-    this._hardware?.Request(HardwareReq.RESTART);
+    await this._hardware?.Request(HardwareReq.STOP);
+    await this._hardware?.Request(HardwareReq.RESET);
+    await this._hardware?.Request(HardwareReq.RESTART);
 
     const data = fs.readFileSync(path);
     const buff = new Uint8Array(data);
@@ -120,10 +132,10 @@ export class Emulator {
     }
 
     const reqData = { "data": buff, "addr": ROM_LOAD_ADDR };
-    this._hardware?.Request(HardwareReq.SET_MEM, reqData);
+    await this._hardware?.Request(HardwareReq.SET_MEM, reqData);
 
     // has to be called after Hardware loading Rom because it stores the last state of Hardware
-    this._hardware?.Request(HardwareReq.DEBUG_RESET, { "resetRecorder": true });
+    await this._hardware?.Request(HardwareReq.DEBUG_RESET, { "resetRecorder": true });
 
     // TODO: implement if still needed
     //this.debugger?.GetDebugData().LoadDebugData(path);
@@ -134,8 +146,8 @@ export class Emulator {
 
   // Extension thread
   // Returns old FDD image if any
-	private LoadFdd(path: string, fddIdx: number = 0, autoBoot: boolean = true)
-  : type.EmulatorResult
+	private async LoadFdd(path: string, fddIdx: number = 0, autoBoot: boolean = true)
+  : Promise<type.EmulatorResult>
   {
     let result = new type.EmulatorResult();
 
@@ -144,8 +156,9 @@ export class Emulator {
     }
 
     // Retrieve the old FDD image if any
-    const old_img = this._hardware?.Request(
-      HardwareReq.DISMOUNT_FDD, {"fddIdx": fddIdx}).data as FdcDiskImage;
+    const old_resp = await this._hardware?.Request(
+      HardwareReq.DISMOUNT_FDD, {"fddIdx": fddIdx});
+    const old_img = old_resp?.data as FdcDiskImage;
     // save old fdd to the disk
     if (old_img && old_img.path && !this._project.settings.FddReadOnly) {
       fs.writeFileSync(old_img.path, old_img.data);
@@ -164,21 +177,21 @@ export class Emulator {
       fddimg = fddimg.slice(0, FDD_SIZE);
     }
 
-    this._hardware?.Request(HardwareReq.STOP);
+    await this._hardware?.Request(HardwareReq.STOP);
 
     // loading the fdd data
     const fdcDiskImage: FdcDiskImage = {"fddIdx": fddIdx, "data": fddimg, "path": path};
-    this._hardware?.Request(HardwareReq.MOUNT_FDD, fdcDiskImage).data as FdcDiskImage;
+    await this._hardware?.Request(HardwareReq.MOUNT_FDD, fdcDiskImage);
 
     // TODO: check if we still need this
     //this._debugger?.GetDebugData().LoadDebugData(_path);
 
     if (autoBoot)
     {
-      this._hardware?.Request(HardwareReq.RESET);
+      await this._hardware?.Request(HardwareReq.RESET);
       // has to be called after Hardware loading FDD
       // image because it stores the last state of Hardware
-      this._hardware?.Request(HardwareReq.DEBUG_RESET, { "resetRecorder": true });
+      await this._hardware?.Request(HardwareReq.DEBUG_RESET, { "resetRecorder": true });
     }
 
     result.addPrintMessage(`Loaded FDD ${path}, index: ${fddIdx}, autoBoot: ${autoBoot}`);
@@ -189,9 +202,10 @@ export class Emulator {
 
   // Extention thread
   // HW thread must be stopped before calling this
-  private SaveFdds(): type.EmulatorResult {
+  private async SaveFdds(): Promise<type.EmulatorResult> {
     let result = new type.EmulatorResult();
-    const fdd_imgs = this._hardware?.Request(HardwareReq.DISMOUNT_FDD_ALL)["data"] as FdcDiskImage[] | undefined;
+    const resp = await this._hardware?.Request(HardwareReq.DISMOUNT_FDD_ALL);
+    const fdd_imgs = resp?.["data"] as FdcDiskImage[] | undefined;
     if (fdd_imgs) {
       for (const fdd_img of fdd_imgs){
         fs.writeFileSync(fdd_img.path, fdd_img.data);
@@ -204,38 +218,39 @@ export class Emulator {
 
   // Extention thread
   // HW thread will be paused while loading
-  LoadRamDisk(ramDiskPath?: string): Uint8Array | undefined
+  async LoadRamDisk(ramDiskPath?: string): Promise<Uint8Array | undefined>
   {
-    const isRunning = this._hardware?.Request(HardwareReq.IS_RUNNING);
-    this._hardware?.Request(HardwareReq.STOP);
+    const isRunningResp = await this._hardware?.Request(HardwareReq.IS_RUNNING);
+    await this._hardware?.Request(HardwareReq.STOP);
 
     let ramDisk: Uint8Array | undefined = undefined;
     if (!ramDiskPath || !fs.existsSync(ramDiskPath)) {
       return ramDisk;
     }
     ramDisk = fs.readFileSync(ramDiskPath);
-    if (isRunning) this._hardware?.Request(HardwareReq.RUN);
+    if (isRunningResp?.["isRunning"]) await this._hardware?.Request(HardwareReq.RUN);
     return ramDisk;
   }
 
 
   // Extention thread
   // HW thread will be paused while saving
-  SaveRamDisk(): type.EmulatorResult
+  async SaveRamDisk(): Promise<type.EmulatorResult>
   {
     let result = new type.EmulatorResult();
     if (!this._project) return result.addError("Settings was not inited");
 
     if (this._project.settings.SaveRamDiskOnRestart && this._project.settings.RamDiskPath)
     {
-      const ramDisk = this._hardware?.Request(HardwareReq.GET_RAM_DISK)["data"] as Uint8Array | undefined;
+      const ramDiskResp = await this._hardware?.Request(HardwareReq.GET_RAM_DISK);
+      const ramDisk = ramDiskResp?.["data"] as Uint8Array | undefined;
       if (ramDisk)
       {
-        const isRunning = this._hardware?.Request(HardwareReq.IS_RUNNING);
-        this._hardware?.Request(HardwareReq.STOP);
+        const isRunningResp = await this._hardware?.Request(HardwareReq.IS_RUNNING);
+        await this._hardware?.Request(HardwareReq.STOP);
         fs.writeFileSync(this._project.absolute_ram_disk_path!, ramDisk);
         result.addPrintMessage(`Saved RAM disk to path: ${this._project.absolute_ram_disk_path!}`);
-        if (isRunning) this._hardware?.Request(HardwareReq.RUN);
+        if (isRunningResp?.["isRunning"]) await this._hardware?.Request(HardwareReq.RUN);
       }
     }
     return result;

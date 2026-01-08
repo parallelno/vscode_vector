@@ -1,4 +1,7 @@
 import { HardwareReq } from './hardware_reqs';
+import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
+import * as path from 'path';
+import Debugger from './debugger';
 import * as CpuI8080 from './cpu_i8080';
 import Memory, { MEMORY_GLOBAL_LEN, MEMORY_MAIN_LEN, AddrSpace } from './memory';
 import IO from './io';
@@ -36,7 +39,7 @@ const execDelays: number[] = [
 ];
 
 // Extention thread. Use Hardware.Request(HardwareReq....) to interact with Hardware.
-export class Hardware
+class HardwareCore
 {
   status: Status = Status.STOP;
   execSpeed: ExecSpeed = ExecSpeed.NORMAL; // execution speed
@@ -57,6 +60,7 @@ export class Hardware
 
   debugAttached: boolean = false;
   result: type.EmulatorResult = new type.EmulatorResult();
+  private _debugger?: Debugger;
 
   constructor(
     bootRom: Uint8Array | undefined,
@@ -75,6 +79,7 @@ export class Hardware
     this._cpu = new CpuI8080.CPU(
       this._memory, this._io.PortIn.bind(this._io), this._io.PortOut.bind(this._io));
     this._display = new Display(this._memory, this._io);
+    this._debugger = new Debugger(this);
 
     this.Reset();
   }
@@ -698,6 +703,14 @@ export class Hardware
     } while (this._display?.frameNum === frameNum);
   }
 
+  get cpu(): CpuI8080.CPU | undefined {
+    return this._cpu;
+  }
+
+  get memory(): Memory | undefined {
+    return this._memory;
+  }
+
   GetStepOverAddr(): number
   {
     const pc = this._cpu?.pc ?? 0;
@@ -747,5 +760,93 @@ export class Hardware
   {
     this.Debug = debugFunc;
     this.DebugReqHandling = debugReqHandlingFunc;
+  }
+}
+
+type WorkerRequest = {
+  id: number;
+  req: HardwareReq;
+  data: ReqData;
+};
+
+type WorkerResponse = {
+  id: number;
+  data?: ReqData;
+  error?: string;
+};
+
+if (!isMainThread) {
+  const core = new HardwareCore(workerData?.bootRom, workerData?.ramDisk);
+  parentPort?.on('message', (message: WorkerRequest) => {
+    try {
+      const response = core.Request(message.req, message.data);
+      parentPort?.postMessage({ id: message.id, data: response });
+    } catch (err: any) {
+      parentPort?.postMessage({ id: message.id, error: err?.message ?? String(err) });
+    }
+  });
+}
+
+export class Hardware {
+  private _worker?: Worker;
+  private _core?: HardwareCore;
+  private _pending: Map<number, { resolve: (data: ReqData) => void; reject: (err: Error) => void; }> = new Map();
+  private _reqCounter = 0;
+
+  constructor(
+    bootRom: Uint8Array | undefined,
+    ramDisk: Uint8Array | undefined,
+    runOnMainThread: boolean = false)
+  {
+    if (!isMainThread || runOnMainThread) {
+      this._core = new HardwareCore(bootRom, ramDisk);
+      return;
+    }
+
+    const workerPath = path.resolve(__dirname, 'hardware.js');
+    this._worker = new Worker(workerPath, { workerData: { bootRom, ramDisk } });
+    this._worker.on('message', (message: WorkerResponse) => {
+      const pending = this._pending.get(message.id);
+      if (!pending) return;
+      this._pending.delete(message.id);
+      if (message.error) {
+        pending.reject(new Error(message.error));
+      } else {
+        pending.resolve(message.data ?? {});
+      }
+    });
+    this._worker.on('error', (err) => {
+      this._pending.forEach(({ reject }) => reject(err));
+      this._pending.clear();
+    });
+    this._worker.on('exit', () => {
+      this._pending.forEach(({ reject }) => reject(new Error('Hardware worker exited')));
+      this._pending.clear();
+    });
+  }
+
+  async Request(req: HardwareReq, data: ReqData = {}): Promise<ReqData> {
+    if (this._core) {
+      return this._core.Request(req, data);
+    }
+    const id = ++this._reqCounter;
+    return new Promise<ReqData>((resolve, reject) => {
+      this._pending.set(id, { resolve, reject });
+      this._worker?.postMessage({ id, req, data });
+    });
+  }
+
+  async Destructor() {
+    await this.Request(HardwareReq.STOP);
+    await this.Request(HardwareReq.EXIT);
+    await this._worker?.terminate();
+  }
+
+  get cpu(): CpuI8080.CPU | undefined {
+    return this._core?.cpu;
+  }
+
+  get memory(): Memory | undefined {
+    return this._core?.memory;
   }
 }

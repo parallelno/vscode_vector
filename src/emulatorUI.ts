@@ -144,7 +144,7 @@ export async function openEmulatorPanel(
     devectorOutput.appendLine('Devector logging enabled');
   } catch (e) {}
 
-  const emu = new Emulator(context.extensionPath, project);
+  const emu = await Emulator.create(context.extensionPath, project);
   const emuResult = emu.result;
   if (!emuResult.success){
     devectorOutput.appendLine('Devector Errors: ' + emuResult.errors?.join("\n") || "Unknown error");
@@ -202,7 +202,7 @@ export async function openEmulatorPanel(
   panel.onDidDispose(
     async () => {
       panelDisposed = true;
-      try { emu.hardware?.Request(HardwareReq.STOP); } catch (e) {}
+      try { await emu.hardware?.Request(HardwareReq.STOP); } catch (e) {}
       if (emu.hardware) {
         // Save the RAM Disk
         if (project && project.settings && project.settings.SaveRamDiskOnRestart)
@@ -230,9 +230,9 @@ export async function openEmulatorPanel(
             }
           }
           // Save the RAM Disk to file
-          emu.SaveRamDisk();
+          await emu.SaveRamDisk();
         }
-        try { emu.Destructor(); } catch (e) {}
+        try { await emu.Destructor(); } catch (e) {}
       }
 
       try {
@@ -312,8 +312,8 @@ export async function openEmulatorPanel(
   //   }
   // } catch (e) { }
 
-  const sendHardwareStats = (force: boolean = false) => {
-    const snapshot = tryCollectHardwareStats(emu.hardware, force);
+  const sendHardwareStats = async (force: boolean = false) => {
+    const snapshot = await tryCollectHardwareStats(emu.hardware, force);
 
     if (!snapshot) return;
     try {
@@ -330,12 +330,12 @@ export async function openEmulatorPanel(
    *                   hardware stats update. Use this after debug actions (pause, step, break)
    *                   to ensure the Register panel is synchronized with the highlighted source line.
    */
-  const sendFrameToWebview = (forceStats: boolean = false) => {
+  const sendFrameToWebview = async (forceStats: boolean = false) => {
     if (emu.hardware){
       try {
         // TODO: implement vsync handling if needed
         const sync = false;
-        const fullFrame = emu.hardware.Request(HardwareReq.GET_FRAME, {"vsync": sync})["data"];
+        const fullFrame = (await emu.hardware.Request(HardwareReq.GET_FRAME, {"vsync": sync}))["data"];
 
         let crop: {x: number, y: number, w: number, h: number} = { x: 0, y: 0, w: FRAME_W, h: FRAME_H };
         let aspect = FRAME_W / FRAME_H;
@@ -352,7 +352,7 @@ export async function openEmulatorPanel(
       }
       catch (e) { /* ignore frame conversion errors */ }
     }
-    sendHardwareStats(forceStats);
+    await sendHardwareStats(forceStats);
   };
 
   const postToolbarState = (isRunning: boolean) => {
@@ -386,71 +386,71 @@ export async function openEmulatorPanel(
     postToolbarState(currentToolbarIsRunning);
   };
 
-  const handleDebugAction = (action?: DebugAction) => {
+  const handleDebugAction = async (action?: DebugAction) => {
     if (!action || !emu.hardware) return;
     switch (action) {
     case 'pause':
-        emu.hardware.Request(HardwareReq.STOP);
-        sendFrameToWebview(true);
+        await emu.hardware.Request(HardwareReq.STOP);
+        await sendFrameToWebview(true);
         printDebugState('Pause:', emu.hardware, devectorOutput, panel);
         syncEditorBreakpointsFromHardware(emu.hardware, lastAddressSourceMap);
         emitToolbarState(false);
         break;
 
       case 'run':
-        emu.hardware.Request(HardwareReq.RUN);
+        await emu.hardware.Request(HardwareReq.RUN);
         emitToolbarState(true);
         tick();
         break;
 
       case 'stepInto':
-        emu.hardware.Request(HardwareReq.STOP);
-        emu.hardware?.Request(HardwareReq.EXECUTE_INSTR);
-        sendFrameToWebview(true);
+        await emu.hardware.Request(HardwareReq.STOP);
+        await emu.hardware?.Request(HardwareReq.EXECUTE_INSTR);
+        await sendFrameToWebview(true);
         printDebugState('Step into:', emu.hardware, devectorOutput, panel);
         break;
 
       case 'stepOver':
-        emu.hardware.Request(HardwareReq.STOP);
-        const addr = emu.hardware.Request(HardwareReq.GET_STEP_OVER_ADDR)['data'];
-        emu.hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr: addr, autoDel: true });
+        await emu.hardware.Request(HardwareReq.STOP);
+        const addr = (await emu.hardware.Request(HardwareReq.GET_STEP_OVER_ADDR))['data'];
+        await emu.hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr: addr, autoDel: true });
         printDebugState('Step over:', emu.hardware, devectorOutput, panel);
-        emu.hardware.Request(HardwareReq.RUN);
+        await emu.hardware.Request(HardwareReq.RUN);
         emitToolbarState(true);
         tick();
         break;
 
       case 'stepOut':
-        emu.hardware.Request(HardwareReq.STOP);
+        await emu.hardware.Request(HardwareReq.STOP);
         // TODO: implement proper step out
-        emu.hardware?.Request(HardwareReq.EXECUTE_INSTR);
-        sendFrameToWebview(true);
+        await emu.hardware?.Request(HardwareReq.EXECUTE_INSTR);
+        await sendFrameToWebview(true);
         printDebugState('Step out (NOT IMPLEMENTED):', emu.hardware, devectorOutput, panel);
         break;
 
       case 'stepFrame':
-        emu.hardware.Request(HardwareReq.STOP);
-        emu.hardware.Request(HardwareReq.EXECUTE_FRAME_NO_BREAKS);
-        sendFrameToWebview(true);
+        await emu.hardware.Request(HardwareReq.STOP);
+        await emu.hardware.Request(HardwareReq.EXECUTE_FRAME_NO_BREAKS);
+        await sendFrameToWebview(true);
         printDebugState('Run frame:', emu.hardware, devectorOutput, panel);
         emitToolbarState(false);
         break;
 
       case 'step256':
-        emu.hardware.Request(HardwareReq.STOP);
+        await emu.hardware.Request(HardwareReq.STOP);
         for (let i = 0; i < 256; i++) {
-          emu.hardware.Request(HardwareReq.EXECUTE_INSTR);
+          await emu.hardware.Request(HardwareReq.EXECUTE_INSTR);
         }
-        sendFrameToWebview(true);
+        await sendFrameToWebview(true);
         printDebugState('Step 256:', emu.hardware, devectorOutput, panel);
         break;
 
       case 'restart':
-        emu.hardware.Request(HardwareReq.STOP);
-        emu.hardware.Request(HardwareReq.RESET);
-        emu.hardware.Request(HardwareReq.RESTART);
-        emu.Load();
-        emu.hardware.Request(HardwareReq.RUN);
+        await emu.hardware.Request(HardwareReq.STOP);
+        await emu.hardware.Request(HardwareReq.RESET);
+        await emu.hardware.Request(HardwareReq.RESTART);
+        await emu.Load();
+        await emu.hardware.Request(HardwareReq.RUN);
         emitToolbarState(true);
         tick();
         break;
@@ -556,15 +556,16 @@ export async function openEmulatorPanel(
     do {
       let startTime = performance.now();
 
-      emu.hardware?.Request(HardwareReq.EXECUTE_FRAME);
-      sendFrameToWebview();
+      await emu.hardware?.Request(HardwareReq.EXECUTE_FRAME);
+      await sendFrameToWebview();
 
       // logging
       if (log_every_frame){
         printDebugState('hw stats:', emu.hardware!, devectorOutput, panel, false);
       }
 
-      running = emu.hardware?.Request(HardwareReq.IS_RUNNING)['isRunning'] ?? false;
+      const runningResp = await emu.hardware?.Request(HardwareReq.IS_RUNNING);
+      running = runningResp?.['isRunning'] ?? false;
 
       // throttle to approx real-time, adjusted by emulation speed
       const elapsed = performance.now() - startTime;
@@ -584,7 +585,7 @@ export async function openEmulatorPanel(
 
     // Force hardware stats update (bypassing throttle) when breaking to
     // ensure Register panel is synchronized
-    sendFrameToWebview(true);
+    await sendFrameToWebview(true);
     printDebugState('Break:', emu.hardware!, devectorOutput, panel);
     syncEditorBreakpointsFromHardware(emu.hardware, lastAddressSourceMap);
     emitToolbarState(false);

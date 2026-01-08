@@ -437,7 +437,7 @@ function compareMemory(
   }
 }
 
-function runTestCase(test: EmulatorTestCase): EmulatorTestResult {
+async function runTestCase(test: EmulatorTestCase): Promise<EmulatorTestResult> {
   const filePath = path.join(emulatorTestDir, test.sourceFile);
   const details: string[] = [];
   const start = Date.now();
@@ -469,11 +469,11 @@ function runTestCase(test: EmulatorTestCase): EmulatorTestResult {
   let hw: any;
   try {
     hw = new Hardware('', '', true);
-    hw.Request(HardwareReq.SET_MEM, { data: assembleResult.output, addr: ROM_LOAD_ADDR });
-    hw.Request(HardwareReq.RESTART);
+    await hw.Request(HardwareReq.SET_MEM, { data: assembleResult.output, addr: ROM_LOAD_ADDR });
+    await hw.Request(HardwareReq.RESTART);
     // Set PC to ROM_LOAD_ADDR (0x100) to match the .org directive in test files.
     // All test assembly files use .org 0x100 which matches ROM_LOAD_ADDR.
-    hw.cpu.state.regs.pc.word = ROM_LOAD_ADDR;
+    hw.cpu!.state.regs.pc.word = ROM_LOAD_ADDR;
   } catch (e) {
     return {
       name: test.name,
@@ -486,7 +486,7 @@ function runTestCase(test: EmulatorTestCase): EmulatorTestResult {
   // Execute instructions
   try {
     for (let i = 0; i < test.instructionCount; i++) {
-      hw.Request(HardwareReq.EXECUTE_INSTR);
+      await hw.Request(HardwareReq.EXECUTE_INSTR);
     }
   } catch (e) {
     return {
@@ -571,11 +571,11 @@ function generateReport(results: EmulatorTestResult[]): void {
   console.log('='.repeat(70) + '\n');
 }
 
-function main(): void {
+async function main(): Promise<void> {
   console.log('i8080 Emulator Test Suite');
   console.log(`Running ${tests.length} tests...\n`);
 
-  const results = tests.map(runTestCase);
+  const results = await Promise.all(tests.map(runTestCase));
   generateReport(results);
 
   const failedCount = results.filter(r => !r.passed).length;
