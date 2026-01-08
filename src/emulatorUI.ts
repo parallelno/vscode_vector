@@ -467,7 +467,7 @@ export async function openEmulatorPanel(
     performDebugAction: (action: DebugAction) => { handleDebugAction(action); },
     stopAndClose: async () => {
       if (panelDisposed) return;
-      try { emu.hardware?.Request(HardwareReq.STOP); } catch (e) {}
+      try { await emu.hardware?.Request(HardwareReq.STOP); } catch (e) {}
       await emitToolbarState(false);
       try { panel.dispose(); } catch (e) {}
     },

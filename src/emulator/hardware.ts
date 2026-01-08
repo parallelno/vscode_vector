@@ -128,7 +128,7 @@ class HardwareCore
   }
 
   // UI thread. It return when the request fulfilled
-  Request(req: HardwareReq, data: ReqData = {}): ReqData
+  async Request(req: HardwareReq, data: ReqData = {}): Promise<ReqData>
   {
     return this.ReqHandling(req, data);
   }
