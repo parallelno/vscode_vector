@@ -9,7 +9,7 @@ import { IOState } from './io';
 
 type DebugHardware = {
   AttachDebugFuncs: (debugFunc: DebugFunc, debugReqHandlingFunc: DebugReqHandlingFunc) => void;
-  Request: (req: HardwareReq, data?: ReqData) => any;
+  Request: (req: HardwareReq, data?: ReqData) => ReqData | Promise<ReqData>;
 };
 
 /////////////////////////////////////////////////////////////

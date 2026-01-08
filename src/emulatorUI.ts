@@ -480,44 +480,48 @@ export async function openEmulatorPanel(
   await sendHardwareStats(true);
 
   panel.webview.onDidReceiveMessage(async msg => {
-    if (msg && msg.type === 'key') {
-      // keyboard events: forward to keyboard handling
-      const action: string = msg.kind === 'down' ? 'down' : 'up';
-      await emu.hardware?.Request(HardwareReq.KEY_HANDLING, { "scancode": msg.code, "action": action });
+    try {
+      if (msg && msg.type === 'key') {
+        // keyboard events: forward to keyboard handling
+        const action: string = msg.kind === 'down' ? 'down' : 'up';
+        await emu.hardware?.Request(HardwareReq.KEY_HANDLING, { "scancode": msg.code, "action": action });
 
-    }
-    else if (msg && msg.type === 'stop') {
-      await emu.hardware?.Request(HardwareReq.STOP);
-      await emitToolbarState(false);
-    }
-    else if (msg && msg.type === 'debugAction') {
-      await handleDebugAction(msg.action);
-    }
-    else if (msg && msg.type === 'memoryDumpControl') {
-      await handleMemoryDumpControlMessage(msg, panel, emu.hardware);
-    }
-    else if (msg && msg.type === 'speedChange') {
-      const speedValue = msg.speed;
-      if (speedValue === 'max') {
-        project!.settings.Speed = 'max';
-      } else {
-        const parsed = parseFloat(speedValue);
-        if (!isNaN(parsed) && parsed > 0) {
-          project!.settings.Speed = parsed;
+      }
+      else if (msg && msg.type === 'stop') {
+        await emu.hardware?.Request(HardwareReq.STOP);
+        await emitToolbarState(false);
+      }
+      else if (msg && msg.type === 'debugAction') {
+        await handleDebugAction(msg.action);
+      }
+      else if (msg && msg.type === 'memoryDumpControl') {
+        await handleMemoryDumpControlMessage(msg, panel, emu.hardware);
+      }
+      else if (msg && msg.type === 'speedChange') {
+        const speedValue = msg.speed;
+        if (speedValue === 'max') {
+          project!.settings.Speed = 'max';
+        } else {
+          const parsed = parseFloat(speedValue);
+          if (!isNaN(parsed) && parsed > 0) {
+            project!.settings.Speed = parsed;
+          }
         }
       }
-    }
-    else if (msg && msg.type === 'viewModeChange') {
-      const viewMode = msg.viewMode;
-      if (viewMode === 'full' || viewMode === 'noBorder') {
-        currentViewMode = viewMode;
-        // Re-send current frame with new view mode
-        await sendFrameToWebview(false);
+      else if (msg && msg.type === 'viewModeChange') {
+        const viewMode = msg.viewMode;
+        if (viewMode === 'full' || viewMode === 'noBorder') {
+          currentViewMode = viewMode;
+          // Re-send current frame with new view mode
+          await sendFrameToWebview(false);
+        }
       }
-    }
-    else if (msg && msg.type === 'ramDiskSaveOnRestartChange') {
-      let enable = !!msg.value;
-      project!.settings.SaveRamDiskOnRestart = enable;
+      else if (msg && msg.type === 'ramDiskSaveOnRestartChange') {
+        let enable = !!msg.value;
+        project!.settings.SaveRamDiskOnRestart = enable;
+      }
+    } catch (err) {
+      console.error('Webview message handling failed', err);
     }
   }, undefined, context.subscriptions);
 
