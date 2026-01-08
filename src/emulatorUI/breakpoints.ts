@@ -187,11 +187,12 @@ function mapHardwareAddrToEditorLocation(addr: number, lastAddressSourceMap: Map
   return { uri, range };
 }
 
-export function buildSourceBreakpointsFromHardware(hardware: Hardware | undefined | null, lastAddressSourceMap: Map<number, SourceLineRef> | null): vscode.SourceBreakpoint[] {
+export async function buildSourceBreakpointsFromHardware(hardware: Hardware | undefined | null, lastAddressSourceMap: Map<number, SourceLineRef> | null): Promise<vscode.SourceBreakpoint[]> {
   if (!hardware) return [];
   let data: any;
   try {
-    data = hardware.Request(HardwareReq.DEBUG_BREAKPOINT_GET_ALL)?.data;
+    const resp = await hardware.Request(HardwareReq.DEBUG_BREAKPOINT_GET_ALL);
+    data = resp?.data;
   } catch (err) {
     return [];
   }
@@ -225,8 +226,8 @@ export function buildSourceBreakpointsFromHardware(hardware: Hardware | undefine
   return result;
 }
 
-export function syncEditorBreakpointsFromHardware(hardware: Hardware | undefined | null, lastAddressSourceMap: Map<number, SourceLineRef> | null): void {
-  const target = buildSourceBreakpointsFromHardware(hardware, lastAddressSourceMap);
+export async function syncEditorBreakpointsFromHardware(hardware: Hardware | undefined | null, lastAddressSourceMap: Map<number, SourceLineRef> | null): Promise<void> {
+  const target = await buildSourceBreakpointsFromHardware(hardware, lastAddressSourceMap);
   if (!target) return;
 
   const targetFiles = new Set(target.map(bp => bp.location.uri.fsPath));
@@ -283,7 +284,7 @@ export function buildAddressToSourceMap(tokens: any, tokenPath: string, projectD
   return map;
 }
 
-export function loadBreakpointsFromToken(
+export async function loadBreakpointsFromToken(
   romPath: string,
   hardware: Hardware | undefined | null,
   options: {
@@ -291,7 +292,7 @@ export function loadBreakpointsFromToken(
     debugPath?: string;
     cacheSymbolMetadata: (tokens: any, tokenPath: string) => void;
     clearSymbolMetadataCache: () => void;
-  }): { applied: number; addressSourceMap: Map<number, SourceLineRef> | null }
+  }): Promise<{ applied: number; addressSourceMap: Map<number, SourceLineRef> | null }>
 {
   options.clearSymbolMetadataCache();
   if (!hardware || !romPath) return { applied: 0, addressSourceMap: null };
@@ -313,7 +314,7 @@ export function loadBreakpointsFromToken(
   const addressSourceMap = buildAddressToSourceMap(tokens, tokenPath, projectDir);
   const desired = collectBreakpointAddresses(tokens, projectDir);
 
-  hardware.Request(HardwareReq.DEBUG_BREAKPOINT_DEL_ALL);
+  await hardware.Request(HardwareReq.DEBUG_BREAKPOINT_DEL_ALL);
 
   if (desired.size === 0) {
     try {
@@ -324,7 +325,7 @@ export function loadBreakpointsFromToken(
 
   for (const [addr, meta] of desired) {
     const status: BpStatus = (meta.enabled === false) ? BpStatus.DISABLED : BpStatus.ACTIVE;
-    hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr: addr, status: status });
+    await hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr: addr, status: status });
   }
 
   try {

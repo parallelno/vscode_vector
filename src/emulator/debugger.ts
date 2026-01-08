@@ -1,4 +1,9 @@
-import type { Hardware } from './hardware';
+import { DebugFunc, DebugReqHandlingFunc } from "./hardware_types";
+
+type DebugHardware = {
+  AttachDebugFuncs: (debugFunc: DebugFunc, debugReqHandlingFunc: DebugReqHandlingFunc) => void;
+  Request: (req: HardwareReq, data?: ReqData) => any;
+};
 import { HardwareReq } from './hardware_reqs';
 import { CpuState } from './cpu_i8080';
 import { MemState } from './memory';
@@ -69,11 +74,11 @@ export class MemoryAccessLog {
 /////////////////////////////////////////////////////////////
 
 export default class Debugger {
-  private hardware: Hardware;
+  private hardware: DebugHardware;
   private _breakpoints = new Breakpoints();
   private _memAccessLog = new MemoryAccessLog();
 
-  constructor(hardware: Hardware)
+  constructor(hardware: DebugHardware)
   {
     this.hardware = hardware;
     hardware.AttachDebugFuncs(this.Debug.bind(this), this.DebugReqHandling.bind(this));

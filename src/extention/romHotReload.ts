@@ -104,7 +104,7 @@ async function performRomHotReload(
 
   ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload triggered for ${project.name}`);
 
-  const snapshot = captureExecutionSnapshot(devectorOutput, project);
+  const snapshot = await captureExecutionSnapshot(devectorOutput, project);
 
   let oldRom = new Uint8Array();
   if (fs.existsSync(romPath)) {
@@ -155,13 +155,14 @@ async function performRomHotReload(
     ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload skipped for ${project.name}: hardware not available`);
     return;
   }
-  const wasRunning = hardware.Request(HardwareReq.IS_RUNNING).isRunning ?? false;
+  const isRunningResp = await hardware.Request(HardwareReq.IS_RUNNING);
+  const wasRunning = isRunningResp?.isRunning ?? false;
   if (wasRunning) {
-    hardware.Request(HardwareReq.STOP);
+    await hardware.Request(HardwareReq.STOP);
   }
 
   ext_utils.logOutput(devectorOutput, 'Devector: Comparing ROM images and applying diff...');
-  const result = applyRomDiffToActiveHardware(oldRom, newRom, devectorOutput, hardware);
+  const result = await applyRomDiffToActiveHardware(oldRom, newRom, devectorOutput, hardware);
   if (result.patched === 0) {
     ext_utils.logOutput(devectorOutput, `Devector: ROM hot reload found no differences to apply for ${project.name}`);
   } else {
@@ -170,7 +171,7 @@ async function performRomHotReload(
       `Devector: ROM hot reload applied ${result.patched} diff chunk(s), ${result.bytes} byte(s) updated for ${project.name}`);
   }
 
-  adjustPcAfterReload(devectorOutput, project, snapshot);
+  await adjustPcAfterReload(devectorOutput, project, snapshot);
 
   if (wasRunning) {
     hardware.Request(HardwareReq.RUN);
@@ -180,10 +181,10 @@ async function performRomHotReload(
 
 
 // Capture the current execution state snapshot before ROM hot reload
-function captureExecutionSnapshot(
+async function captureExecutionSnapshot(
   devectorOutput: vscode.OutputChannel,
   project: ProjectInfo)
-: ExecutionSnapshot
+: Promise<ExecutionSnapshot>
 {
   const snapshot: ExecutionSnapshot = {
     pc: undefined,
@@ -196,7 +197,7 @@ function captureExecutionSnapshot(
     try {
       const hardware = getActiveHardware();
       if (hardware) {
-        const pcResult = hardware.Request(HardwareReq.GET_REG_PC);
+        const pcResult = await hardware.Request(HardwareReq.GET_REG_PC);
         if (pcResult && typeof pcResult.pc === 'number') {
           snapshot.pc = pcResult.pc;
           ext_utils.logOutput(devectorOutput, `Devector: Captured PC = 0x${snapshot.pc.toString(16).toUpperCase()}`);
@@ -256,12 +257,12 @@ function captureExecutionSnapshot(
 // Apply a ROM diff by sending memory write requests to the active hardware.
 // Returns the number of patched chunks and total bytes patched.
 // It assumes the emulator is paused.
-export function applyRomDiffToActiveHardware(
+export async function applyRomDiffToActiveHardware(
   oldRom: Uint8Array,
   newRom: Uint8Array,
   logChannel?: vscode.OutputChannel,
   hardware?: Hardware)
-: { patched: number; bytes: number }
+: Promise<{ patched: number; bytes: number }>
 {
   if (!hardware) {
     return { patched: 0, bytes: 0 };
@@ -292,7 +293,7 @@ export function applyRomDiffToActiveHardware(
 
     if (chunk.length) {
       const payload = new Uint8Array(chunk);
-      hardware.Request(HardwareReq.SET_MEM, { addr: ROM_LOAD_ADDR + start, data: payload });
+      await hardware.Request(HardwareReq.SET_MEM, { addr: ROM_LOAD_ADDR + start, data: payload });
       if (logChannel) {
         const addrLabel = '0x' + (ROM_LOAD_ADDR + start).toString(16).toUpperCase();
         logChannel.appendLine(`Devector: Applying ROM diff at ${addrLabel} (${payload.length} byte(s))`);
@@ -306,7 +307,7 @@ export function applyRomDiffToActiveHardware(
 
 
 // Adjust the PC register based on label address changes after ROM hot reload
-function adjustPcAfterReload(
+async function adjustPcAfterReload(
   devectorOutput: vscode.OutputChannel,
   project: ProjectInfo,
   snapshot: ExecutionSnapshot)
@@ -375,9 +376,9 @@ function adjustPcAfterReload(
     try {
       const hardware = getActiveHardware();
       if (hardware) {
-        hardware.Request(HardwareReq.SET_REG_PC, { pc: newPc });
+        await hardware.Request(HardwareReq.SET_REG_PC, { pc: newPc });
 
-        const verifyResult = hardware.Request(HardwareReq.GET_REG_PC);
+        const verifyResult = await hardware.Request(HardwareReq.GET_REG_PC);
         if (verifyResult && verifyResult.pc === newPc) {
           ext_utils.logOutput(devectorOutput, 'Devector: PC register updated successfully');
         } else {

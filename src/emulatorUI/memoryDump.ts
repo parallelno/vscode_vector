@@ -31,7 +31,7 @@ export function resetMemoryDumpState(): void {
   memoryDumpAnchorAddr = 0;
 }
 
-export function updateMemoryDumpFromHardware(
+export async function updateMemoryDumpFromHardware(
   panel: vscode.WebviewPanel | null,
   hardware: Hardware | undefined | null,
   reason: 'pc' | 'user' = 'pc',
@@ -41,7 +41,8 @@ export function updateMemoryDumpFromHardware(
   let nextBase = memoryDumpStartAddr;
   let anchor = memoryDumpAnchorAddr;
 
-  const cpuState = hardware.Request(HardwareReq.GET_CPU_STATE)["data"];
+  const cpuResp = await hardware.Request(HardwareReq.GET_CPU_STATE);
+  const cpuState = cpuResp["data"];
 
   if (reason === 'pc' && memoryDumpFollowPc)
   {
@@ -65,8 +66,9 @@ export function updateMemoryDumpFromHardware(
   const addrSpace: AddrSpace = AddrSpace.GLOBAL;
   switch (addrSpace) {
     case AddrSpace.GLOBAL:
-      bytes = hardware.Request(
-        HardwareReq.GET_MEM_RANGE, { "addr": memoryDumpStartAddr, "len": MEMORY_DUMP_TOTAL_BYTES })["data"] ?? [];
+      const memResp = await hardware.Request(
+        HardwareReq.GET_MEM_RANGE, { "addr": memoryDumpStartAddr, "len": MEMORY_DUMP_TOTAL_BYTES });
+      bytes = memResp?.["data"] ?? [];
       break;
     // case AddrSpace.RAM:
     //   // TODO: implement RAM space dump
@@ -93,7 +95,7 @@ export function updateMemoryDumpFromHardware(
   }
 }
 
-export function handleMemoryDumpControlMessage(
+export async function handleMemoryDumpControlMessage(
   msg: any,
   panel: vscode.WebviewPanel | null,
   hardware: Hardware | undefined | null
@@ -105,7 +107,7 @@ export function handleMemoryDumpControlMessage(
       const parsed = parseAddressLike(msg.addr);
       if (parsed === undefined) break;
       memoryDumpFollowPc = false;
-      updateMemoryDumpFromHardware(panel, hardware, 'user', parsed);
+      await updateMemoryDumpFromHardware(panel, hardware, 'user', parsed);
       break;
     }
     case 'delta': {
@@ -117,16 +119,16 @@ export function handleMemoryDumpControlMessage(
       if (!Number.isFinite(delta) || delta === 0) break;
       memoryDumpFollowPc = false;
       const target = (memoryDumpStartAddr + delta) & MEMORY_ADDRESS_MASK;
-      updateMemoryDumpFromHardware(panel, hardware, 'user', target);
+      await updateMemoryDumpFromHardware(panel, hardware, 'user', target);
       break;
     }
     case 'follow': {
       memoryDumpFollowPc = !!msg.value;
-      updateMemoryDumpFromHardware(panel, hardware, memoryDumpFollowPc ? 'pc' : 'user');
+      await updateMemoryDumpFromHardware(panel, hardware, memoryDumpFollowPc ? 'pc' : 'user');
       break;
     }
     case 'refresh': {
-      updateMemoryDumpFromHardware(panel, hardware, memoryDumpFollowPc ? 'pc' : 'user');
+      await updateMemoryDumpFromHardware(panel, hardware, memoryDumpFollowPc ? 'pc' : 'user');
       break;
     }
     default:

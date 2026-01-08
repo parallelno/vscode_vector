@@ -14,7 +14,7 @@ export async function provideHover(
 {
 	// Data/memory hovers require a paused emulator; symbol hovers can work from cached metadata.
 	if (isEmulatorPanelPaused()) {
-		const dataHover = resolveDataDirectiveHover(document, position);
+		const dataHover = await resolveDataDirectiveHover(document, position);
 		if (dataHover) {
 			const valueWidth = Math.max(2, dataHover.unitBytes * 2);
 			const memoryHex = '0x' + (dataHover.value >>> 0).toString(16).toUpperCase().padStart(valueWidth, '0');
@@ -44,7 +44,7 @@ export async function provideHover(
 		const symbol = resolveEmulatorHoverSymbol(identifier, filePath ? { filePath, line: position.line + 1 } : undefined);
 		if (symbol) {
 			if (symbol.kind === 'line') {
-				const instructionHover = resolveInstructionHover(document, position, symbol.value);
+				const instructionHover = await resolveInstructionHover(document, position, symbol.value);
 				if (instructionHover) {
 					const addrHex = '0x' + instructionHover.address.toString(16).toUpperCase().padStart(4, '0');
 					const memBytes = instructionHover.bytes.map(b => '0x' + b.toString(16).toUpperCase().padStart(2, '0')).join(' ');

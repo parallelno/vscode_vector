@@ -139,18 +139,19 @@ export function formatInstructionHoverText(opcode: number, bytes: number[], sour
   return `opcode 0x${opcode.toString(16).toUpperCase().padStart(2, '0')}`;
 }
 
-export function resolveInstructionHoverForMemory(
+export async function resolveInstructionHoverForMemory(
   hardware: Hardware | null | undefined,
   document: vscode.TextDocument,
   position: vscode.Position,
   address: number,
   isToolbarRunning: boolean)
-  : InstructionHoverInfo | undefined
+  : Promise<InstructionHoverInfo | undefined>
 {
   if (!hardware || isToolbarRunning) return undefined;
 
   const normalizedAddr = address & 0xffff;
-  const instr = hardware.Request(HardwareReq.GET_INSTR, { addr: normalizedAddr })['data'] as number[];
+  const instrResp = await hardware.Request(HardwareReq.GET_INSTR, { addr: normalizedAddr });
+  const instr = instrResp['data'] as number[];
   const opcode = instr[0];
   const bytes = instr;
 
@@ -263,13 +264,13 @@ export function splitArgsWithRanges(text: string, offset: number): DirectiveValu
   return ranges;
 }
 
-export function resolveDataDirectiveHoverForMemory(
+export async function resolveDataDirectiveHoverForMemory(
   document: vscode.TextDocument,
   position: vscode.Position,
   hardware: Hardware | null | undefined,
   isToolbarRunning: boolean,
   dataLineSpanCache: Map<string, Map<number, DataLineSpan>> | null | undefined)
-  : DataDirectiveHoverInfo | undefined
+  : Promise<DataDirectiveHoverInfo | undefined>
 {
   if (!hardware || isToolbarRunning) return undefined;
   if (!dataLineSpanCache || dataLineSpanCache.size === 0) return undefined;
@@ -294,7 +295,7 @@ export function resolveDataDirectiveHoverForMemory(
   const byteOffset = matchIndex * span.unitBytes;
   if (byteOffset >= span.byteLength) return undefined;
   const addr = (span.start + byteOffset) & 0xffff;
-  const value = readMemoryValueForSpan(hardware, addr, span.unitBytes);
+  const value = await readMemoryValueForSpan(hardware, addr, span.unitBytes);
   if (value === undefined) return undefined;
   const tokenRange = ranges[matchIndex];
   const literalRange = new vscode.Range(position.line, tokenRange.start, position.line, tokenRange.end);
@@ -310,11 +311,12 @@ export function resolveDataDirectiveHoverForMemory(
   };
 }
 
-function readMemoryValueForSpan(hardware: Hardware | undefined | null, addr: number, unitBytes: number): number | undefined {
+async function readMemoryValueForSpan(hardware: Hardware | undefined | null, addr: number, unitBytes: number): Promise<number | undefined> {
   if (!hardware) return undefined;
 
   const normalizedAddr = addr & 0xffff;
-  const bytes = hardware.Request(HardwareReq.GET_MEM_RANGE, { "addr": normalizedAddr, "length": unitBytes })['data'] as number[];
+  const bytesResp = await hardware.Request(HardwareReq.GET_MEM_RANGE, { "addr": normalizedAddr, "length": unitBytes });
+  const bytes = bytesResp['data'] as number[];
 
   if (unitBytes === 1) return bytes[0];
 

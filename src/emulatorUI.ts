@@ -262,7 +262,7 @@ export async function openEmulatorPanel(
       resetMemoryDumpState();
       disposeHardwareStatsTracking();
 
-      try { emitToolbarState(false); } catch (e) {}
+      try { await emitToolbarState(false); } catch (e) {}
       for (const listener of panelClosedListeners) {
         try { listener(); } catch (err) { console.error('Emulator panel close listener failed', err); }
       }
@@ -271,11 +271,11 @@ export async function openEmulatorPanel(
   );
 
   // attach debugger and sync breakpoints from the compiled token file, if available
-  emu.hardware?.Request(HardwareReq.DEBUG_ATTACH, { data: true });
-  emu.hardware?.Request(HardwareReq.RUN);
+  await emu.hardware?.Request(HardwareReq.DEBUG_ATTACH, { data: true });
+  await emu.hardware?.Request(HardwareReq.RUN);
 
   // TODO: check if appliedBreakpoints was useful
-  const { applied: appliedBreakpoints, addressSourceMap } = loadBreakpointsFromToken(
+  const { applied: appliedBreakpoints, addressSourceMap } = await loadBreakpointsFromToken(
     project.absolute_rom_path!,
     emu.hardware,
     {
@@ -361,7 +361,7 @@ export async function openEmulatorPanel(
     } catch (e) { /* ignore toolbar sync errors */ }
   };
 
-  const emitToolbarState = (isRunning: boolean) => {
+  const emitToolbarState = async (isRunning: boolean) => {
     currentToolbarIsRunning = isRunning;
     postToolbarState(isRunning);
     for (const listener of toolbarListeners) {
@@ -378,7 +378,7 @@ export async function openEmulatorPanel(
         /* ignore */
       }
     } else {
-      refreshDataLineHighlights(emu.hardware, dataAddressLookup, lastSymbolCache?.filePaths);
+      await refreshDataLineHighlights(emu.hardware, dataAddressLookup, lastSymbolCache?.filePaths);
     }
   };
 
@@ -392,14 +392,14 @@ export async function openEmulatorPanel(
     case 'pause':
         await emu.hardware.Request(HardwareReq.STOP);
         await sendFrameToWebview(true);
-        printDebugState('Pause:', emu.hardware, devectorOutput, panel);
-        syncEditorBreakpointsFromHardware(emu.hardware, lastAddressSourceMap);
-        emitToolbarState(false);
+        await printDebugState('Pause:', emu.hardware, devectorOutput, panel);
+        await syncEditorBreakpointsFromHardware(emu.hardware, lastAddressSourceMap);
+        await emitToolbarState(false);
         break;
 
       case 'run':
         await emu.hardware.Request(HardwareReq.RUN);
-        emitToolbarState(true);
+        await emitToolbarState(true);
         tick();
         break;
 
@@ -407,16 +407,16 @@ export async function openEmulatorPanel(
         await emu.hardware.Request(HardwareReq.STOP);
         await emu.hardware?.Request(HardwareReq.EXECUTE_INSTR);
         await sendFrameToWebview(true);
-        printDebugState('Step into:', emu.hardware, devectorOutput, panel);
+        await printDebugState('Step into:', emu.hardware, devectorOutput, panel);
         break;
 
       case 'stepOver':
         await emu.hardware.Request(HardwareReq.STOP);
         const addr = (await emu.hardware.Request(HardwareReq.GET_STEP_OVER_ADDR))['data'];
         await emu.hardware.Request(HardwareReq.DEBUG_BREAKPOINT_ADD, { addr: addr, autoDel: true });
-        printDebugState('Step over:', emu.hardware, devectorOutput, panel);
+        await printDebugState('Step over:', emu.hardware, devectorOutput, panel);
         await emu.hardware.Request(HardwareReq.RUN);
-        emitToolbarState(true);
+        await emitToolbarState(true);
         tick();
         break;
 
@@ -425,15 +425,15 @@ export async function openEmulatorPanel(
         // TODO: implement proper step out
         await emu.hardware?.Request(HardwareReq.EXECUTE_INSTR);
         await sendFrameToWebview(true);
-        printDebugState('Step out (NOT IMPLEMENTED):', emu.hardware, devectorOutput, panel);
+        await printDebugState('Step out (NOT IMPLEMENTED):', emu.hardware, devectorOutput, panel);
         break;
 
       case 'stepFrame':
         await emu.hardware.Request(HardwareReq.STOP);
         await emu.hardware.Request(HardwareReq.EXECUTE_FRAME_NO_BREAKS);
         await sendFrameToWebview(true);
-        printDebugState('Run frame:', emu.hardware, devectorOutput, panel);
-        emitToolbarState(false);
+        await printDebugState('Run frame:', emu.hardware, devectorOutput, panel);
+        await emitToolbarState(false);
         break;
 
       case 'step256':
@@ -442,7 +442,7 @@ export async function openEmulatorPanel(
           await emu.hardware.Request(HardwareReq.EXECUTE_INSTR);
         }
         await sendFrameToWebview(true);
-        printDebugState('Step 256:', emu.hardware, devectorOutput, panel);
+        await printDebugState('Step 256:', emu.hardware, devectorOutput, panel);
         break;
 
       case 'restart':
@@ -451,7 +451,7 @@ export async function openEmulatorPanel(
         await emu.hardware.Request(HardwareReq.RESTART);
         await emu.Load();
         await emu.hardware.Request(HardwareReq.RUN);
-        emitToolbarState(true);
+        await emitToolbarState(true);
         tick();
         break;
 
@@ -465,10 +465,10 @@ export async function openEmulatorPanel(
     resume: () => { handleDebugAction('run'); },
     stepFrame: () => { handleDebugAction('stepFrame'); },
     performDebugAction: (action: DebugAction) => { handleDebugAction(action); },
-    stopAndClose: () => {
+    stopAndClose: async () => {
       if (panelDisposed) return;
       try { emu.hardware?.Request(HardwareReq.STOP); } catch (e) {}
-      emitToolbarState(false);
+      await emitToolbarState(false);
       try { panel.dispose(); } catch (e) {}
     },
     getProjectInfo: () => {
@@ -476,25 +476,25 @@ export async function openEmulatorPanel(
     }
   };
 
-  updateMemoryDumpFromHardware(panel, emu.hardware, 'pc');
-  sendHardwareStats(true);
+  await updateMemoryDumpFromHardware(panel, emu.hardware, 'pc');
+  await sendHardwareStats(true);
 
-  panel.webview.onDidReceiveMessage(msg => {
+  panel.webview.onDidReceiveMessage(async msg => {
     if (msg && msg.type === 'key') {
       // keyboard events: forward to keyboard handling
       const action: string = msg.kind === 'down' ? 'down' : 'up';
-      emu.hardware?.Request(HardwareReq.KEY_HANDLING, { "scancode": msg.code, "action": action });
+      await emu.hardware?.Request(HardwareReq.KEY_HANDLING, { "scancode": msg.code, "action": action });
 
     }
     else if (msg && msg.type === 'stop') {
-      emu.hardware?.Request(HardwareReq.STOP);
-      emitToolbarState(false);
+      await emu.hardware?.Request(HardwareReq.STOP);
+      await emitToolbarState(false);
     }
     else if (msg && msg.type === 'debugAction') {
-      handleDebugAction(msg.action);
+      await handleDebugAction(msg.action);
     }
     else if (msg && msg.type === 'memoryDumpControl') {
-      handleMemoryDumpControlMessage(msg, panel, emu.hardware);
+      await handleMemoryDumpControlMessage(msg, panel, emu.hardware);
     }
     else if (msg && msg.type === 'speedChange') {
       const speedValue = msg.speed;
@@ -512,7 +512,7 @@ export async function openEmulatorPanel(
       if (viewMode === 'full' || viewMode === 'noBorder') {
         currentViewMode = viewMode;
         // Re-send current frame with new view mode
-        sendFrameToWebview(false);
+        await sendFrameToWebview(false);
       }
     }
     else if (msg && msg.type === 'ramDiskSaveOnRestartChange') {
@@ -521,12 +521,12 @@ export async function openEmulatorPanel(
     }
   }, undefined, context.subscriptions);
 
-  panel.onDidChangeViewState(() => {
+  panel.onDidChangeViewState(async () => {
     if (panel.visible) {
       syncToolbarState();
       // Re-send the current frame to the webview to restore canvas content
       // that may have been discarded while the tab was hidden
-      sendFrameToWebview();
+      await sendFrameToWebview();
       try {
         panel.webview.postMessage({ type: 'setSpeed', speed: project!.settings.Speed });
       } catch (e) {}
@@ -586,20 +586,20 @@ export async function openEmulatorPanel(
     // Force hardware stats update (bypassing throttle) when breaking to
     // ensure Register panel is synchronized
     await sendFrameToWebview(true);
-    printDebugState('Break:', emu.hardware!, devectorOutput, panel);
-    syncEditorBreakpointsFromHardware(emu.hardware, lastAddressSourceMap);
-    emitToolbarState(false);
+        await printDebugState('Break:', emu.hardware!, devectorOutput, panel);
+    await syncEditorBreakpointsFromHardware(emu.hardware, lastAddressSourceMap);
+    await emitToolbarState(false);
   }
 
-  emitToolbarState(true);
+  await emitToolbarState(true);
   tick();
 }
 
-export function reloadEmulatorBreakpointsFromFile()
-: number
+export async function reloadEmulatorBreakpointsFromFile()
+: Promise<number>
 {
   if (!lastBreakpointSource) return 0;
-  const { applied, addressSourceMap } = loadBreakpointsFromToken(
+  const { applied, addressSourceMap } = await loadBreakpointsFromToken(
     lastBreakpointSource.absoluteRomPath,
     lastBreakpointSource.hardware,
     {
@@ -613,21 +613,21 @@ export function reloadEmulatorBreakpointsFromFile()
 }
 
 
-function printDebugState(
+async function printDebugState(
   header:string, hardware: Hardware,
   emuOutput: vscode.OutputChannel,
   panel: vscode.WebviewPanel,
   highlightSource: boolean = true)
 {
-  const line = getDebugLine(hardware);
+  const line = await getDebugLine(hardware);
   try {
     emuOutput.appendLine((header ? header + ' ' : '') + line);
   } catch (e) {}
   if (highlightSource) {
-    highlightSourceFromHardware(hardware, lastAddressSourceMap, lastSymbolCache?.lineAddresses);
-    updateMemoryDumpFromHardware(panel, hardware, 'pc');
+    await highlightSourceFromHardware(hardware, lastAddressSourceMap, lastSymbolCache?.lineAddresses);
+    await updateMemoryDumpFromHardware(panel, hardware, 'pc');
     if (!currentToolbarIsRunning) {
-      refreshDataLineHighlights(hardware, dataAddressLookup, lastSymbolCache?.filePaths);
+      await refreshDataLineHighlights(hardware, dataAddressLookup, lastSymbolCache?.filePaths);
     }
   }
 }
@@ -675,11 +675,11 @@ export function onEmulatorPanelClosed(listener: PanelClosedListener): vscode.Dis
 }
 
 
-export function resolveInstructionHover(
+export async function resolveInstructionHover(
   document: vscode.TextDocument,
   position: vscode.Position,
   address: number)
-  : InstructionHoverInfo | undefined
+  : Promise<InstructionHoverInfo | undefined>
 {
   return resolveInstructionHoverForMemory(lastBreakpointSource?.hardware, document, position, address, currentToolbarIsRunning);
 }
@@ -713,7 +713,7 @@ export function getActiveHardware(): Hardware | undefined {
   return lastBreakpointSource?.hardware ?? undefined;
 }
 
-export function resolveDataDirectiveHover(document: vscode.TextDocument, position: vscode.Position): DataDirectiveHoverInfo | undefined {
+export async function resolveDataDirectiveHover(document: vscode.TextDocument, position: vscode.Position): Promise<DataDirectiveHoverInfo | undefined> {
   return resolveDataDirectiveHoverForMemory(
     document,
     position,

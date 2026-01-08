@@ -155,12 +155,13 @@ function resolvePreferredHighlightLine(
   return candidates[0];
 }
 
-function disassembleInstructionAt(hardware: Hardware | undefined | null, addr: number)
-: string | undefined
+async function disassembleInstructionAt(hardware: Hardware | undefined | null, addr: number)
+: Promise<string | undefined>
 {
   if (!hardware) return undefined;
 
-  const instr = hardware.Request(HardwareReq.GET_INSTR, { "addr": addr })['data'] as number[];
+  const instrResp = await hardware.Request(HardwareReq.GET_INSTR, { "addr": addr });
+  const instr = instrResp['data'] as number[];
   const opcode = instr.shift() ?? 0;
   const bytes = instr;
 
@@ -169,7 +170,7 @@ function disassembleInstructionAt(hardware: Hardware | undefined | null, addr: n
   return `${display} (bytes: ${listing})`;
 }
 
-function highlightSourceAddress(
+async function highlightSourceAddress(
   hardware: Hardware | undefined | null,
   addressSourceMap: Map<number, SourceLineRef> | null,
   addr?: number,
@@ -200,7 +201,7 @@ function highlightSourceAddress(
         const lineText = doc.lineAt(idx).text;
         const range = new vscode.Range(idx, 0, idx, Math.max(lineText.length, 1));
         const addrHex = '0x' + normalizedAddr.toString(16).toUpperCase().padStart(4, '0');
-        const disasm = disassembleInstructionAt(hardware, normalizedAddr);
+    const disasm = await disassembleInstructionAt(hardware, normalizedAddr);
         const disasmText = disasm ? ` - executing ${disasm}` : ' - executing unmapped code';
         const decoration: vscode.DecorationOptions = {
           range,
@@ -276,17 +277,18 @@ function highlightSourceAddress(
   void run();
 }
 
-export function highlightSourceFromHardware(
+export async function highlightSourceFromHardware(
   hardware: Hardware | undefined | null,
   addressSourceMap: Map<number, SourceLineRef> | null,
   lineAddresses: Map<string, Map<number, number[]>> | null | undefined)
-: void
+: Promise<void>
 {
   if (!hardware || !highlightContext) return;
   try {
-    const pc = hardware?.Request(HardwareReq.GET_REG_PC)['pc'] ?? 0;
-    const debugLine = getDebugLine(hardware);
-    highlightSourceAddress(hardware, addressSourceMap, pc, debugLine, lineAddresses);
+    const pcResp = await hardware?.Request(HardwareReq.GET_REG_PC);
+    const pc = pcResp?.['pc'] ?? 0;
+    const debugLine = await getDebugLine(hardware);
+    await highlightSourceAddress(hardware, addressSourceMap, pc, debugLine, lineAddresses);
   } catch (e) {
     /* ignore highlight errors */
   }
@@ -402,17 +404,18 @@ export function clearDataLineHighlights(): void {
   lastDataAccessLog = null;
 }
 
-export function refreshDataLineHighlights(
+export async function refreshDataLineHighlights(
   hardware: Hardware | null | undefined,
   dataAddressLookup: Map<number, DataAddressEntry> | null,
   filePaths: Map<string, string> | null | undefined)
-: void
+: Promise<void>
 {
   if (!hardware) {
     clearDataLineHighlights();
     lastDataAccessLog = null;
     return;
   }
-  const snapshotAccessLog = hardware.Request(HardwareReq.DEBUG_MEM_ACCESS_LOG_GET)['data'] as MemoryAccessLog | undefined;
+  const snapshotResp = await hardware.Request(HardwareReq.DEBUG_MEM_ACCESS_LOG_GET);
+  const snapshotAccessLog = snapshotResp['data'] as MemoryAccessLog | undefined;
   applyDataLineHighlightsFromSnapshot(snapshotAccessLog, dataAddressLookup, filePaths);
 }

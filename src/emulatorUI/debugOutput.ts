@@ -4,24 +4,27 @@ import { HardwareReq } from "../emulator/hardware_reqs";
 
 
 // helper: read cpu/memory state and return a compact debug object
-export function getDebugState(hardware: Hardware)
-: { global_addr: number,
+export async function getDebugState(hardware: Hardware)
+: Promise<{ global_addr: number,
     state: CpuI8080.CpuState,
-    instr_bytes: number[]}
+    instr_bytes: number[]}>
 {
-  const state: CpuI8080.CpuState = hardware?.Request(HardwareReq.GET_CPU_STATE)["data"] ?? new CpuI8080.CpuState();
+  const stateResp = await hardware.Request(HardwareReq.GET_CPU_STATE);
+  const state: CpuI8080.CpuState = stateResp?.["data"] ?? new CpuI8080.CpuState();
   //const mem_debug_state = hardware?.Request(HardwareReq.GET_MEM_DEBUG_STATE)["data"] ?? new MemDebug();
-  const global_addr = hardware?.Request(HardwareReq.GET_GLOBAL_ADDR_RAM, {'addr': state.regs.pc.word})["data"] ?? 0;
-  const instr_bytes = hardware?.Request(HardwareReq.GET_INSTR)["data"] ?? [0];
+  const globalAddrResp = await hardware.Request(HardwareReq.GET_GLOBAL_ADDR_RAM, {'addr': state.regs.pc.word});
+  const global_addr = globalAddrResp?.["data"] ?? 0;
+  const instrResp = await hardware.Request(HardwareReq.GET_INSTR);
+  const instr_bytes = instrResp?.["data"] ?? [0];
 
   return { global_addr, state, instr_bytes};
 }
 
 // helper: format a single debug line from hardware state
-export function getDebugLine(hardware: Hardware)
-: string
+export async function getDebugLine(hardware: Hardware)
+: Promise<string>
 {
-    const s = getDebugState(hardware!);
+    const s = await getDebugState(hardware!);
     const cc = s.state.cc;
 
     const addrHex = s.global_addr.toString(16).toUpperCase().padStart(6, '0');
@@ -33,7 +36,7 @@ export function getDebugLine(hardware: Hardware)
                     s.instr_bytes[2].toString(16).toUpperCase().padStart(2, '0') :
                     '  ';
 
-    const display_data = hardware.Request(HardwareReq.GET_DISPLAY_DATA);
+    const display_data = await hardware.Request(HardwareReq.GET_DISPLAY_DATA);
     const x = display_data["rasterPixel"];
     const y = display_data["rasterLine"];
     const scrollIdx = display_data["scrollIdx"];

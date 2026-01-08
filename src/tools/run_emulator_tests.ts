@@ -19,9 +19,9 @@ import * as path from 'path';
 import { assemble } from '../assembler/assembler';
 
 // Import hardware components directly to avoid VS Code dependencies
-const { Hardware } = require('../hardware');
-const { HardwareReq } = require('../hardware_reqs');
-const { ROM_LOAD_ADDR } = require('../memory');
+const { Hardware } = require('../emulator/hardware');
+const { HardwareReq } = require('../emulator/hardware_reqs');
+const { ROM_LOAD_ADDR } = require('../emulator/memory');
 
 // Test case types
 type ExpectedFlags = {

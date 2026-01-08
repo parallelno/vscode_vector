@@ -125,7 +125,7 @@ export async function ensureRomReady(
   });
   if (!compiled) return false;
 
-  reloadEmulatorBreakpointsFromFile();
+  await reloadEmulatorBreakpointsFromFile();
   return fs.existsSync(project.absolute_rom_path!);
 };
 
@@ -350,7 +350,7 @@ export async function compileProjectFile(
     );
   }
 
-  reloadEmulatorBreakpointsFromFile();
+  await reloadEmulatorBreakpointsFromFile();
   return true;
 }
 
@@ -544,7 +544,7 @@ export async function compileProjectsForBreakpointChanges(
         await compileProjectFile(devectorOutput, project, { silent: true, reason: 'breakpoint change' });
       } else if (project.absolute_debug_path && fs.existsSync(project.absolute_debug_path)) {
         await updateBreakpointsInDebugFile(devectorOutput, mainsm, source, project.absolute_debug_path);
-        reloadEmulatorBreakpointsFromFile();
+        await reloadEmulatorBreakpointsFromFile();
         ext_utils.logOutput(devectorOutput, `Devector: Applied breakpoint changes without recompiling ${project.name} (emulator running)`);
       } else {
         ext_utils.logOutput(devectorOutput, `Devector: Skipped recompiling ${project.name} (emulator running)`);
@@ -561,7 +561,7 @@ export async function compileProjectsForBreakpointChanges(
         source,
         project.absolute_debug_path
       );
-      reloadEmulatorBreakpointsFromFile();
+      await reloadEmulatorBreakpointsFromFile();
     } else if (allowCompile) {
       await compileProjectFile(devectorOutput, project, { silent: true, reason: 'breakpoint change' });
     } else {

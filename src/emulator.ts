@@ -16,7 +16,6 @@ export class Emulator {
   private BOOT_ROM_PATH: string = "res/boot/boot.bin";
 
   private _hardware?: Hardware;
-  private _debugger?: Debugger;
   private _project?: ProjectInfo = undefined;
 
   result: type.EmulatorResult = new type.EmulatorResult();
@@ -68,7 +67,6 @@ export class Emulator {
       result.addWarning(`Cannot load RAM disk file: ${this._project.absolute_ram_disk_path!}`);
     }
     this._hardware = new Hardware(bootRom, ramDisk);
-    this._debugger = new Debugger(this._hardware);
 
     return result;
   }
