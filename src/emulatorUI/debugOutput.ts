@@ -24,7 +24,7 @@ export async function getDebugState(hardware: Hardware)
 export async function getDebugLine(hardware: Hardware)
 : Promise<string>
 {
-    const s = await getDebugState(hardware!);
+    const s = await getDebugState(hardware);
     const cc = s.state.cc;
 
     const addrHex = s.global_addr.toString(16).toUpperCase().padStart(6, '0');

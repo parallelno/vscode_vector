@@ -1,17 +1,16 @@
-import { DebugFunc, DebugReqHandlingFunc } from "./hardware_types";
+import { DebugFunc, DebugReqHandlingFunc, ReqData } from "./hardware_types";
+import { HardwareReq } from './hardware_reqs';
+import { CpuState } from './cpu_i8080';
+import { MemState } from './memory';
+import Breakpoints from './breakpoints';
+import { BP_MEM_PAGES, BpCondition, BpOperand, BpStatus, Breakpoint } from './breakpoint';
+import { DisplayState } from './display';
+import { IOState } from './io';
 
 type DebugHardware = {
   AttachDebugFuncs: (debugFunc: DebugFunc, debugReqHandlingFunc: DebugReqHandlingFunc) => void;
   Request: (req: HardwareReq, data?: ReqData) => any;
 };
-import { HardwareReq } from './hardware_reqs';
-import { CpuState } from './cpu_i8080';
-import { MemState } from './memory';
-import { ReqData } from './hardware_types';
-import Breakpoints from './breakpoints';
-import { BP_MEM_PAGES, BpCondition, BpOperand, BpStatus, Breakpoint } from './breakpoint';
-import { DisplayState } from './display';
-import { IOState } from './io';
 
 /////////////////////////////////////////////////////////////
 //

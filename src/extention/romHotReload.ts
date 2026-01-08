@@ -174,7 +174,7 @@ async function performRomHotReload(
   await adjustPcAfterReload(devectorOutput, project, snapshot);
 
   if (wasRunning) {
-    hardware.Request(HardwareReq.RUN);
+    await hardware.Request(HardwareReq.RUN);
   }
 }
 
