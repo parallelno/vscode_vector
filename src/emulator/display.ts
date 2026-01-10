@@ -139,7 +139,7 @@ export class Display {
     this.frameBuffer.fill(0xff000000);
   }
 
-  RasterizeActiveArea(rasterizedPixels: number)
+  RasterizeActiveArea(rasterizedPixels: number, optimize: boolean = false)
   {
     const rasterLine: number = this.rasterLine;
     const rasterPixel: number = this.rasterPixel;
@@ -153,23 +153,25 @@ export class Display {
     if (commitTime || scrollTime)
     {
       if ((this.io?.displayMode ?? IO.MODE_256) == IO.MODE_256) {
-        this.FillActiveArea256PortHandling(rasterizedPixels);
+        this.FillActiveArea256PortHandling(rasterizedPixels, optimize);
       }
       else {
-        this.FillActiveArea512PortHandling(rasterizedPixels);
+        this.FillActiveArea512PortHandling(rasterizedPixels, optimize);
       }
     }
     else {
       if ((this.io?.displayMode ?? IO.MODE_256) == IO.MODE_256) {
-        this.FillActiveArea256(rasterizedPixels);
+        this.FillActiveArea256(rasterizedPixels, optimize);
       }
       else {
-        this.FillActiveArea512(rasterizedPixels);
+        this.FillActiveArea512(rasterizedPixels, optimize);
       }
     }
   }
 
-  RasterizeBorder(rasterizedPixels: number)
+  RasterizeBorder(
+    rasterizedPixels: number,
+    fill: boolean = true)
   {
     const rasterLine: number = this.rasterLine;
     const commitTime: boolean =
@@ -178,16 +180,19 @@ export class Display {
 
     if (commitTime || rasterLine == 0 || rasterLine == 311)
     {
-      this.FillBorderPortHandling(rasterizedPixels);
+      this.FillBorderPortHandling(rasterizedPixels, fill);
     }
     else {
-      this.FillBorder(rasterizedPixels);
+      this.FillBorder(rasterizedPixels, fill);
     }
   }
 
   // renders 16 pixels (in the 512 mode) from left to right
-  Rasterize()
+  Rasterize(
+    borderFill: boolean = true,
+    optimize: boolean = false)
   {
+    borderFill = borderFill && !optimize;
     // reset the interrupt request. it can be set during border drawing.
     this.state.update.irq = false;
 
@@ -205,12 +210,12 @@ export class Display {
       let rasterizedPixels: number =
         Math.min(ACTIVE_AREA_RIGHT - rasterPixel, RASTERIZED_PXLS_MAX);
 
-      this.RasterizeActiveArea(rasterizedPixels);
+      this.RasterizeActiveArea(rasterizedPixels, optimize);
       // Rasterize the border if there is a leftover
       if (rasterizedPixels < RASTERIZED_PXLS_MAX)
       {
         rasterizedPixels = RASTERIZED_PXLS_MAX - rasterizedPixels;
-        this.RasterizeBorder(rasterizedPixels);
+        this.RasterizeBorder(rasterizedPixels, borderFill);
       }
     }
     // Rasterize the Border
@@ -219,154 +224,191 @@ export class Display {
               RASTERIZED_PXLS_MAX :
               Math.min(this.borderLeft - rasterPixel, RASTERIZED_PXLS_MAX);
 
-      this.RasterizeBorder(rasterizedPixels);
+      this.RasterizeBorder(rasterizedPixels, borderFill);
 
       // Rasterize the Active Area if there is a leftover
       if (rasterizedPixels < RASTERIZED_PXLS_MAX)
       {
         rasterizedPixels = RASTERIZED_PXLS_MAX - rasterizedPixels;
-        this.RasterizeActiveArea(rasterizedPixels);
+        this.RasterizeActiveArea(rasterizedPixels, optimize);
       }
     }
   }
 
-  FillBorder(rasterizedPixels: number)
+  FillBorder(rasterizedPixels: number, fill: boolean = true)
   {
-    let borderColor: number = this.fullPalette[this.io?.GetBorderColor() ?? 0];
-    for (let i = 0; i < rasterizedPixels; i++)
-    {
-      this.frameBuffer[this.state.update.framebufferIdx++] = borderColor;
+    if (!fill) {
+      this.state.update.framebufferIdx += rasterizedPixels;
+      return;
     }
+    const fb = this.frameBuffer;
+    const borderColor: number = this.fullPalette[this.io?.GetBorderColor() ?? 0];
+    let idx = this.state.update.framebufferIdx;
+    const end = idx + rasterizedPixels;
+    for (; idx < end; idx++) {
+      fb[idx] = borderColor;
+    }
+    this.state.update.framebufferIdx = idx;
   }
 
-  FillBorderPortHandling(rasterizedPixels: number)
+  FillBorderPortHandling(rasterizedPixels: number, fill: boolean = true)
   {
+    const fb = this.frameBuffer;
+    const palette = this.fullPalette;
+    const io = this.io;
+    const irqCommit = this.irqCommitPxl;
+    let idx = this.state.update.framebufferIdx;
+
     for (let i = 0; i < rasterizedPixels; i++)
     {
-      this.io?.TryToCommit(this.io?.GetBorderColorIdx() ?? 0);
-      let color = this.fullPalette[this.io?.GetBorderColor() ?? 0];
+      io?.TryToCommit(io?.GetBorderColorIdx() ?? 0);
+      if (fill) {
+        fb[idx] = palette[io?.GetBorderColor() ?? 0];
+      }
+      idx++;
 
-      this.frameBuffer[this.state.update.framebufferIdx++] = color;
-      let isNewFrame = (this.state.update.framebufferIdx / FRAME_LEN) | 0;
-      this.state.update.framebufferIdx %= FRAME_LEN;
-
-      let rasterLine = this.rasterLine;
-      let rasterPixel = this.rasterPixel;
-      this.state.update.irq ||= this.state.update.framebufferIdx == this.irqCommitPxl;
-
-      if (isNewFrame)
+      if (idx === FRAME_LEN)
       {
         this.state.update.frameNum++;
         // copy a frame to a back buffer for sync rasterization
-        this.backBuffer.set(this.frameBuffer);
+        this.backBuffer.set(fb);
+        idx = 0;
+      }
+
+      if (idx === irqCommit) {
+        this.state.update.irq = true;
       }
     }
+
+    this.state.update.framebufferIdx = idx;
   }
 
-  FillActiveArea256(rasterizedPixels: number)
+  FillActiveArea256(rasterizedPixels: number, optimize: boolean = true)
   {
+    if (optimize) {
+      this.state.update.framebufferIdx += rasterizedPixels;
+      return;
+    }
+
     // scrolling
     let rasterLine = this.rasterLine;
     let rasterPixel = this.rasterPixel;
+
     let rasterLineScrolled = (
       rasterLine - SCAN_ACTIVE_AREA_TOP + (255 - this.state.update.scrollIdx) + ACTIVE_AREA_H) %
       ACTIVE_AREA_H + SCAN_ACTIVE_AREA_TOP;
 
     // rasterization
+    const fb = this.frameBuffer;
+    const palette = this.fullPalette;
+    const io = this.io;
+
+    let idx = this.state.update.framebufferIdx;
     let screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
-    let bitIdx = 7 - (
-      ((this.state.update.framebufferIdx - this.borderLeft) % RASTERIZED_PXLS_MAX) >> 1);
+    let bitIdx = 7 - (((idx - this.borderLeft) % RASTERIZED_PXLS_MAX) >> 1);
 
     for (let i = 0; i < rasterizedPixels; i++)
     {
-      let colorIdx = this.BytesToColorIdx256(screenBytes, bitIdx);
-      let color = this.fullPalette[this.io?.GetColor(colorIdx) ?? 0];
+      const colorIdx = this.BytesToColorIdx256(screenBytes, bitIdx);
+      fb[idx++] = palette[io?.GetColor(colorIdx) ?? 0];
 
-      this.frameBuffer[this.state.update.framebufferIdx++] = color;
-
-      bitIdx -= i % 2;
+      bitIdx -= (i & 1);
       if (bitIdx < 0) {
         bitIdx = 7;
-        screenBytes = this.GetScreenBytes(rasterLineScrolled, this.rasterPixel);
+        rasterPixel = idx % FRAME_W;
+        screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
       }
     }
+
+    this.state.update.framebufferIdx = idx;
   }
 
-  FillActiveArea256PortHandling(rasterizedPixels: number)
+  FillActiveArea256PortHandling(rasterizedPixels: number, optimize: boolean = false)
   {
     // scrolling
     const rasterLine = this.rasterLine;
-    let rasterPixel = this.rasterPixel;
     const rasterLineScrolled = (
       rasterLine - SCAN_ACTIVE_AREA_TOP + (255 - this.state.update.scrollIdx) + ACTIVE_AREA_H) %
       ACTIVE_AREA_H + SCAN_ACTIVE_AREA_TOP;
 
     // rasterization
+    const fb = this.frameBuffer;
+    const palette = this.fullPalette;
+    const io = this.io;
+
+    let idx = this.state.update.framebufferIdx;
+    let rasterPixel = idx % FRAME_W;
     let screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
-    let bitIdx = 7 - (
-      ((this.state.update.framebufferIdx - this.borderLeft) % RASTERIZED_PXLS_MAX) >> 1);
+    let bitIdx = 7 - (((idx - this.borderLeft) % RASTERIZED_PXLS_MAX) >> 1);
 
     for (let i = 0; i < rasterizedPixels; i++)
     {
-      rasterPixel = this.rasterPixel;
-      if (rasterLine == SCAN_ACTIVE_AREA_TOP && rasterPixel == SCROLL_COMMIT_PXL) {
-        this.state.update.scrollIdx = this.io?.scroll ?? SCROLL_DEFAULT;
+      if (rasterLine === SCAN_ACTIVE_AREA_TOP && rasterPixel === SCROLL_COMMIT_PXL) {
+        this.state.update.scrollIdx = io?.scroll ?? SCROLL_DEFAULT;
       }
 
-      let colorIdx = this.BytesToColorIdx256(screenBytes, bitIdx);
-      this.io?.TryToCommit(colorIdx);
-      let color = this.fullPalette[this.io?.GetColor(colorIdx) ?? 0];
+      const colorIdx = this.BytesToColorIdx256(screenBytes, bitIdx);
+      io?.TryToCommit(colorIdx);
+      fb[idx++] = palette[io?.GetColor(colorIdx) ?? 0];
 
-      this.frameBuffer[this.state.update.framebufferIdx++] = color;
-
-      bitIdx -= i % 2;
+      bitIdx -= (i & 1);
+      rasterPixel = idx % FRAME_W;
       if (bitIdx < 0){
         bitIdx = 7;
         screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
       }
     }
+
+    this.state.update.framebufferIdx = idx;
   }
 
-  FillActiveArea512PortHandling(rasterizedPixels: number)
+  FillActiveArea512PortHandling(rasterizedPixels: number, optimize: boolean = false)
   {
     // scrolling
     const rasterLine = this.rasterLine;
-    let rasterPixel = this.rasterPixel;
     const rasterLineScrolled = (rasterLine - SCAN_ACTIVE_AREA_TOP +
                           (255 - this.state.update.scrollIdx) +
                           ACTIVE_AREA_H) % ACTIVE_AREA_H + SCAN_ACTIVE_AREA_TOP;
 
     // rasterization
     // 4 bytes. One byte per screen buffer
+    const fb = this.frameBuffer;
+    const palette = this.fullPalette;
+    const io = this.io;
+
+    let idx = this.state.update.framebufferIdx;
+    let rasterPixel = idx % FRAME_W;
     let screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
     // 0-15
-    let pxlIdx = 15 - (
-      (this.state.update.framebufferIdx - this.borderLeft) % RASTERIZED_PXLS_MAX);
+    let pxlIdx = 15 - ((idx - this.borderLeft) % RASTERIZED_PXLS_MAX);
 
     for (let i = 0; i < rasterizedPixels; i++)
     {
-      rasterPixel = this.rasterPixel;
-
       if (rasterLine == SCAN_ACTIVE_AREA_TOP && rasterPixel == SCROLL_COMMIT_PXL) {
-        this.state.update.scrollIdx = this.io?.scroll ?? SCROLL_DEFAULT;
+        this.state.update.scrollIdx = io?.scroll ?? SCROLL_DEFAULT;
       }
 
-      let colorIdx = this.BytesToColorIdx512(screenBytes, pxlIdx);
-      this.io?.TryToCommit(colorIdx);
-      let color = this.fullPalette[this.io?.GetColor(colorIdx) ?? 0];
-
-      this.frameBuffer[this.state.update.framebufferIdx++] = color;
+      const colorIdx = this.BytesToColorIdx512(screenBytes, pxlIdx);
+      io?.TryToCommit(colorIdx);
+      fb[idx++] = palette[io?.GetColor(colorIdx) ?? 0];
 
       pxlIdx--;
+      rasterPixel++;
       if (pxlIdx < 0){
         pxlIdx = 15;
         screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
       }
     }
+
+    this.state.update.framebufferIdx = idx;
   }
 
-  FillActiveArea512(rasterizedPixels: number)
+  FillActiveArea512(rasterizedPixels: number, optimize: boolean = false)
   {
+    if (optimize) {
+      this.state.update.framebufferIdx += rasterizedPixels;
+      return;
+    }
     // scrolling
     let rasterLine = this.rasterLine;
     let rasterPixel = this.rasterPixel;
@@ -376,27 +418,35 @@ export class Display {
 
     // rasterization
     // 4 bytes. One byte per screen buffer
+    const fb = this.frameBuffer;
+    const palette = this.fullPalette;
+    const io = this.io;
+
+    let idx = this.state.update.framebufferIdx;
     let screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
     // 0-15
-    let pxlIdx = 15 - (
-      (this.state.update.framebufferIdx - this.borderLeft) % RASTERIZED_PXLS_MAX);
+    let pxlIdx = 15 - ((idx - this.borderLeft) % RASTERIZED_PXLS_MAX);
 
     for (let i = 0; i < rasterizedPixels; i++)
     {
-      let colorIdx = this.BytesToColorIdx512(screenBytes, pxlIdx);
-      let color = this.fullPalette[this.io?.GetColor(colorIdx) ?? 0];
-
-      this.frameBuffer[this.state.update.framebufferIdx++] = color;
+      const colorIdx = this.BytesToColorIdx512(screenBytes, pxlIdx);
+      fb[idx++] = palette[io?.GetColor(colorIdx) ?? 0];
 
       pxlIdx--;
       if (pxlIdx < 0){
         pxlIdx = 15;
-        screenBytes = this.GetScreenBytes(rasterLineScrolled, this.rasterPixel);
+        rasterPixel = idx % FRAME_W;
+        screenBytes = this.GetScreenBytes(rasterLineScrolled, rasterPixel);
       }
     }
+
+    this.state.update.framebufferIdx = idx;
   }
 
+
+  // returns true if an IRQ is requested
   IsIRQ(): boolean { return this.state.update.irq; }
+
 
   // TODO: optimize by not making a copy
   GetFrame(vsync: boolean = true): Uint32Array
@@ -482,7 +532,7 @@ export class Display {
         if (rasterizedPixels < RASTERIZED_PXLS_MAX)
         {
           rasterizedPixels = RASTERIZED_PXLS_MAX - rasterizedPixels;
-          this.FillBorder(rasterizedPixels);
+          this.FillBorder(rasterizedPixels, false);
         }
       }
       // Rasterize the Border
@@ -491,7 +541,7 @@ export class Display {
           RASTERIZED_PXLS_MAX :
           Math.min(this.borderLeft - rasterPixel, RASTERIZED_PXLS_MAX);
 
-        this.FillBorder(rasterizedPixels);
+        this.FillBorder(rasterizedPixels, false);
 
         // Rasterize the Active Area if there is a leftover
         if (rasterizedPixels < RASTERIZED_PXLS_MAX)

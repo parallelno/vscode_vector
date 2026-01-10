@@ -23,6 +23,7 @@ This repository contains a VS Code extension with key features: a two-pass Intel
   - [How to Test the extension in the VS Code](#how-to-test-the-extension-in-the-vs-code)
   - [Tests Suits](#tests-suits)
     - [Exclusive Tests](#exclusive-tests)
+  - [Performance Profiling](#performance-profiling)
 - [Tools](#tools)
   - [FDD utility CLI](#fdd-utility-cli)
   - [assemble_one](#assemble_one)
@@ -99,7 +100,7 @@ All projects start with creating a `.project.json` file that declares the projec
 
 ### Settings
 
-- **speed**: (Optional) Initial emulation speed (`0.1`, `1`, `2`, `4`, `8`, or `"max"`).
+- **speed**: (Optional) Initial emulation speed (`0.1`, `1`, `2`, `4`, `8`, or `"max"`). `"max"` removes frame pacing. video/audio quality degrade in favor of performance.
 - **viewMode**: (Optional) Emulator viewport mode (`"border"`, `"noBorder"`).
 - **ramDiskPath**: (Optional) RAM disk image path for persistence across emulator restarts.
 - **ramDiskClearAfterRestart**: (Optional) Clear RAM disk data on emulator restart.
@@ -139,7 +140,7 @@ The execution flow can be controlled via the standard VS Code debug toolbar as w
   - **2x** - 2x normal speed
   - **4x** - 4x normal speed
   - **8x** - 8x normal speed
-  - **Max** - Run as fast as possible with no frame delay
+  - **Max** - Run as fast as possible with no frame delay (video and audio quality degrade in favor of performance)
 - **Clear RAM Disk After Restart**: empties the RAM disk memory every restart. Convinient for testing.
 
 ## Extra VS Code editor helpers
@@ -576,7 +577,7 @@ npm run compile
 
 ### How to Test the extension in the VS Code
 
-- Select the 'Launch Extension' in the debug launch list and press F5
+- Select the `Launch Extension` in the debug launch list and press F5
 
 ### Tests Suits
 
@@ -599,6 +600,35 @@ Or launch the `npm: test-emulator` config.
 npm run test-directives
 ```
 Or launch the `npm: test-directives` config.
+
+### Performance Profiling
+
+You can print per-frame timing breakdowns from the emulator and extension by enabling the built-in profiler via environment variables (e.g., in `.vscode/launch.json` under `env`):
+
+```jsonc
+  "configurations": [
+    {
+      "name": "Launch Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "preLaunchTask": "npm: compile",
+      "env": {
+        "VECTOR_PROFILE": "0",
+        "VECTOR_PROFILE_RATE": "250"
+      },
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}/temp/project"
+      ]
+    },
+```
+
+- `VECTOR_PROFILE`: set to `1` to enable logging. Leave at `0` (default) to disable.
+- `VECTOR_PROFILE_RATE`: sampling stride for instruction-level timing. Smaller numbers sample more often (e.g., `64`), larger numbers (e.g., `500`) reduce sampling overhead but make per-bucket estimates coarser.
+- (Optional) `VECTOR_PROFILE_REPORT`: frames between log lines; defaults to `50` when unset.
+
+When enabled, the console prints lines like `f=740ms ohead=12ms disp=... cpu=... aud=... dbg=...`, where `ohead` approximates time spent outside the emulated instruction execution (extension/UI overhead) for that reporting window.
 
 ## Tools
 

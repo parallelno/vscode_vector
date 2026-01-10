@@ -110,5 +110,8 @@ enum HardwareReq {
 
 	DEBUG_TRACE_LOG_ENABLE,
 	DEBUG_TRACE_LOG_DISABLE,
+
+	BORDER_FILL,
+	OPTIMIZE,
 };
 export { HardwareReq };

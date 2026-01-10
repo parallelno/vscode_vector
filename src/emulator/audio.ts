@@ -128,14 +128,16 @@ export class Audio {
    * Clock the audio system - advances all sound generators and produces samples.
    * @param cycles - Number of 1.5 MHz timer ticks to process
    * @param beeper - Beeper output value (0 or 1)
+   * @param optimize - If true, no sound, keeps register handling
    */
-  Clock(cycles: number, beeper: number): void {
+  Clock(cycles: number, beeper: number, optimize: boolean = false): void {
     if (!this.inited) return;
 
     for (let tick = 0; tick < cycles; ++tick) {
       // Mix timer, AY, and beeper outputs
       // Timer clocked at 1 cycle, AY at 2 cycles (as per original C++ code)
-      const sample = (this.timer.Clock(1) + this.aywrapper.Clock(2) + beeper) * this.muteMul;
+      const sample = (this.timer.Clock(1) + this.aywrapper.Clock(2, optimize) + beeper) * this.muteMul;
+      if (optimize) continue;
 
       // Downsample and store if ready
       const downsampledSample = this.Downsample(sample);

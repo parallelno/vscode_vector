@@ -10,6 +10,8 @@ import { Fdc1793 } from './fdc_wd1793';
 import { DebugFunc, DebugReqHandlingFunc, ReqData } from './hardware_types';
 import { Audio } from './audio';
 import * as type from './type';
+import { performance } from 'perf_hooks';
+import { PerfProfiler } from './perf_profiler';
 
 enum Status {
 			RUN = 0,
@@ -40,6 +42,12 @@ export class Hardware
 {
   status: Status = Status.STOP;
   execSpeed: ExecSpeed = ExecSpeed.NORMAL; // execution speed
+
+  private _profiler?: PerfProfiler;
+  // enabled when bordelsess drawing is enabled
+  private _borderFill: boolean = true;
+  // optimization disables producing sound and rasterization
+  private _optimize: boolean = false;
 
   private _cpu?: CpuI8080.CPU;
   private _memory?: Memory;
@@ -76,6 +84,10 @@ export class Hardware
       this._memory, this._io.PortIn.bind(this._io), this._io.PortOut.bind(this._io));
     this._display = new Display(this._memory, this._io);
 
+    if (process.env.VECTOR_PROFILE === '1'){
+      this._profiler = new PerfProfiler();
+    }
+
     this.Reset();
   }
 
@@ -92,37 +104,54 @@ export class Hardware
     // mem debug init
     this._memory?.state.debug.Init();
 
-    do
+    let break_ = false;
+    let executed = false;
+    while (!break_ && !executed)
     {
-      this._display?.Rasterize();
-      this._cpu?.ExecuteMachineCycle(this._display?.IsIRQ() ?? false);
-      this._audio?.Clock(2, this._io?.GetBeeper() ?? 0);
-
-    } while (!this._cpu?.IsInstructionExecuted());
-
-    // debug per instruction
-    try {
-      if (this.debugAttached && this.Debug && this._cpu && this._memory && this._io && this._display)
+      if (this._profiler && this._profiler.shouldSample(this._cpu!.state.cc / 4))
       {
-          const break_ = this.Debug(this._cpu.state, this._memory.state, this._io.state, this._display.state);
-          if (break_) return true;
+        const t0 = performance.now();
+        this._display?.Rasterize(this._borderFill, this._optimize);
+        const t1 = performance.now();
+        this._cpu?.ExecuteMachineCycle(this._display?.IsIRQ() ?? false);
+        const t2 = performance.now();
+        this._audio?.Clock(2, this._io?.GetBeeper() ?? 0, this._optimize);
+        const t3 = performance.now();
+
+        executed = this._cpu?.IsInstructionExecuted() ?? false;
+        if (executed) {
+          break_ ||= this.Debug!(this._cpu!.state, this._memory!.state, this._io!.state, this._display!.state);
+        }
+        if (this._memory?.IsException())
+        {
+          this._memory.InitRamDiskMapping(); // reset RAM Disk mode collision
+          console.log("ERROR: more than one RAM Disk has mapping enabled");
+          break_ = true;
+        }
+        const t4 = performance.now();
+        this._profiler?.recordSample(t1-t0, t2-t1, t3-t2, t4-t3);
       }
-    } catch (e) {
-        console.error('Debug per instruction error', e);
-        return true;
+      else
+      {
+        this._display?.Rasterize(this._borderFill, this._optimize);
+        this._cpu?.ExecuteMachineCycle(this._display?.IsIRQ() ?? false);
+        this._audio?.Clock(2, this._io?.GetBeeper() ?? 0, this._optimize);
+        executed = this._cpu?.IsInstructionExecuted() ?? false;
+        if (executed) {
+          break_ ||= this.Debug!(this._cpu!.state, this._memory!.state, this._io!.state, this._display!.state);
+        }
+        if (this._memory?.IsException())
+        {
+          this._memory.InitRamDiskMapping(); // reset RAM Disk mode collision
+          console.log("ERROR: more than one RAM Disk has mapping enabled");
+          break_ = true;
+        }
+      }
     }
-
-    if (this._memory?.IsException())
-    {
-      this._memory.InitRamDiskMapping(); // reset RAM Disk mode collision
-      console.log("ERROR: more than one RAM Disk has mapping enabled");
-      return true;
-    }
-
-    return false;
+    return break_;
   }
 
-  // UI thread. It return when the request fulfilled
+  // UI thread. It returns when the request is fulfilled
   Request(req: HardwareReq, data: ReqData = {}): ReqData
   {
     return this.ReqHandling(req, data);
@@ -525,6 +554,14 @@ export class Hardware
       this.debugAttached = data.data;
       break;
 
+    case HardwareReq.OPTIMIZE:
+      this._optimize = data.data;
+      break;
+
+    case HardwareReq.BORDER_FILL:
+      this._borderFill = data.data;
+      break;
+
     default:
       if (this.DebugReqHandling && this._cpu && this._memory && this._io && this._display){
         out = this.DebugReqHandling(req, data, this._cpu.state, this._memory.state, this._io.state, this._display.state);
@@ -696,6 +733,8 @@ export class Hardware
         break;
       };
     } while (this._display?.frameNum === frameNum);
+
+    this._profiler?.onFrame(this._display?.frameNum ?? 0);
   }
 
   GetStepOverAddr(): number

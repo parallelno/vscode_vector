@@ -188,9 +188,11 @@ export async function openEmulatorPanel(
 
   try {
     panel.webview.postMessage({ type: 'setSpeed', speed: project.settings.Speed });
+    emu.hardware?.Request(HardwareReq.OPTIMIZE, { data: project.settings.Speed === 'max' });
   } catch (e) {}
   try {
     panel.webview.postMessage({ type: 'setViewMode', viewMode: project.settings.ViewMode });
+    emu.hardware?.Request(HardwareReq.BORDER_FILL, { data: project.settings.ViewMode === 'full' });
   } catch (e) {}
   try {
     panel.webview.postMessage({ type: 'setRamDiskSaveOnRestart', value: project.settings.SaveRamDiskOnRestart });
@@ -500,16 +502,20 @@ export async function openEmulatorPanel(
       const speedValue = msg.speed;
       if (speedValue === 'max') {
         project!.settings.Speed = 'max';
+        emu.hardware?.Request(HardwareReq.OPTIMIZE, { data: true });
       } else {
         const parsed = parseFloat(speedValue);
         if (!isNaN(parsed) && parsed > 0) {
           project!.settings.Speed = parsed;
+          emu.hardware?.Request(HardwareReq.OPTIMIZE, { data: false });
         }
       }
     }
     else if (msg && msg.type === 'viewModeChange') {
       const viewMode = msg.viewMode;
-      if (viewMode === 'full' || viewMode === 'noBorder') {
+      if (viewMode === 'full' || viewMode === 'noBorder')
+      {
+        emu.hardware?.Request(HardwareReq.BORDER_FILL, { data: viewMode === 'full' });
         currentViewMode = viewMode;
         // Re-send current frame with new view mode
         sendFrameToWebview(false);
@@ -532,6 +538,7 @@ export async function openEmulatorPanel(
       } catch (e) {}
       try {
         panel.webview.postMessage({ type: 'setViewMode', viewMode: currentViewMode });
+        emu.hardware?.Request(HardwareReq.BORDER_FILL, { data: currentViewMode === 'full' });
       } catch (e) {}
       try {
         panel.webview.postMessage({ type: 'setRamDiskSaveOnRestart', value: project!.settings.SaveRamDiskOnRestart });
@@ -552,10 +559,8 @@ export async function openEmulatorPanel(
   async function tick(log_every_frame: boolean = false)
   {
     let running = true;
-
+    let startTime = 0;
     do {
-      let startTime = performance.now();
-
       emu.hardware?.Request(HardwareReq.EXECUTE_FRAME);
       sendFrameToWebview();
 
@@ -567,12 +572,12 @@ export async function openEmulatorPanel(
       running = emu.hardware?.Request(HardwareReq.IS_RUNNING)['isRunning'] ?? false;
 
       // throttle to approx real-time, adjusted by emulation speed
-      const elapsed = performance.now() - startTime;
-      let delay: number;
-      if (project!.settings.Speed === 'max') {
-        delay = 0; // no delay for max speed
-      } else {
-        const targetFrameTime = (1000 / 60) / project!.settings.Speed;
+      let delay: number = 0; // no delay for max speed
+      if (project!.settings.Speed !== 'max')
+      {
+        const elapsed = performance.now() - startTime;
+        startTime = performance.now();
+        const targetFrameTime = (1000 / 50) / project!.settings.Speed;
         delay = Math.max(0, targetFrameTime - elapsed);
       }
       await new Promise(resolve => setTimeout(resolve, delay));

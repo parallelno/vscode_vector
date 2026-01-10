@@ -230,7 +230,11 @@ export class AYWrapper {
    * @param cycles Number of CPU cycles elapsed
    * @returns Average audio output for this period
    */
-  Clock(cycles: number): number {
+  Clock(cycles: number, optimize: boolean = false): number {
+    if (optimize) {
+      this.ay.Mute();
+      return this.last;
+    }
     this.ayAccu += 7 * cycles;
     let aysamp = 0;
     let avg = 0;

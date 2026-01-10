@@ -7,6 +7,10 @@
       "request": "launch",
       "runtimeExecutable": "${execPath}",
       "preLaunchTask": "npm: compile",
+      "env": {
+        "VECTOR_PROFILE": "0",
+        "VECTOR_PROFILE_RATE": "250"
+      },
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}",
         "${workspaceFolder}/temp/project"
