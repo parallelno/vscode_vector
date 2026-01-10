@@ -532,7 +532,7 @@ export async function openEmulatorPanel(
       syncToolbarState();
       // Re-send the current frame to the webview to restore canvas content
       // that may have been discarded while the tab was hidden
-      sendFrameToWebview();
+      sendFrameToWebview(true);
       try {
         panel.webview.postMessage({ type: 'setSpeed', speed: project!.settings.Speed });
       } catch (e) {}
