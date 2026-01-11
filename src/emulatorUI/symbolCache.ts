@@ -8,11 +8,13 @@ import type { DataAddressEntry, DataLineSpan, HoverSymbolInfo } from './hover';
 
 export type SymbolSource = { fileKey: string; line: number };
 export type SymbolMeta = { value: number; kind: 'label' | 'const'; source?: SymbolSource };
+export type MacroMeta = { kind: 'macro'; source?: SymbolSource; params?: string[] };
 export type SymbolCache = {
   byName: Map<string, SymbolMeta>;
   lineAddresses: Map<string, Map<number, number[]>>;
   projectDir?: string;
   filePaths: Map<string, string>;
+  macros: Map<string, MacroMeta>;
 };
 
 type DataLineCache = Map<string, Map<number, DataLineSpan>>;
@@ -115,6 +117,7 @@ export function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
   setNormalizeFileKeyProjectDir(projectDir);
   const byName = new Map<string, SymbolMeta>();
   const filePaths = new Map<string, string>();
+  const macros = new Map<string, MacroMeta>();
   const registerFilePath = (fileKey: string, resolvedPath: string) => {
     if (!fileKey || !resolvedPath) return;
     if (!filePaths.has(fileKey)) filePaths.set(fileKey, resolvedPath);
@@ -164,6 +167,22 @@ export function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
       }
       if (resolved === undefined) continue;
       registerSymbol(constName, { value: resolved, kind: 'const', source });
+    }
+  }
+
+  if (tokens.macros && typeof tokens.macros === 'object') {
+    for (const [macroName, rawInfo] of Object.entries(tokens.macros as Record<string, any>)) {
+      const srcKey = normalizeFileKey((rawInfo as any)?.src, projectDir);
+      const lineNum = typeof (rawInfo as any)?.line === 'number' ? (rawInfo as any).line : undefined;
+      const params = Array.isArray((rawInfo as any)?.params) ? (rawInfo as any).params as string[] : undefined;
+      const source: SymbolSource | undefined = (srcKey && lineNum) ? { fileKey: srcKey, line: lineNum } : undefined;
+      if (srcKey && (rawInfo as any)?.src) {
+        const resolvedPath = resolveTokenFileReference(tokenPath, (rawInfo as any).src, projectDir);
+        if (resolvedPath) registerFilePath(srcKey, resolvedPath);
+      }
+      const meta: MacroMeta = { kind: 'macro', source, params };
+      macros.set(macroName, meta);
+      macros.set(macroName.toLowerCase(), meta);
     }
   }
 
@@ -231,7 +250,7 @@ export function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
     }
   }
 
-  lastSymbolCache = { byName, lineAddresses, filePaths, projectDir };
+  lastSymbolCache = { byName, lineAddresses, filePaths, macros, projectDir };
   dataLineSpanCache = dataLines.size ? dataLines : null;
   dataAddressLookup = addressLookup.size ? addressLookup : null;
 }
@@ -264,8 +283,18 @@ export function resolveSymbolDefinition(identifier: string): { filePath: string;
   const token = (identifier || '').trim();
   if (!token) return undefined;
   const symbol = lastSymbolCache.byName.get(token);
-  if (!symbol) return undefined;
-  return resolveSymbolSource(symbol, lastSymbolCache.filePaths);
+  if (symbol) {
+    return resolveSymbolSource(symbol, lastSymbolCache.filePaths);
+  }
+
+  const macro = lastSymbolCache.macros.get(token);
+  if (macro && macro.source) {
+    const pathResolved = lastSymbolCache.filePaths.get(macro.source.fileKey);
+    if (pathResolved) {
+      return { filePath: pathResolved, line: macro.source.line };
+    }
+  }
+  return undefined;
 }
 
 export function resolveEmulatorHoverSymbol(identifier: string, location?: { filePath?: string; line?: number }): HoverSymbolInfo | undefined {

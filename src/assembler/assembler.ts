@@ -1044,6 +1044,14 @@ export function assemble(
   for (const [k, v] of consts) constsOut[k] = v;
   const constOriginsOut: Record<string, { line: number; src?: string }> = {};
   for (const [k, v] of constOrigins) constOriginsOut[k] = v;
+  const macrosOut: Record<string, { line: number; src?: string; params?: string[] }> = {};
+  for (const def of macroPrep.macros.values()) {
+    macrosOut[def.name] = {
+      line: def.startLine,
+      src: def.sourceFile,
+      params: def.params?.map((p) => p.name)
+    };
+  }
   const dataSpanOut: Record<number, { start: number; byteLength: number; unitBytes: number }> = {};
   for (let idx = 0; idx < dataLineSpans.length; idx++) {
     const span = dataLineSpans[idx];
@@ -1058,6 +1066,7 @@ export function assemble(
     labels: labelsOut,
     consts: constsOut,
     constOrigins: constOriginsOut,
+    macros: macrosOut,
     dataLineSpans: dataSpanOut,
     warnings,
     printMessages,

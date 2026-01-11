@@ -150,7 +150,8 @@ export function createAssembleAndWrite(assemble: AssembleFn, projectFile?: strin
       }
       const tokens: any = {
         labels: {},
-        consts: {}
+        consts: {},
+        macros: {}
       };
       if (resolvedProjectFile) {
         tokens.projectFile = toWorkspaceRelative(resolvedProjectFile);
@@ -180,6 +181,16 @@ export function createAssembleAndWrite(assemble: AssembleFn, projectFile?: strin
             hex: '0x' + normalized.toString(16).toUpperCase().padStart(4, '0'),
             line: origin?.line,
             src: toProjectRelative(originSrc)
+          };
+        }
+      }
+      if (res.macros) {
+        for (const [name, info] of Object.entries(res.macros)) {
+          const srcPathRel = info.src ? toProjectRelative(info.src) : toProjectRelative(sourcePath);
+          tokens.macros[name] = {
+            src: srcPathRel,
+            line: info.line,
+            params: Array.isArray(info.params) ? info.params : undefined
           };
         }
       }
