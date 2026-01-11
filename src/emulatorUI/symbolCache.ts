@@ -52,6 +52,7 @@ function clearCaches() {
   lastSymbolCache = null;
   dataLineSpanCache = null;
   dataAddressLookup = null;
+  debugPathCache.clear();
   setNormalizeFileKeyProjectDir(undefined);
 }
 

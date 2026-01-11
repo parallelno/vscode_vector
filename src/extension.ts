@@ -22,6 +22,7 @@ import {
   onEmulatorPanelClosed
 } from './emulatorUI';
 import { registerRomHotReload } from './extention/romHotReload';
+import { clearSymbolMetadataCache } from './emulatorUI/symbolCache';
 
 type DebugRequestMessage = { seq: number; type: 'request'; command: string; arguments?: any };
 type OutgoingMessage =
@@ -183,6 +184,13 @@ export function activate(context: vscode.ExtensionContext)
   const devectorOutput = vscode.window.createOutputChannel('Devector');
   context.subscriptions.push(devectorOutput);
 
+  // Clear symbol metadata caches when workspace folders change (multi-root or folder switches)
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      clearSymbolMetadataCache();
+    })
+  );
+
 
   const createProjectDisposable = vscode.commands.registerCommand(
     ext_consts.EXTENTION_NAME + '.createProject', () => createProject(devectorOutput, context));
@@ -341,4 +349,6 @@ export function activate(context: vscode.ExtensionContext)
   registerRomHotReload(context, devectorOutput);
 }
 
-export function deactivate() {}
+export function deactivate() {
+  clearSymbolMetadataCache();
+}
