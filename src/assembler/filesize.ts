@@ -77,6 +77,6 @@ export function handleFilesizeDirectiveFirstPass(
   }
 
   ctx.consts.set(storeName, size);
-  ctx.constOrigins.set(storeName, { line: lineIndex, src: origin?.file || ctx.sourcePath });
+  ctx.constOrigins.set(storeName, { line: origin?.line ?? lineIndex, src: origin?.file || ctx.sourcePath });
   return true;
 }

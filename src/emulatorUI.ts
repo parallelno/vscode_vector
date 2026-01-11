@@ -34,9 +34,6 @@ import {
 import {
   cacheSymbolMetadata,
   clearSymbolMetadataCache,
-  ensureSymbolCacheForDocument,
-  resolveSymbolDefinition,
-  resolveEmulatorHoverSymbol,
   getSymbolCache,
   getDataLineSpanCache,
   getDataAddressLookup,

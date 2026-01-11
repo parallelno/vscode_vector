@@ -309,7 +309,10 @@ export function assemble(
         const result = tryEvaluateConstant(pending.rhs, pending.line, pending.origin, pending.locationCounter);
         if (result.value !== null) {
           consts.set(pending.name, result.value);
-          constOrigins.set(pending.name, { line: pending.line, src: pending.origin?.file || sourcePath });
+          constOrigins.set(pending.name, {
+            line: pending.origin?.line ?? pending.line,
+            src: pending.origin?.file || sourcePath
+          });
           pendingConsts.splice(idx, 1);
           madeProgress = true;
         } else {
@@ -479,7 +482,10 @@ export function assemble(
         errors.push(`Bad initial value '${rhs}' for .var ${rawName} at ${originDesc}${detail}`);
       } else {
         consts.set(storeName, result.value);
-        constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
+        constOrigins.set(storeName, {
+          line: origins[i]?.line ?? i + 1,
+          src: origins[i]?.file || sourcePath
+        });
         variables.add(rawName);
         variables.add(storeName); // Track scoped name to avoid reassignment warnings
         variableInitials.set(storeName, result.value);
@@ -511,7 +517,10 @@ export function assemble(
       const result = tryEvaluateConstant(rhs, i + 1, origins[i], addr);
       if (result.value !== null) {
         consts.set(storeName, result.value);
-        constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
+        constOrigins.set(storeName, {
+          line: origins[i]?.line ?? i + 1,
+          src: origins[i]?.file || sourcePath
+        });
       } else {
         pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc, locationCounter: addr });
       }
@@ -539,7 +548,10 @@ export function assemble(
       const result = tryEvaluateConstant(rhs, i + 1, origins[i], addr);
       if (result.value !== null) {
         consts.set(storeName, result.value);
-        constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
+        constOrigins.set(storeName, {
+          line: origins[i]?.line ?? i + 1,
+          src: origins[i]?.file || sourcePath
+        });
       } else {
         pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc, locationCounter: addr });
       }
@@ -566,7 +578,10 @@ export function assemble(
       const result = tryEvaluateConstant(rhs, i + 1, origins[i], addr);
       if (result.value !== null) {
         consts.set(storeName, result.value);
-        constOrigins.set(storeName, { line: i + 1, src: origins[i]?.file || sourcePath });
+        constOrigins.set(storeName, {
+          line: origins[i]?.line ?? i + 1,
+          src: origins[i]?.file || sourcePath
+        });
       } else {
         pendingConsts.push({ name: storeName, rhs, line: i + 1, origin: origins[i], originDesc, locationCounter: addr });
       }
