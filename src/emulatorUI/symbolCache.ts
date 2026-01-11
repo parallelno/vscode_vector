@@ -10,10 +10,9 @@ export type SymbolSource = { fileKey: string; line: number };
 export type SymbolMeta = { value: number; kind: 'label' | 'const'; source?: SymbolSource };
 export type SymbolCache = {
   byName: Map<string, SymbolMeta>;
-  byLowerCase: Map<string, SymbolMeta>;
   lineAddresses: Map<string, Map<number, number[]>>;
-  filePaths: Map<string, string>;
   projectDir?: string;
+  filePaths: Map<string, string>;
 };
 
 type DataLineCache = Map<string, Map<number, DataLineSpan>>;
@@ -115,7 +114,6 @@ export function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
 
   setNormalizeFileKeyProjectDir(projectDir);
   const byName = new Map<string, SymbolMeta>();
-  const byLowerCase = new Map<string, SymbolMeta>();
   const filePaths = new Map<string, string>();
   const registerFilePath = (fileKey: string, resolvedPath: string) => {
     if (!fileKey || !resolvedPath) return;
@@ -124,10 +122,6 @@ export function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
   const registerSymbol = (name: string | undefined, meta: SymbolMeta) => {
     if (!name) return;
     byName.set(name, meta);
-    const lower = name.toLowerCase();
-    if (lower) {
-      byLowerCase.set(lower, meta);
-    }
   };
   if (tokens.labels && typeof tokens.labels === 'object') {
     for (const [labelName, rawInfo] of Object.entries(tokens.labels as Record<string, any>)) {
@@ -237,7 +231,7 @@ export function cacheSymbolMetadata(tokens: any, tokenPath?: string) {
     }
   }
 
-  lastSymbolCache = { byName, byLowerCase, lineAddresses, filePaths, projectDir };
+  lastSymbolCache = { byName, lineAddresses, filePaths, projectDir };
   dataLineSpanCache = dataLines.size ? dataLines : null;
   dataAddressLookup = addressLookup.size ? addressLookup : null;
 }
@@ -269,7 +263,7 @@ export function resolveSymbolDefinition(identifier: string): { filePath: string;
   if (!lastSymbolCache) return undefined;
   const token = (identifier || '').trim();
   if (!token) return undefined;
-  const symbol = lastSymbolCache.byName.get(token) || lastSymbolCache.byLowerCase.get(token.toLowerCase());
+  const symbol = lastSymbolCache.byName.get(token);
   if (!symbol) return undefined;
   return resolveSymbolSource(symbol, lastSymbolCache.filePaths);
 }

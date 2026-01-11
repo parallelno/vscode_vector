@@ -14,7 +14,6 @@ export type InstructionHoverInfo = {
 
 export type SymbolCacheLookup = {
   byName: Map<string, { value: number; kind: 'label' | 'const' }>;
-  byLowerCase: Map<string, { value: number; kind: 'label' | 'const' }>;
   lineAddresses: Map<string, Map<number, number[]>>;
   projectDir?: string;
   filePaths?: Map<string, string>;
@@ -168,7 +167,7 @@ export function resolveHoverSymbol(
   if (!symbolCache) return undefined;
   const token = (identifier || '').trim();
   if (token) {
-    const exact = symbolCache.byName.get(token) || symbolCache.byLowerCase.get(token.toLowerCase());
+    const exact = symbolCache.byName.get(token);
     if (exact) return exact;
   }
   if (location?.filePath && location.line !== undefined) {
