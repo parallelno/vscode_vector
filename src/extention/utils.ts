@@ -5,6 +5,7 @@ import type { PrintMessage } from '../assembler/types';
 import * as ext_types from './project_info';
 import * as ext_consts from './consts';
 import { resolveIncludePath } from '../assembler/utils';
+import { collectIncludeFiles } from '../assembler/includes';
 
 
 export function readTemplateMainAsm(
@@ -623,3 +624,65 @@ export function extractTargetFromArg(arg: any)
   visit(arg);
   return { uri, line };
 };
+
+
+export function projectOwnsAsm(project: ext_types.ProjectInfo, normalizedTarget: string): boolean {
+  project.init_asm_path();
+  project.init_debug_path();
+  const mainAsm = project.absolute_asm_path;
+  if (!mainAsm || !fs.existsSync(mainAsm)) return false;
+
+  let source: string;
+  try {
+    source = fs.readFileSync(mainAsm, 'utf8');
+  } catch (_) {
+    return false;
+  }
+
+  let includes: Set<string>;
+  try {
+    includes = collectIncludeFiles(source, mainAsm, mainAsm, project.absolute_path);
+  } catch (_) {
+    return false;
+  }
+  includes.add(path.resolve(mainAsm));
+  for (const inc of includes) {
+    if (normalizeFsPath(inc) === normalizedTarget) return true;
+  }
+  return false;
+}
+
+
+export async function findProjectForAsmFile(documentPath: string): Promise<ext_types.ProjectInfo | undefined> {
+  const normalizedTarget = normalizeFsPath(documentPath);
+  const candidates = collectProjectFilesNear(documentPath);
+  for (const projectPath of candidates) {
+    const project = ext_types.ProjectInfo.createFromFileSync(projectPath);
+    if (project.error) continue;
+    if (projectOwnsAsm(project, normalizedTarget)) return project;
+  }
+  return undefined;
+}
+
+
+export function collectProjectFilesNear(documentPath: string): string[] {
+  const seen = new Set<string>();
+  const results: string[] = [];
+  let cursor = path.dirname(documentPath);
+  while (true) {
+    try {
+      for (const entry of fs.readdirSync(cursor)) {
+        if (!entry.toLowerCase().endsWith(ext_consts.PROJECT_FILE_SUFFIX)) continue;
+        const full = path.join(cursor, entry);
+        const normalized = normalizeFsPath(full);
+        if (seen.has(normalized)) continue;
+        seen.add(normalized);
+        results.push(full);
+      }
+    } catch (_) {}
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  return results;
+}

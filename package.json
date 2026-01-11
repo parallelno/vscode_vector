@@ -30,6 +30,11 @@
     "pngjs": "^7.0.0"
   },
   "activationEvents": [
+    "onLanguage:asm",
+    "onCommand:devector.createProject",
+    "onCommand:devector.compileProject",
+    "onCommand:devector.compileDependencies",
+    "onCommand:devector.runProject",
     "onDebug"
   ],
   "contributes": {

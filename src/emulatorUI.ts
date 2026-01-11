@@ -11,7 +11,7 @@ import { handleMemoryDumpControlMessage, resetMemoryDumpState, updateMemoryDumpF
 import { disposeHardwareStatsTracking, resetHardwareStatsTracking, tryCollectHardwareStats } from './emulatorUI/hardwareStats';
 import { parseAddressLike } from './emulatorUI/utils';
 import { ProjectInfo } from './extention/project_info';
-import { DEBUG_FILE_SUFFIX } from './extention/consts';
+import * as ext_utils from './extention/utils';
 import * as ext_consts from './extention/consts';
 import {
   SourceLineRef,
@@ -64,6 +64,7 @@ type SymbolCache = {
 
 type DataLineCache = Map<string, Map<number, DataLineSpan>>;
 
+const debugPathCache = new Map<string, string | null>();
 let lastSymbolCache: SymbolCache | null = null;
 let dataLineSpanCache: DataLineCache | null = null;
 let dataAddressLookup: Map<number, DataAddressEntry> | null = null;
@@ -770,26 +771,44 @@ function loadSymbolCacheFromDebugFile(tokenPath: string): boolean {
   }
 }
 
-// Best-effort lazy load: look for a debug file next to the source document.
-export async function ensureSymbolCacheForDocument(documentPath?: string): Promise<boolean> {
-  if (lastSymbolCache) return true;
-  if (!documentPath) return false;
-  const dir = path.dirname(documentPath);
-  const base = path.basename(documentPath, path.extname(documentPath));
-  const candidate = path.join(dir, base + DEBUG_FILE_SUFFIX);
-  if (fs.existsSync(candidate)) {
-    if (loadSymbolCacheFromDebugFile(candidate)) return true;
+function documentCoveredByCurrentCache(documentPath: string): boolean {
+  if (!lastSymbolCache) return false;
+  const normalizedDoc = ext_utils.normalizeFsPath(documentPath);
+  for (const p of lastSymbolCache.filePaths.values()) {
+    if (ext_utils.normalizeFsPath(p) === normalizedDoc) return true;
   }
-  // fallback: first *.debug.json in the same folder
-  try {
-    const entries = fs.readdirSync(dir, 'utf8');
-    const debugFiles = entries.filter(f => f.toLowerCase().endsWith(DEBUG_FILE_SUFFIX));
-    debugFiles.sort();
-    for (const f of debugFiles) {
-      const full = path.join(dir, f);
-      if (loadSymbolCacheFromDebugFile(full)) return true;
-    }
-  } catch (_) {}
+  return false;
+}
+
+function rememberDebugPath(documentPath: string, debugPath?: string) {
+  const normalizedDoc = ext_utils.normalizeFsPath(documentPath);
+  debugPathCache.set(normalizedDoc, debugPath ? path.normalize(debugPath) : null);
+}
+
+
+async function resolveDebugPathForDocument(documentPath: string): Promise<string | undefined> {
+  const normalizedDoc = ext_utils.normalizeFsPath(documentPath);
+  const cached = debugPathCache.get(normalizedDoc);
+  if (cached !== undefined) return cached || undefined;
+
+  const project = await ext_utils.findProjectForAsmFile(documentPath);
+  const debugPath = project?.absolute_debug_path;
+  if (debugPath && fs.existsSync(debugPath)) {
+    rememberDebugPath(documentPath, debugPath);
+    return debugPath;
+  }
+  return undefined;
+}
+
+// Best-effort lazy load: locate the owning project, then use its debug file.
+export async function ensureSymbolCacheForDocument(documentPath?: string): Promise<boolean> {
+  if (!documentPath) return false;
+
+  if (lastSymbolCache && documentCoveredByCurrentCache(documentPath)) return true;
+  if (lastSymbolCache) clearSymbolMetadataCache();
+
+  const debugPath = await resolveDebugPathForDocument(documentPath);
+  if (debugPath && loadSymbolCacheFromDebugFile(debugPath)) return true;
   return !!lastSymbolCache;
 }
 
