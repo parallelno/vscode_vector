@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { resolveIncludePath } from '../assembler/utils';
+import { findProjectForAsmFile } from './utils';
 
 // Definition provider for .include directives
 // It enables Ctrl+hover underline and click navigation to included files
@@ -35,13 +37,13 @@ export async function provideIncludeDefinition(
 		return undefined;
 	}
 
-	// Resolve the path relative to the current document
-	let resolvedPath: string;
-	if (path.isAbsolute(includedPath)) {
-		resolvedPath = includedPath;
-	} else {
-		const baseDir = path.dirname(document.uri.fsPath);
-		resolvedPath = path.resolve(baseDir, includedPath);
+	// assembler-aware path resolution
+	const project = await findProjectForAsmFile(document.uri.fsPath);
+	const mainAsm = project?.absolute_asm_path || document.uri.fsPath;
+	const projectFile = project?.absolute_path;
+	const resolvedPath = resolveIncludePath(includedPath, document.uri.fsPath, mainAsm, projectFile);
+	if (!resolvedPath) {
+		return undefined;
 	}
 
 	// Check if the file exists asynchronously

@@ -449,6 +449,18 @@ export function parseTextLiteralToBytes(part: string, encoding: TextEncodingType
   return { error: `Invalid .text value '${trimmed}' - expected string or character literal` };
 }
 
+// Helper to attempt resolving an included file relative to a base directory
+function tryResolveIncludePath(
+  includedFile: string,
+  baseDir?: string,
+  candidatePath?: string)
+: string | undefined
+{
+    if (!baseDir) return undefined;
+    candidatePath = path.resolve(baseDir, includedFile);
+    return fs.existsSync(candidatePath) ? candidatePath : undefined;
+};
+
 // Resolve the path of an included file based on the current file,
 // main assembly file, project file, workspace root, and CWD.
 export function resolveIncludePath(
@@ -458,38 +470,27 @@ export function resolveIncludePath(
   projectFile?: string
 ): string | undefined
 {
-  // Keep a list of attempted paths so the caller can surface a useful error when none exist.
-  const attempted: string[] = [];
-
   if (path.isAbsolute(includedFile)) {
     return includedFile;
   }
 
-  const tryResolve = (baseDir?: string): string | undefined => {
-    if (!baseDir) return undefined;
-    const candidate = path.resolve(baseDir, includedFile);
-    attempted.push(candidate);
-    return fs.existsSync(candidate) ? candidate : undefined;
-  };
-
+  let candidatePath: string = '';
   const projectDir = projectFile ? path.dirname(projectFile) : undefined;
 
   // 1) Relative to the current file
   const currentDir = currentAsm ? path.dirname(currentAsm) : undefined;
-  const found = tryResolve(currentDir)
+  const found = tryResolveIncludePath(includedFile, currentDir, candidatePath)
     // 2) Relative to the main asm file directory
-    || tryResolve(mainAsm ? path.dirname(mainAsm) : undefined)
+    || tryResolveIncludePath(includedFile, mainAsm ? path.dirname(mainAsm) : undefined, candidatePath)
     // 3) Relative to the project file directory (explicit)
-    || tryResolve(projectDir)
+    || tryResolveIncludePath(includedFile, projectDir, candidatePath)
     // 4) Relative to the VS Code workspace root when available
-    || tryResolve(tryGetWorkspaceRoot())
+    || tryResolveIncludePath(includedFile, tryGetWorkspaceRoot(), candidatePath)
     // 5) Relative to the current working directory
-    || tryResolve(process.cwd());
-
+    || tryResolveIncludePath(includedFile, process.cwd(), candidatePath);
   if (found) return found;
 
-  // Fall back to the last attempted path so the caller can include it in the error message.
-  return attempted.length ? attempted[attempted.length - 1] : undefined;
+  return candidatePath;
 }
 
 export function parseDwordLiteral(v: string): WordLiteralResult {
