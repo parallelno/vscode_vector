@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import { ensureSymbolCacheForDocument, resolveSymbolDefinition } from '../emulatorUI';
 
+// Definition provider for labels/consts using emulator debug metadata
+// It enables Ctrl+hover underline and click navigation to symbol definitions
+// It uses cached symbol metadata from debug files.
 export async function provideSymbolDefinition(
     document: vscode.TextDocument,
     position: vscode.Position,

@@ -1,16 +1,13 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
-import * as ext_utils from './extention/utils';
-import * as ext_prg from './extention/project';
 import * as ext_consts from './extention/consts';
-import { provideDefinition } from './extention/provider_include';
+import { provideIncludeDefinition } from './extention/provider_include';
 import { provideSymbolDefinition } from './extention/provider_symbol_definition';
 import { createProject } from './extention/cmd_create_project';
 import { compileProject } from './extention/cmd_compile_project';
 import { compileDependencies } from './extention/cmd_compile_dependencies';
 import { runProject } from './extention/cmd_run_project';
 import { toggleBreakpointFromArg } from './extention/cmd_toggle_bp';
-import { provideHover } from './extention/provider_hover';
+import { provideSymbolHover } from './extention/provider_symbol_hover';
 import {provideDebugConfigurations, resolveDebugConfiguration} from './extention/provider_debug_conf';
 import {
   DebugAction,
@@ -23,6 +20,8 @@ import {
 } from './emulatorUI';
 import { registerRomHotReload } from './extention/romHotReload';
 import { clearSymbolMetadataCache } from './emulatorUI/symbolCache';
+import { breakpointListener } from './extention/breakpoint_listener';
+
 
 type DebugRequestMessage = { seq: number; type: 'request'; command: string; arguments?: any };
 type OutgoingMessage =
@@ -177,10 +176,6 @@ class EmulatorDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactor
 
 export function activate(context: vscode.ExtensionContext)
 {
-  const pendingBreakpointAsmPaths = new Set<string>();
-  let breakpointCompilePromise: Promise<void> = Promise.resolve();
-
-  let suppressBreakpointValidation = false;
   const devectorOutput = vscode.window.createOutputChannel('Devector');
   context.subscriptions.push(devectorOutput);
 
@@ -272,83 +267,42 @@ export function activate(context: vscode.ExtensionContext)
     }
   }
 
-////////////////////////////////////////////////////////////////////////////////
-//
-// ANYTHING BELOW UNCHECKED YET
-//
-////////////////////////////////////////////////////////////////////////////////
-
-
-  // Hover provider for asm files to show emulator symbol info when paused
-  const asmHoverProvider = vscode.languages.registerHoverProvider(
-    'asm', {provideHover}
-  );
-  context.subscriptions.push(asmHoverProvider);
-
 
   // Register DefinitionProvider for .include directive paths
   // This enables Ctrl+hover underline and click navigation to included files
   const asmDefinitionProvider = vscode.languages.registerDefinitionProvider(
-      { language: 'asm' }, { provideDefinition });
+      { language: 'asm' }, { provideDefinition: provideIncludeDefinition });
   context.subscriptions.push(asmDefinitionProvider);
 
-    // Definition provider for labels/consts using emulator debug metadata
-    const asmSymbolDefinitionProvider = vscode.languages.registerDefinitionProvider(
-      { language: 'asm' }, { provideDefinition: provideSymbolDefinition });
-    context.subscriptions.push(asmSymbolDefinitionProvider);
+  // It provides symbol definition navigation in asm files
+  // It enables Ctrl+hover underline and click navigation to symbol definitions
+  // It uses cached symbol metadata from debug files.
+  const asmSymbolDefinitionProvider = vscode.languages.registerDefinitionProvider(
+    { language: 'asm' }, { provideDefinition: provideSymbolDefinition });
+  context.subscriptions.push(asmSymbolDefinitionProvider);
+
+  // Hover provider for asm files to show emulator symbol info when paused
+  const asmHoverProvider = vscode.languages.registerHoverProvider(
+    { language: 'asm' }, { provideHover: provideSymbolHover }
+  );
+  context.subscriptions.push(asmHoverProvider);
 
 
   // Persist breakpoints whenever they change in the debugger model
-  context.subscriptions.push(vscode.debug.onDidChangeBreakpoints(async (ev) =>
-  {
-    if (suppressBreakpointValidation) {
-      await ext_utils.writeBreakpointsForActiveEditor();
-      return;
-    }
+  const breakpointProvider = vscode.debug.onDidChangeBreakpoints(async (ev) =>
+    {breakpointListener(ev, devectorOutput);});
+  context.subscriptions.push(breakpointProvider);
 
-    const invalidAdded = await ext_utils.findInvalidBreakpoints(devectorOutput, ev.added);
-    if (invalidAdded.length) {
-      ext_utils.reportInvalidBreakpointLine();
-      try {
-        suppressBreakpointValidation = true;
-        vscode.debug.removeBreakpoints(invalidAdded);
-      } finally {
-        suppressBreakpointValidation = false;
-      }
-      await ext_utils.writeBreakpointsForActiveEditor();
-      return;
-    }
-
-    // Only write tokens if we have an active asm editor
-    await ext_utils.writeBreakpointsForActiveEditor();
-
-    // schedule breakpoint project compile
-    const asmPaths = ext_utils.collectAsmPathsFromEvent(ev);
-    for (const p of asmPaths) {
-        pendingBreakpointAsmPaths.add(path.resolve(p));
-      }
-
-      breakpointCompilePromise = breakpointCompilePromise.then(async () =>
-      {
-        if (!pendingBreakpointAsmPaths.size) return;
-
-        const batch = new Set(pendingBreakpointAsmPaths);
-        pendingBreakpointAsmPaths.clear();
-        if (batch.size === 0) return;
-        // compile only projects that own the affected asm paths
-        await ext_prg.compileProjectsForBreakpointChanges(devectorOutput, batch);
-
-      }).catch((err) => {
-        ext_utils.logOutput(
-          devectorOutput,
-          'Devector: breakpoint-triggered project compile failed: ' +
-          (err instanceof Error ? err.message : String(err)));
-      });
-  }));
-
+  // Register ROM hot-reload functionality
   registerRomHotReload(context, devectorOutput);
 }
 
 export function deactivate() {
   clearSymbolMetadataCache();
 }
+
+////////////////////////////////////////////////////////////////////////////////
+//
+// ANYTHING BELOW UNCHECKED YET
+//
+////////////////////////////////////////////////////////////////////////////////

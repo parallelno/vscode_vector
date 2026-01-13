@@ -470,9 +470,9 @@ export function normalizeUri(value: any): vscode.Uri | undefined {
 // Helper to write breakpoints for the active asm editor into its tokens file
 export async function writeBreakpointsForActiveEditor()
 {
-  const ed2 = vscode.window.activeTextEditor;
-  if (!ed2) return;
-  const doc2 = ed2.document;
+  const ed = vscode.window.activeTextEditor;
+  if (!ed) return;
+  const doc2 = ed.document;
   if (!doc2 || doc2.isUntitled || !doc2.fileName.endsWith('.asm')) return;
   const src2 = doc2.getText();
   const mainPath2 = doc2.fileName;

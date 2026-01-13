@@ -2,8 +2,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 
-
-export async function provideDefinition(
+// Definition provider for .include directives
+// It enables Ctrl+hover underline and click navigation to included files
+export async function provideIncludeDefinition(
 	document: vscode.TextDocument,
 	position: vscode.Position,
 	token: vscode.CancellationToken)
