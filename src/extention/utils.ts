@@ -233,8 +233,6 @@ export function reportInvalidBreakpointLine()
 };
 
 
-
-
 export function isAsmBreakpointLine(doc: vscode.TextDocument, line: number)
 : boolean
 {
@@ -267,13 +265,22 @@ export function getOpenDocumentByFsPath(fsPath: string)
 };
 
 
-export const openDocument = async (logChannel: vscode.OutputChannel, uri: vscode.Uri): Promise<vscode.TextDocument | undefined> => {
+// Open a document by URI. If it's already open, return the existing instance.
+export async function openDocument(
+  logChannel: vscode.OutputChannel,
+  uri: vscode.Uri)
+  : Promise<vscode.TextDocument | undefined>
+{
   const existing = getOpenDocumentByFsPath(uri.fsPath);
   if (existing) return existing;
   try {
     return await vscode.workspace.openTextDocument(uri);
   } catch (err) {
-    logOutput(logChannel, 'Devector: Failed to open document for breakpoint validation: ' + (err instanceof Error ? err.message : String(err)));
+    logOutput(
+      logChannel,
+      'Devector: Failed to open document for breakpoint validation: ' +
+      (err instanceof Error ? err.message : String(err))
+    );
     return undefined;
   }
 };
@@ -410,27 +417,6 @@ export function collectAsmPathsFromEvent(
 }
 
 
-export async function findInvalidBreakpoints(
-  devectorOutput: vscode.OutputChannel,
-  items?: readonly vscode.Breakpoint[])
-  : Promise<vscode.SourceBreakpoint[]>
-{
-  const invalid: vscode.SourceBreakpoint[] = [];
-  if (!items) return invalid;
-  for (const bp of items) {
-    if (!(bp instanceof vscode.SourceBreakpoint)) continue;
-    const uri = bp.location?.uri;
-    if (!uri || uri.scheme !== 'file') continue;
-    if (!uri.fsPath.toLowerCase().endsWith('.asm')) continue;
-    const doc = await openDocument(devectorOutput, uri);
-    if (!doc) continue;
-    const line = bp.location.range.start.line;
-    if (!isAsmBreakpointLine(doc, line)) invalid.push(bp);
-  }
-  return invalid;
-}
-
-
 // Helper utilities for breakpoint targeting
 export function looksLikeFsPath(value: string): boolean {
   return path.isAbsolute(value) || /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\');
@@ -467,163 +453,7 @@ export function normalizeUri(value: any): vscode.Uri | undefined {
 };
 
 
-// Helper to write breakpoints for the active asm editor into its tokens file
-export async function writeBreakpointsForActiveEditor()
-{
-  const ed = vscode.window.activeTextEditor;
-  if (!ed) return;
-  const doc2 = ed.document;
-  if (!doc2 || doc2.isUntitled || !doc2.fileName.endsWith('.asm')) return;
-  const src2 = doc2.getText();
-  const mainPath2 = doc2.fileName;
-  try {
-    let tokenPath2: string;
-    const outPath2 = mainPath2.replace(/\.asm$/i, '.rom');
-    if (/\.[^/.]+$/.test(outPath2)) tokenPath2 = outPath2.replace(/\.[^/.]+$/, ext_consts.DEBUG_FILE_SUFFIX);
-    else tokenPath2 = outPath2 + ext_consts.DEBUG_FILE_SUFFIX;
-    if (!fs.existsSync(tokenPath2)) return;
-    const tokenText2 = fs.readFileSync(tokenPath2, 'utf8');
-    const tokens2 = JSON.parse(tokenText2);
-    const projectDir = resolveProjectDirFromTokens(tokens2, tokenPath2) || path.dirname(mainPath2);
-    const projectFile = resolveProjectFileFromTokens(tokens2, tokenPath2);
-    const included = findIncludedFiles(mainPath2, src2, new Set<string>(), 0, mainPath2, projectFile);
-    tokens2.breakpoints = {};
-    const fileKeyToPaths = new Map<string, Set<string>>();
-    for (const f of Array.from(included)) {
-      const key = normalizeDebugFileKey(f, projectDir);
-      if (!key) continue;
-      let s = fileKeyToPaths.get(key);
-      if (!s) { s = new Set(); fileKeyToPaths.set(key, s); }
-      s.add(path.resolve(f));
-    }
-    const allBps2 = vscode.debug.breakpoints;
-    for (const bp of allBps2) {
-      if ((bp as vscode.SourceBreakpoint).location) {
-        const srcBp = bp as vscode.SourceBreakpoint;
-        const uri = srcBp.location.uri;
-        if (!uri || uri.scheme !== 'file') continue;
-        const bpPath = path.resolve(uri.fsPath);
-        const bpKey = normalizeDebugFileKey(bpPath, projectDir);
-        if (!bpKey || !fileKeyToPaths.has(bpKey)) continue;
-        const pathsForBase = fileKeyToPaths.get(bpKey)!;
-        if (!pathsForBase.has(bpPath)) continue;
-        const lineNum = srcBp.location.range.start.line + 1;
-        const entry = { line: lineNum, enabled: !!bp.enabled } as any;
-        if (tokens2.labels) {
-          for (const [labelName, labInfo] of Object.entries(tokens2.labels)) {
-            try {
-              const labelKey = normalizeDebugFileKey((labInfo as any).src, projectDir);
-              if (labelKey && labelKey === bpKey && (labInfo as any).line === lineNum) {
-                entry.label = labelName;
-                entry.addr = (labInfo as any).addr;
-                break;
-              }
-            } catch (e) {}
-          }
-        }
-        attachAddressFromTokens(tokens2, bpPath, lineNum, entry, tokenPath2);
-        if (!tokens2.breakpoints[bpKey]) tokens2.breakpoints[bpKey] = [];
-        tokens2.breakpoints[bpKey].push(entry);
-      }
-    }
-    fs.writeFileSync(tokenPath2, JSON.stringify(tokens2, null, 4), 'utf8');
-  } catch (e) {
-    console.error('writeBreakpointsForActiveEditor failed:', e);
-  }
-}
 
-
-function applyLine(
-  current: number | undefined,
-  raw: any,
-  opts: { oneBased?: boolean } = {})
-  : number | undefined
-{
-  if (current !== undefined) return current;
-  if (raw === undefined || raw === null) return current;
-  const num = Number(raw);
-  if (!Number.isFinite(num)) return current;
-  const normalized = opts.oneBased ? num - 1 : num;
-  return Math.max(0, Math.floor(normalized));
-};
-
-
-
-/**
- * Extract a target from an arbitrary argument.
- * The target is an object with two properties: `uri` and `line`.
- * The `uri` property is a URI that points to a file, and the `line` property is a 0-based line number.
- * The function will recursively traverse the argument and return the first target it finds.
- * If no target is found, the function returns an object with `undefined` properties.
- * @param {any} arg - The argument to extract the target from.
- * @returns {{ uri?: vscode.Uri; line?: number }} - The extracted target.
- */
-export function extractTargetFromArg(arg: any)
-: { uri?: vscode.Uri; line?: number }
-{
-  let uri: vscode.Uri | undefined;
-  let line: number | undefined;
-
-  const visit = (node: any) => {
-    if (node === undefined || node === null) return;
-    if (uri && line !== undefined) return;
-    if (Array.isArray(node)) {
-      for (const item of node) visit(item);
-      return;
-    }
-    const maybeUri = normalizeUri(node);
-    if (maybeUri && !uri) uri = maybeUri;
-    if (typeof node === 'number') {
-      line = applyLine(line, node);
-      return;
-    }
-    if (typeof node !== 'object') return;
-
-    const candidate = node as any;
-    if (candidate.uri) {
-      const parsed = normalizeUri(candidate.uri);
-      if (parsed && !uri) uri = parsed;
-    }
-    if (candidate.resource) {
-      const parsed = normalizeUri(candidate.resource);
-      if (parsed && !uri) uri = parsed;
-    }
-    if (candidate.document?.uri) {
-      const parsed = normalizeUri(candidate.document.uri);
-      if (parsed && !uri) uri = parsed;
-    }
-    if (candidate.source?.path) {
-      const parsed = normalizeUri(candidate.source.path);
-      if (parsed && !uri) uri = parsed;
-    }
-    if (candidate.location) {
-      const loc = candidate.location;
-      if (loc.uri) {
-        const parsed = normalizeUri(loc.uri);
-        if (parsed && !uri) uri = parsed;
-      }
-      if (loc.range) visit(loc.range);
-    }
-    if (candidate.editor) visit(candidate.editor);
-    if (candidate.textEditor) visit(candidate.textEditor);
-    if (candidate.range) visit(candidate.range);
-    if (candidate.selection) visit(candidate.selection);
-    if (candidate.selections) visit(candidate.selections);
-    if (candidate.position) visit(candidate.position);
-    if (candidate.active) visit(candidate.active);
-    if (candidate.start) visit(candidate.start);
-    if (candidate.end) visit(candidate.end);
-    if (candidate.anchor) visit(candidate.anchor);
-    if (candidate.line !== undefined) line = applyLine(line, candidate.line);
-    if (candidate.lineNumber !== undefined) line = applyLine(line, candidate.lineNumber, { oneBased: true });
-    if (candidate.startLine !== undefined) line = applyLine(line, candidate.startLine);
-    if (candidate.startLineNumber !== undefined) line = applyLine(line, candidate.startLineNumber, { oneBased: true });
-    if (candidate.lineno !== undefined) line = applyLine(line, candidate.lineno, { oneBased: true });
-  };
-
-  visit(arg);
-  return { uri, line };
-};
 
 
 export function projectOwnsAsm(project: ext_types.ProjectInfo, normalizedTarget: string): boolean {

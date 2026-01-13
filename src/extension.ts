@@ -6,7 +6,6 @@ import { createProject } from './extention/cmd_create_project';
 import { compileProject } from './extention/cmd_compile_project';
 import { compileDependencies } from './extention/cmd_compile_dependencies';
 import { runProject } from './extention/cmd_run_project';
-import { toggleBreakpointFromArg } from './extention/cmd_toggle_bp';
 import { provideSymbolHover } from './extention/provider_symbol_hover';
 import {provideDebugConfigurations, resolveDebugConfiguration} from './extention/provider_debug_conf';
 import {
@@ -242,30 +241,6 @@ export function activate(context: vscode.ExtensionContext)
   //   stepFramePanel();
   // });
   // context.subscriptions.push(runFrameDisposable);
-
-
-  // Provide additional registrations for common variant commands the editor may use
-  const cmdNames = [
-    'editor.action.debug.toggleBreakpoint',
-    'editor.action.toggleBreakpoint',
-    'workbench.debug.action.toggleBreakpoints',
-    'editor.debug.action.toggleBreakpoint',
-    'editor.debug.action.toggleConditionalBreakpoint',
-    'editor.action.debug.toggleConditionalBreakpoint',
-    'editor.action.debug.toggleLogPoint',
-    'editor.debug.action.toggleLogPoint'
-  ];
-  for (const name of cmdNames) {
-    try {
-      const reg = vscode.commands.registerCommand(
-        name,
-        (arg: any) => toggleBreakpointFromArg(devectorOutput, arg)
-      );
-      context.subscriptions.push(reg);
-    } catch (e) {
-      // ignore failures to register (some core commands may not be overrideable)
-    }
-  }
 
 
   // Register DefinitionProvider for .include directive paths
