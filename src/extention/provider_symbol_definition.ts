@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ensureSymbolCacheForDocument, resolveSymbolDefinition } from '../emulatorUI';
+import { ensureSymbolCacheForDocument, resolveSymbolDefinition } from '../emulatorUI/symbolCache';
 
 // Definition provider for labels/consts using emulator debug metadata
 // It enables Ctrl+hover underline and click navigation to symbol definitions
@@ -10,13 +10,21 @@ export async function provideSymbolDefinition(
     _token: vscode.CancellationToken
   ): Promise<vscode.Definition | vscode.DefinitionLink[] | undefined>
 {
-  const wordRange = document.getWordRangeAtPosition(position, /[A-Za-z_@.][A-Za-z0-9_@.]*/);
+  const filePath = document.uri.scheme === 'file' ?
+		document.uri.fsPath :
+		undefined;
+	if (!filePath) return undefined;
+
+  const wordRange = document.getWordRangeAtPosition(
+    position, /[A-Za-z_@.][A-Za-z0-9_@.]*/);
   if (!wordRange) return undefined;
+
   const identifier = document.getText(wordRange);
+  // ignore directives
   if (!identifier || identifier.startsWith('.')) return undefined;
 
-  // Lazily load symbol metadata from a nearby debug file when not running the emulator
-  await ensureSymbolCacheForDocument(document.uri.fsPath);
+  // Ensure symbol cache is available
+  await ensureSymbolCacheForDocument(filePath);
 
   const target = resolveSymbolDefinition(identifier);
   if (!target) return undefined;

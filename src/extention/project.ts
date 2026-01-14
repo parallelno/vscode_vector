@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as ext_utils from './utils';
 import * as ext_types from './project_info';
 import { compileAsmSource, updateBreakpointsInDebugFile } from './compile';
-import { reloadEmulatorBreakpointsFromFile, isEmulatorRunning } from '../emulatorUI';
+import { reloadEmulatorBreakpointsFromFile, isEmulatorPaused } from '../emulatorUI';
 import * as ext_consts from './consts';
 import { collectIncludeFiles } from '../assembler/includes';
 import { buildFddImage } from '../tools/fddutil';
@@ -506,9 +506,8 @@ export async function compileProjectsForBreakpointChanges(
   const infos = await loadAllProjects(devectorOutput, workspaceRoot, { silent: true });
   if (!infos.length) return;
 
-  const emulatorRunning = isEmulatorRunning();
-  const allowCompile = !emulatorRunning;
-  if (emulatorRunning) {
+  const emulatorPaused = isEmulatorPaused();
+  if (!emulatorPaused) {
     ext_utils.logOutput(devectorOutput, 'Devector: Emulator running; skipping recompilation for breakpoint change');
   }
 
@@ -540,7 +539,7 @@ export async function compileProjectsForBreakpointChanges(
     const filesChanged = haveAsmFilesChanged(project, asmFiles);
 
     if (filesChanged) {
-      if (allowCompile) {
+      if (emulatorPaused) {
         await compileProjectFile(devectorOutput, project, { silent: true, reason: 'breakpoint change' });
       } else if (project.absolute_debug_path && fs.existsSync(project.absolute_debug_path)) {
         await updateBreakpointsInDebugFile(devectorOutput, mainsm, source, project.absolute_debug_path);
@@ -562,7 +561,7 @@ export async function compileProjectsForBreakpointChanges(
         project.absolute_debug_path
       );
       reloadEmulatorBreakpointsFromFile();
-    } else if (allowCompile) {
+    } else if (emulatorPaused) {
       await compileProjectFile(devectorOutput, project, { silent: true, reason: 'breakpoint change' });
     } else {
       ext_utils.logOutput(devectorOutput, `Devector: No debug file for ${project.name}; compile skipped while emulator running`);

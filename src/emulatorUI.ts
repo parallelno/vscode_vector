@@ -4,11 +4,26 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Hardware } from './emulator/hardware';
 import { HardwareReq } from './emulator/hardware_reqs';
-import { ACTIVE_AREA_H, ACTIVE_AREA_W, BORDER_LEFT, FRAME_H, FRAME_W, SCAN_ACTIVE_AREA_TOP } from './emulator/display';
+import {
+  ACTIVE_AREA_H,
+  ACTIVE_AREA_W,
+  BORDER_LEFT,
+  FRAME_H,
+  FRAME_W,
+  SCAN_ACTIVE_AREA_TOP
+} from './emulator/display';
 import { getWebviewContent } from './emulatorUI/webviewContent';
 import { getDebugLine } from './emulatorUI/debugOutput';
-import { handleMemoryDumpControlMessage, resetMemoryDumpState, updateMemoryDumpFromHardware } from './emulatorUI/memoryDump';
-import { disposeHardwareStatsTracking, resetHardwareStatsTracking, tryCollectHardwareStats } from './emulatorUI/hardwareStats';
+import {
+  handleMemoryDumpControlMessage,
+  resetMemoryDumpState,
+  updateMemoryDumpFromHardware
+} from './emulatorUI/memoryDump';
+import {
+  disposeHardwareStatsTracking,
+  resetHardwareStatsTracking,
+  tryCollectHardwareStats
+} from './emulatorUI/hardwareStats';
 import { ProjectInfo } from './extention/project_info';
 import * as ext_consts from './extention/consts';
 import {
@@ -16,12 +31,6 @@ import {
   loadBreakpointsFromToken,
   syncEditorBreakpointsFromHardware,
 } from './emulatorUI/breakpoints';
-import {
-  DataDirectiveHoverInfo,
-  InstructionHoverInfo,
-  resolveDataDirectiveHoverForMemory,
-  resolveInstructionHoverForMemory,
-} from './emulatorUI/hover';
 import {
   clearDataLineHighlights,
   clearHighlightedSourceLine,
@@ -35,15 +44,9 @@ import {
   cacheSymbolMetadata,
   clearSymbolMetadataCache,
   getSymbolCache,
-  getDataLineSpanCache,
   getDataAddressLookup,
 } from './emulatorUI/symbolCache';
 
-export {
-  ensureSymbolCacheForDocument,
-  resolveSymbolDefinition,
-  resolveEmulatorHoverSymbol,
-} from './emulatorUI/symbolCache';
 
 // set to true to enable instruction logging to file
 const log_tick_to_file = false;
@@ -55,7 +58,7 @@ let lastBreakpointSource: {
   log?: vscode.OutputChannel } | null = null;
 
 let lastAddressSourceMap: Map<number, SourceLineRef> | null = null;
-let currentToolbarIsRunning = true;
+let toolbarIsRunning = true;
 
 export type DebugAction = 'pause' | 'run' | 'stepOver' | 'stepInto' | 'stepOut' | 'stepFrame' | 'step256' | 'restart';
 type ToolbarListener = (isRunning: boolean) => void;
@@ -115,7 +118,7 @@ export async function openEmulatorPanel(
   const html = getWebviewContent();
   panel.webview.html = html;
   setHighlightContext(context);
-  currentToolbarIsRunning = true;
+  toolbarIsRunning = true;
   resetHardwareStatsTracking();
   resetMemoryDumpState();
 
@@ -352,7 +355,7 @@ export async function openEmulatorPanel(
   };
 
   const emitToolbarState = (isRunning: boolean) => {
-    currentToolbarIsRunning = isRunning;
+    toolbarIsRunning = isRunning;
     postToolbarState(isRunning);
     for (const listener of toolbarListeners) {
       try { listener(isRunning); } catch (err) {
@@ -373,7 +376,7 @@ export async function openEmulatorPanel(
   };
 
   const syncToolbarState = () => {
-    postToolbarState(currentToolbarIsRunning);
+    postToolbarState(toolbarIsRunning);
   };
 
   const handleDebugAction = (action?: DebugAction) => {
@@ -535,9 +538,9 @@ export async function openEmulatorPanel(
   }, null, context.subscriptions);
 
   const editorVisibilityDisposable = vscode.window.onDidChangeVisibleTextEditors(() => {
-    if (!currentToolbarIsRunning) {
+    if (!toolbarIsRunning) {
       // Reapply execution highlight when editor visibility changes
-      reapplyExecutionHighlight(currentToolbarIsRunning);
+      reapplyExecutionHighlight(toolbarIsRunning);
       // Reapply data line highlights (reads/writes)
       reapplyDataHighlightsFromCache(getDataAddressLookup(), getSymbolCache()?.filePaths);
     }
@@ -618,7 +621,7 @@ function printDebugState(
   if (highlightSource) {
     highlightSourceFromHardware(hardware, lastAddressSourceMap, getSymbolCache()?.lineAddresses);
     updateMemoryDumpFromHardware(panel, hardware, 'pc');
-    if (!currentToolbarIsRunning) {
+    if (!toolbarIsRunning) {
       refreshDataLineHighlights(hardware, getDataAddressLookup(), getSymbolCache()?.filePaths);
     }
   }
@@ -666,23 +669,10 @@ export function onEmulatorPanelClosed(listener: PanelClosedListener): vscode.Dis
   };
 }
 
-
-export function resolveInstructionHover(
-  document: vscode.TextDocument,
-  position: vscode.Position,
-  address: number)
-  : InstructionHoverInfo | undefined
-{
-  return resolveInstructionHoverForMemory(lastBreakpointSource?.hardware, document, position, address, currentToolbarIsRunning);
+export function isEmulatorPaused(): boolean {
+  return !!currentPanelController && !toolbarIsRunning;
 }
 
-export function isEmulatorPanelPaused(): boolean {
-  return !!currentPanelController && !currentToolbarIsRunning;
-}
-
-export function isEmulatorRunning(): boolean {
-  return !!currentPanelController && currentToolbarIsRunning;
-}
 
 export function getRunningProjectInfo(): ProjectInfo | undefined {
   return currentPanelController?.getProjectInfo();
@@ -690,18 +680,4 @@ export function getRunningProjectInfo(): ProjectInfo | undefined {
 
 export function getActiveHardware(): Hardware | undefined {
   return lastBreakpointSource?.hardware ?? undefined;
-}
-
-export function resolveDataDirectiveHover(
-  document: vscode.TextDocument,
-  position: vscode.Position)
-  : DataDirectiveHoverInfo | undefined
-{
-  return resolveDataDirectiveHoverForMemory(
-    document,
-    position,
-    lastBreakpointSource?.hardware,
-    currentToolbarIsRunning,
-    getDataLineSpanCache()
-  );
 }

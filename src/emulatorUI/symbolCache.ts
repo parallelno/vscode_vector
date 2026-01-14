@@ -1,14 +1,28 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as ext_utils from '../extention/utils';
-import { coerceAddressList, normalizeFileKey, setNormalizeFileKeyProjectDir } from './breakpoints';
+import {
+    coerceAddressList,
+    normalizeFileKey,
+    setNormalizeFileKeyProjectDir
+} from './breakpoints';
 import { parseAddressLike } from './utils';
-import { resolveHoverSymbol } from './hover';
-import type { DataAddressEntry, DataLineSpan, HoverSymbolInfo } from './hover';
+import type { DataAddressEntry, DataLineSpan } from './hover';
 
-export type SymbolSource = { fileKey: string; line: number };
-export type SymbolMeta = { value: number; kind: 'label' | 'const'; source?: SymbolSource };
-export type MacroMeta = { kind: 'macro'; source?: SymbolSource; params?: string[] };
+export type SymbolSource = {
+    fileKey: string;
+    line: number
+};
+export type SymbolMeta = {
+    value: number;
+    kind: 'label' | 'const';
+    source?: SymbolSource
+};
+export type MacroMeta = {
+    kind: 'macro';
+    source?: SymbolSource;
+    params?: string[]
+};
 export type SymbolCache = {
   byName: Map<string, SymbolMeta>;
   lineAddresses: Map<string, Map<number, number[]>>;
@@ -278,7 +292,9 @@ export async function ensureSymbolCacheForDocument(documentPath?: string): Promi
   return !!lastSymbolCache;
 }
 
-export function resolveSymbolDefinition(identifier: string): { filePath: string; line: number } | undefined {
+export function resolveSymbolDefinition(identifier: string)
+: { filePath: string; line: number } | undefined
+{
   if (!lastSymbolCache) return undefined;
   const token = (identifier || '').trim();
   if (!token) return undefined;
@@ -295,25 +311,4 @@ export function resolveSymbolDefinition(identifier: string): { filePath: string;
     }
   }
   return undefined;
-}
-
-export function resolveEmulatorHoverSymbol(identifier: string, location?: { filePath?: string; line?: number }): HoverSymbolInfo | undefined {
-  return resolveHoverSymbol(identifier, location, lastSymbolCache);
-}
-
-export function setDebugPathForDocument(documentPath: string, debugPath: string | undefined) {
-  rememberDebugPath(documentPath, debugPath);
-}
-
-// Utilities exposed for breakpoint/token loaders
-export function loadSymbolCacheFromPath(tokenPath: string): boolean {
-  return loadSymbolCacheFromDebugFile(tokenPath);
-}
-
-export function getProjectDirFromTokens(tokens: any, tokenPath?: string): string | undefined {
-  return resolveProjectDirFromTokens(tokens, tokenPath);
-}
-
-export function resolveSymbolSourcePath(symbol: SymbolMeta, filePaths: Map<string, string>): { filePath: string; line: number } | undefined {
-  return resolveSymbolSource(symbol, filePaths);
 }
