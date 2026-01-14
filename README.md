@@ -117,7 +117,7 @@ The bundled extension exposes a veriaty quality-of-life helpers whenever you edi
 - **Navigation for includes**: hold `Ctrl` (or `Cmd` on macOS) to underline the path in the ASM '.include' directive, any label or a constant and click it to open the target file.
 - **Navigation for consts and global labels**: hold `Ctrl` (or `Cmd` on macOS) to underline the constant or any label and click it to open navigate it. Please keep in mind it uses the debug metadata gathered from the last compilation. If you don't get the navigation, compile the project.
 - **Syntax highlight**: ASM code uses a refined, color scheme inspired by the Retor-Assembler that cleanly differentiates constants, labels, instructions, and comments, making long sessions easier on the eyes and faster to parse. Make sure you select the **ASM** language in the bottom panel.
-- **Breakpoint handling**: Click the left gutter to toggle breakpoints, or use the built-in **Debug: Toggle Breakpoint** command. All active and disabled breakpoints appear in the **BREAKPOINTS** panel. Adding breakpoints in the editor available only within the **ASM** language that comes with this extension. Make sure it is selected in the bottom panel. Breakpoint gutter respects only meaningful lines (labels/instructions) and ignores comments, .byte, .include, etc.
+- **Breakpoint handling**: Click the left gutter to toggle breakpoints. All active and disabled breakpoints appear in the **BREAKPOINTS** panel. Adding breakpoints in the editor available only within the **ASM** language that comes with this extension. Make sure it is selected in the bottom panel. Breakpoint gutter respects only meaningful lines (labels/instructions) and ignores comments, .byte, .include, etc.
 
 ## Emulator panel controls
 
@@ -147,10 +147,10 @@ The execution flow can be controlled via the standard VS Code debug toolbar as w
 Additional editor helpers are available while debugging is paused.
 
 ### Hover hints on labels/consts showing current values
-When the emulator is paused (manually or because it hit a breakpoint) you can hover any label or named constant in an `.asm` file that belongs to the loaded ROM and VS Code shows a tooltip with both the hexadecimal and decimal value. The hint data comes directly from the ROM’s `.debug.json` metadata, so it works for symbols introduced through `.include` chains as well. This is handy for confirming the current address/value of a label without opening the token file or dumping registers.
+When you hover over any label or named constant in an `.asm` file, the extension shows a tooltip with both the hexadecimal and decimal value. The hint data comes directly from the ROM’s `.debug.json` metadata, so it works for symbols introduced through `.include` chains as well. This is handy for confirming the current address/value of a label without opening the token file or dumping registers.
 
 ### Instruction hover shows opcode bytes and decoded operands
-When you hover over an assembled instruction (the mnemonic and register portion of the line—not the immediate literal) the extension now reads the underlying opcode bytes from the paused emulator, disassembles the operands, and shows the resolved value alongside the backing memory bytes. Example:
+When you hover over an assembled instruction (the mnemonic and register portion of the line—not the immediate literal) the extension reads the underlying opcode bytes from the paused emulator, disassembles the operands, and shows the resolved value alongside the backing memory bytes. Example:
 
 ### Currently executed line highlight
 When execution pauses, the executing code line in the editor receives a translucent green highlight with a HW states. If no source mapping is available, the debugger highlights the last line in yellow printing the opcode executed.
@@ -165,7 +165,6 @@ Adding, removing, or toggling breakpoints in the open ASM file syncs immediately
 The emulator view now embeds a **Memory Dump** panel under the frame preview. It streams a 16x16 hexdump that automatically tracks the current PC (both the hex bytes and ASCII column highlight the byte that will execute next). Uncheck **Follow PC** to freeze the window on a specific address, type any hex/decimal start value, or use the +/-0x10 and +/-0x100 buttons plus **Refresh** to nudge through RAM manually.
 
 ## Assembler
-
 By default the assembler targets the Intel 8080 instruction set. If a project sets `"cpu": "z80"`, it enables a compatibility subset of Zilog Z80 mnemonics that map 1:1 to the 8080 instruction encodings (including Z80 aliases like `LD (N),A` and `ADD HL,BC`). Pure Z80-only features such as IX/IY indexed addressing are not supported.
 
 ### Comments
