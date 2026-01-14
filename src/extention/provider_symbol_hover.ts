@@ -8,6 +8,12 @@ import {
 	getActiveHardware } from '../emulatorUI';
 import { HardwareReq } from '../emulator/hardware_reqs';
 
+////////////////////////////////////////////////////////////////////////////////
+//
+// ANYTHING BELOW UNCHECKED YET
+//
+////////////////////////////////////////////////////////////////////////////////
+
 // Hover provider for labels/consts using emulator debug metadata
 // It shows symbol values and additional info on hover
 // It uses cached symbol metadata from debug files.

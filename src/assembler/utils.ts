@@ -452,17 +452,15 @@ export function parseTextLiteralToBytes(part: string, encoding: TextEncodingType
 // Helper to attempt resolving an included file relative to a base directory
 function tryResolveIncludePath(
   includedFile: string,
-  baseDir?: string,
-  candidatePath?: string)
+  baseDir?: string)
 : string | undefined
 {
     if (!baseDir) return undefined;
-    candidatePath = path.resolve(baseDir, includedFile);
-    return fs.existsSync(candidatePath) ? candidatePath : undefined;
+    return path.resolve(baseDir, includedFile);
 };
 
-// Resolve the path of an included file based on the current file,
-// main assembly file, project file, workspace root, and CWD.
+// Resolve the path of an included file according to assembler rules.
+// Returns undefined if the file cannot be found.
 export function resolveIncludePath(
   includedFile: string,
   currentAsm?: string,
@@ -474,21 +472,18 @@ export function resolveIncludePath(
     return includedFile;
   }
 
-  let candidatePath: string = '';
-  const projectDir = projectFile ? path.dirname(projectFile) : undefined;
-
-  // 1) Relative to the current file
-  const currentDir = currentAsm ? path.dirname(currentAsm) : undefined;
-  const found = tryResolveIncludePath(includedFile, currentDir, candidatePath)
+  // 1) Relative to the current file's directory
+  const candidatePath = tryResolveIncludePath(includedFile, currentAsm ? path.dirname(currentAsm) : undefined)
     // 2) Relative to the main asm file directory
-    || tryResolveIncludePath(includedFile, mainAsm ? path.dirname(mainAsm) : undefined, candidatePath)
+    || tryResolveIncludePath(includedFile, mainAsm ? path.dirname(mainAsm) : undefined)
     // 3) Relative to the project file directory (explicit)
-    || tryResolveIncludePath(includedFile, projectDir, candidatePath)
+    || tryResolveIncludePath(includedFile, projectFile ? path.dirname(projectFile) : undefined)
     // 4) Relative to the VS Code workspace root when available
-    || tryResolveIncludePath(includedFile, tryGetWorkspaceRoot(), candidatePath)
+    || tryResolveIncludePath(includedFile, tryGetWorkspaceRoot())
     // 5) Relative to the current working directory
-    || tryResolveIncludePath(includedFile, process.cwd(), candidatePath);
-  if (found) return found;
+    || tryResolveIncludePath(includedFile, process.cwd());
+
+    if (!candidatePath || !fs.existsSync(candidatePath)) return undefined;
 
   return candidatePath;
 }

@@ -453,9 +453,6 @@ export function normalizeUri(value: any): vscode.Uri | undefined {
 };
 
 
-
-
-
 export function projectOwnsAsm(project: ext_types.ProjectInfo, normalizedTarget: string): boolean {
   project.init_asm_path();
   project.init_debug_path();
@@ -483,7 +480,9 @@ export function projectOwnsAsm(project: ext_types.ProjectInfo, normalizedTarget:
 }
 
 
-export async function findProjectForAsmFile(documentPath: string): Promise<ext_types.ProjectInfo | undefined> {
+export async function findProjectForAsmFile(documentPath: string)
+: Promise<ext_types.ProjectInfo | undefined>
+{
   const normalizedTarget = normalizeFsPath(documentPath);
   const candidates = collectProjectFilesNear(documentPath);
   for (const projectPath of candidates) {

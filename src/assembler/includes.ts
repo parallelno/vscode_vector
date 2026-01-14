@@ -49,7 +49,7 @@ export function processIncludes(
       let incText: string;
       const incPath: string | undefined = ext_utils.resolveIncludePath(inc, file, sourcePath, projectFile);
       if (!incPath) {
-        throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li + 1} - ${incPath || inc}`);
+        throw new Error(`Failed to include '${inc}' at ${file || sourcePath || '<memory>'}:${li + 1} - ${inc}`);
       }
       try {
         incText = fs.readFileSync(incPath!, 'utf8');

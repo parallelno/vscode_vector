@@ -45,7 +45,7 @@ export function handleFilesizeDirectiveFirstPass(
   }
 
   const resolvedPath = resolveIncludePath(fileLiteral, origin?.file, ctx.sourcePath, ctx.projectFile);
-  if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+  if (!resolvedPath) {
     ctx.errors.push(`File not found for .filesize ${rawName} at ${originDesc}: ${fileLiteral}`);
     return true;
   }
