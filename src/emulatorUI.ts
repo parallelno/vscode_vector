@@ -692,7 +692,11 @@ export function getActiveHardware(): Hardware | undefined {
   return lastBreakpointSource?.hardware ?? undefined;
 }
 
-export function resolveDataDirectiveHover(document: vscode.TextDocument, position: vscode.Position): DataDirectiveHoverInfo | undefined {
+export function resolveDataDirectiveHover(
+  document: vscode.TextDocument,
+  position: vscode.Position)
+  : DataDirectiveHoverInfo | undefined
+{
   return resolveDataDirectiveHoverForMemory(
     document,
     position,

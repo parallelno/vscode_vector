@@ -456,7 +456,8 @@ function tryResolveIncludePath(
 : string | undefined
 {
     if (!baseDir) return undefined;
-    return path.resolve(baseDir, includedFile);
+    const candidatePath = path.resolve(baseDir, includedFile);
+    return candidatePath ? fs.existsSync(candidatePath) ? candidatePath : undefined : undefined;
 };
 
 // Resolve the path of an included file according to assembler rules.
@@ -482,8 +483,6 @@ export function resolveIncludePath(
     || tryResolveIncludePath(includedFile, tryGetWorkspaceRoot())
     // 5) Relative to the current working directory
     || tryResolveIncludePath(includedFile, process.cwd());
-
-    if (!candidatePath || !fs.existsSync(candidatePath)) return undefined;
 
   return candidatePath;
 }
